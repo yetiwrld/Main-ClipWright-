@@ -171,6 +171,15 @@ export function AiProvidersSection({
                 })
               }
               onRemove={() => setRemoving(provider.record)}
+              onDuplicate={() =>
+                void api
+                  .duplicateProvider(provider.record.id)
+                  .then(() => {
+                    pushToast({ message: 'Copy created — add its key and test it.', tone: 'success' });
+                    return load();
+                  })
+                  .catch((err) => pushToast({ message: describeError(err), tone: 'error' }))
+              }
             />
           ))}
         </div>
@@ -345,6 +354,7 @@ function ProviderRow({
   onTest,
   onEdit,
   onRemove,
+  onDuplicate,
 }: {
   record: ProviderRecordPayload;
   keyAvailable: boolean;
@@ -352,6 +362,7 @@ function ProviderRow({
   onTest: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  onDuplicate: () => void;
 }) {
   const statusTone =
     record.status === 'connected' ? 'success' : record.status === 'key_missing' ? 'warning' : record.status === 'error' ? 'error' : 'neutral';
@@ -398,6 +409,9 @@ function ProviderRow({
       </Button>
       <Button size={28} onClick={onEdit}>
         {keyAvailable ? 'Edit' : 'Add key'}
+      </Button>
+      <Button size={28} onClick={onDuplicate}>
+        Duplicate
       </Button>
       <Button size={28} variant="ghost" onClick={onRemove}>
         Remove

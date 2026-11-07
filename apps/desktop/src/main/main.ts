@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, shell, ipcMain, session } from 'electron';
+import { app, BrowserWindow, dialog, net, protocol, shell, ipcMain, session } from 'electron';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import {
   buildSecureWindowConfig,
@@ -19,6 +20,19 @@ import { MomentsService } from './ai/moments-service.js';
 import { ConnectivityService, type ProcessingMode } from '@clipwright/ai-core';
 
 const isDev = !app.isPackaged;
+
+/**
+ * Project media is served over an app-owned scheme instead of raw `file://`:
+ * the renderer can only ask for a media id, never for an arbitrary path, and the
+ * URL survives both the dev server origin and the packaged app.
+ */
+const MEDIA_SCHEME = 'clipwright-media';
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
 let mainWindow: BrowserWindow | null = null;
 let storageService: StorageService | null = null;
 let secretStore: SecretStore | null = null;
@@ -470,6 +484,7 @@ function registerIPC(): void {
     requireProviders().remove(providerId);
     return true;
   });
+  ipcMain.handle('ai:providers:duplicate', async (_event, providerId: string) => requireProviders().duplicate(providerId));
   ipcMain.handle('ai:providers:test', async (_event, providerId: string) => requireProviders().test(providerId));
   ipcMain.handle('ai:providers:models', async (_event, providerId: string) => requireProviders().listModels(providerId));
   ipcMain.handle('ai:providers:setDefault', async (_event, task, providerId: string | null) =>
@@ -638,6 +653,28 @@ app.whenReady().then(() => {
     connectivity = new ConnectivityService();
     connectivity.setOfflineMode(storage.getSettings().processingMode === 'offline');
   }
+
+  // Serves `clipwright-media://media/<mediaId>` from the media registry only.
+  protocol.handle(MEDIA_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url);
+      const mediaId = decodeURIComponent(url.pathname.replace(/\/+$/, '').split('/').pop() ?? '');
+      const record = mediaId ? requireStorage().getMedia(mediaId) : undefined;
+      if (!record) {
+        return new Response('Not found', { status: 404 });
+      }
+      if (record.status === 'missing') {
+        return new Response('This file is no longer at its recorded location.', { status: 410 });
+      }
+      return await net.fetch(pathToFileURL(record.path).toString(), {
+        headers: request.headers,
+        method: request.method,
+      });
+    } catch (error) {
+      logger?.warn('Media protocol request failed', { error: String(error) });
+      return new Response('Could not read that file.', { status: 500 });
+    }
+  });
 
   registerIPC();
   createWindow();

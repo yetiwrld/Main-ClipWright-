@@ -66,7 +66,15 @@ export type Route =
       /** True when this route leaves this computer. */
       sendsDataOffDevice: boolean;
     }
-  | { ok: false; reason: Reason; fix: FixAction[]; message: string };
+  | {
+      ok: false;
+      reason: Reason;
+      fix: FixAction[];
+      message: string;
+      /** Present when the refusal names a specific provider (consent, capability). */
+      providerId?: string;
+      providerName?: string;
+    };
 
 /** Every task except transcription sends transcript text only (SPEC 06 §8). */
 export function taskSendsTextOffDevice(route: { sendsDataOffDevice: boolean }): boolean {
@@ -110,6 +118,8 @@ function consentRefusal(provider: RouterProvider): Route {
     reason: 'needs_consent',
     message: `Clipwright needs your permission before sending data to ${provider.name} over ${where}.`,
     fix: [{ kind: 'grant_consent', label: `Allow ${provider.name}` }],
+    providerId: provider.id,
+    providerName: provider.name,
   };
 }
 

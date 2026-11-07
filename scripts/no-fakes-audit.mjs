@@ -50,6 +50,7 @@ for (const dir of PROD_DIRS) {
     if (/TODO:\s*mock|FIXME:\s*mock/i.test(content)) {
       violations.push(`${rel}: Contains forbidden 'TODO: mock' marker`);
     }
+
   }
 }
 
@@ -59,6 +60,24 @@ for (const dir of DETERMINISTIC_DIRS) {
     const rel = path.relative(ROOT, file);
     if (/Math\.random\s*\(/.test(content)) {
       violations.push(`${rel}: Contains forbidden Math.random() in deterministic engine/compositor/export code`);
+    }
+  }
+}
+
+/**
+ * SPEC 07 §13.10 — no "viral"/"guaranteed" hype in any string the user can read.
+ * Only renderer copy is scanned: matcher keywords inside engines are data, not claims.
+ */
+const RENDERER_DIR = path.join(ROOT, 'apps/desktop/src/renderer');
+for (const file of walk(RENDERER_DIR)) {
+  const content = fs.readFileSync(file, 'utf8');
+  const rel = path.relative(ROOT, file);
+  // Look only inside quoted strings, so regexes and identifiers are ignored.
+  const strings = content.match(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g) ?? [];
+  for (const literal of strings) {
+    const hype = /\b(viral|guaranteed|go viral|blow up)\b/i.exec(literal);
+    if (hype) {
+      violations.push(`${rel}: UI string contains hype wording "${hype[0]}" (SPEC 07 §13.10)`);
     }
   }
 }

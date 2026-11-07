@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('clipwright', {
   aiListProviders: () => ipcRenderer.invoke('ai:providers:list'),
   aiSaveProvider: (input) => ipcRenderer.invoke('ai:providers:save', input),
   aiRemoveProvider: (providerId) => ipcRenderer.invoke('ai:providers:remove', providerId),
+  aiDuplicateProvider: (providerId) => ipcRenderer.invoke('ai:providers:duplicate', providerId),
   aiTestProvider: (providerId) => ipcRenderer.invoke('ai:providers:test', providerId),
   aiListProviderModels: (providerId) => ipcRenderer.invoke('ai:providers:models', providerId),
   aiSetDefaultProvider: (task, providerId) => ipcRenderer.invoke('ai:providers:setDefault', task, providerId),

@@ -229,6 +229,33 @@ export class ProviderService {
     return record;
   }
 
+  /**
+   * SPEC 06 §4.4 — duplicate a provider.
+   *
+   * The copy keeps the endpoint and models but deliberately *not* the stored
+   * secret: copying a key silently is how keys end up somewhere they were never
+   * meant to be, so the user is asked to add it for the copy.
+   */
+  duplicate(providerId: string): ProviderRecord {
+    const original = this.listProviderRecords().find((p) => p.id === providerId);
+    if (!original) throw new Error('That provider no longer exists.');
+
+    const copy = ProviderRecordSchema.parse({
+      ...original,
+      id: uuidv7(),
+      name: `${original.name} (copy)`,
+      secretId: undefined,
+      maskedKeySuffix: undefined,
+      hasKey: false,
+      status: 'not_tested',
+      lastTestedAt: undefined,
+      lastError: undefined,
+    });
+    this.storage.saveProvider(copy);
+    this.logger.info('Provider duplicated', { from: providerId, to: copy.id });
+    return copy;
+  }
+
   remove(providerId: string): void {
     const record = this.storage.listProviders().find((p) => p.id === providerId);
     if (record?.secretId) this.secrets.deleteSecret(record.secretId);

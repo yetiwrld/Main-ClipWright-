@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Route } from '../App.js';
 import { StageProgressScreen, type SubStep } from '../components/StageProgressScreen.js';
 import { TranscriptEditor } from '../components/TranscriptEditor.js';
+import { MomentsPage } from './MomentsPage.js';
 import { api, describeError, isDesktop } from '../api.js';
 import type {
   IngestResultPayload,
@@ -18,7 +19,7 @@ interface Props {
   onNavigate: (r: Route) => void;
 }
 
-export function ProjectRoutes({ projectId, stage, onNavigate }: Props) {
+export function ProjectRoutes({ projectId, stage, compId, onNavigate }: Props) {
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [loadError, setLoadError] = useState('');
 
@@ -61,7 +62,7 @@ export function ProjectRoutes({ projectId, stage, onNavigate }: Props) {
   if (stage === 'moments') {
     return <MomentsStage projectId={projectId} onNavigate={onNavigate} />;
   }
-  return <EditorStage />;
+  return <EditorStage projectId={projectId} compId={compId} onNavigate={onNavigate} />;
 }
 
 /* ------------------------------------------------------------------ import */
@@ -417,41 +418,7 @@ function TranscribeStage({
 /* ----------------------------------------------------------------- moments */
 
 function MomentsStage({ projectId, onNavigate }: { projectId: string; onNavigate: (r: Route) => void }) {
-  const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!isDesktop()) {
-      setError('Moments are computed inside the Clipwright desktop app.');
-      return;
-    }
-    void api
-      .getTranscript(projectId)
-      .then((t) => setTranscript((t as TranscriptPayload) ?? null))
-      .catch((err) => setError(describeError(err)));
-  }, [projectId]);
-
-  return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '32px 40px' }}>
-      <h1 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
-        Moments
-      </h1>
-      <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: '0 0 24px 0' }}>
-        Candidate clips are scored from the transcript. Moment detection arrives in the next milestone —
-        until then this page reflects the transcript that exists.
-      </p>
-      {error && <div style={{ color: 'var(--danger)', fontSize: 'var(--fs-sm)', marginBottom: 16 }}>{error}</div>}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
-        <Stat label="Words" value={transcript ? transcript.words.length.toLocaleString() : '—'} />
-        <Stat label="Sentences" value={transcript ? transcript.sentences.length.toLocaleString() : '—'} />
-        <Stat label="Paragraphs" value={transcript ? transcript.paragraphs.length.toLocaleString() : '—'} />
-        <Stat label="Language" value={transcript?.language ?? '—'} />
-      </div>
-      <button onClick={() => onNavigate({ name: 'project', id: projectId, stage: 'editor' })} style={secondaryBtn}>
-        Open editor
-      </button>
-    </div>
-  );
+  return <MomentsPage projectId={projectId} onNavigate={onNavigate} />;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -469,21 +436,58 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /* ------------------------------------------------------------------ editor */
 
-function EditorStage() {
+function EditorStage({
+  projectId,
+  compId,
+  onNavigate,
+}: {
+  projectId: string;
+  compId?: string;
+  onNavigate: (r: Route) => void;
+}) {
+  const [comp, setComp] = useState<{ id: string; name: string; version: number } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isDesktop() || !compId) return;
+    let cancelled = false;
+    void api
+      .getComposition(projectId, compId)
+      .then((record) => {
+        if (cancelled) return;
+        if (!record) setError('That clip could not be found. It may have been deleted.');
+        else setComp({ id: record.id, name: record.name, version: record.version ?? 1 });
+      })
+      .catch((err) => !cancelled && setError(describeError(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, compId]);
+
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '32px 40px' }}>
       <h1 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
-        Editor
+        {comp ? comp.name : 'Editor'}
       </h1>
       <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: '0 0 24px 0' }}>
-        The multitrack editor ships in the next milestone.
+        {comp
+          ? `Clip version ${comp.version} · created from a moment. The multitrack timeline arrives with the editing milestone — the clip itself is already saved and editable.`
+          : compId
+            ? 'Loading this clip…'
+            : 'Create a clip from Moments to open it here.'}
       </p>
+      {error && <div style={{ color: 'var(--danger)', fontSize: 'var(--fs-sm)', marginBottom: 16 }}>{error}</div>}
       <div style={{
         background: 'var(--surface-card)', borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--line-subtle)', padding: 32, textAlign: 'center',
         color: 'var(--text-muted)', fontSize: 'var(--fs-sm)',
       }}>
         Timeline, preview and inspector panels arrive with the editing milestone.
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <button onClick={() => onNavigate({ name: 'project', id: projectId, stage: 'moments' })} style={secondaryBtn}>
+          Back to moments
+        </button>
       </div>
     </div>
   );

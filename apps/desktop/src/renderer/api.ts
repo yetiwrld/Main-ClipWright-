@@ -52,7 +52,18 @@ export const api = {
     return requireBridge('Updating the project').updateProject(projectId, patch);
   },
 
+  async getComposition(projectId: string, compId: string) {
+    return requireBridge('Opening the clip').getComposition(projectId, compId) as Promise<
+      { id: string; name: string; version: number; payload: unknown } | null
+    >;
+  },
+
   // ---- Media ----
+  async listMedia() {
+    return requireBridge('Listing media').listMedia() as Promise<
+      Array<{ id: string; path: string; kind: string; status: string; originalName: string }>
+    >;
+  },
   async probeMedia(filePath: string) {
     return requireBridge('Inspecting that file').probeMedia(filePath);
   },
@@ -141,6 +152,9 @@ export const api = {
   },
   async removeProvider(providerId: string) {
     return requireBridge('Removing the provider').aiRemoveProvider(providerId);
+  },
+  async duplicateProvider(providerId: string) {
+    return requireBridge('Duplicating the provider').aiDuplicateProvider(providerId);
   },
   async testProvider(providerId: string) {
     return requireBridge('Testing the provider').aiTestProvider(providerId);

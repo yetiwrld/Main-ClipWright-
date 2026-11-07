@@ -278,6 +278,8 @@ export type RoutePayload =
       reason: string;
       message: string;
       fix: Array<{ kind: string; label: string }>;
+      providerId?: string;
+      providerName?: string;
     };
 
 export interface ConnectivityPayload {
@@ -531,6 +533,7 @@ export interface ClipwrightBridge {
   aiListProviders(): Promise<ProviderListPayload>;
   aiSaveProvider(input: ProviderSaveInput): Promise<ProviderRecordPayload>;
   aiRemoveProvider(providerId: string): Promise<boolean>;
+  aiDuplicateProvider(providerId: string): Promise<ProviderRecordPayload>;
   aiTestProvider(providerId: string): Promise<TestResultPayload>;
   aiListProviderModels(providerId: string): Promise<Array<{ id: string; sizeBytes?: number; parameterSize?: string; quantisation?: string; modifiedAt?: string }>>;
   aiSetDefaultProvider(task: AiTask, providerId: string | null): Promise<AppSettings>;
