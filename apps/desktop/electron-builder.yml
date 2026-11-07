@@ -1,0 +1,114 @@
+# SPEC 15 §6 — Windows x64 packaging.
+#
+# Two artefacts and nothing else: an NSIS installer and a portable exe. Both are
+# unsigned unless a certificate is supplied later, and every place that mentions
+# them says so (README, release notes, the in-app update dialog).
+#
+# Repository identity comes from one place: `appId` + `publish` below must match
+# `UPDATE_REPO` in apps/desktop/src/main/updater/update-config.ts. The app
+# refuses updates from anywhere else.
+#
+# Build: pnpm --filter @clipwright/desktop dist:win
+
+appId: com.clipwright.studio
+productName: Clipwright Studio
+copyright: Copyright © 2026 Clipwright Studio
+
+directories:
+  buildResources: ../../assets
+  output: dist
+
+# Everything the app needs at runtime. The workspace packages are linked through
+# pnpm and bundled by vite already, so only real dependencies are shipped.
+files:
+  - dist/main/**/*
+  - dist/renderer/**/*
+  - dist/preload/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/__tests__/**'
+  - '!**/*.test.*'
+
+# Native modules and external binaries cannot live inside the asar archive.
+# ffmpeg/ffprobe are executables that must be spawned, so they are unpacked and
+# referenced through `process.resourcesPath` at runtime (§6.1).
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/better-sqlite3/**'
+  - '**/node_modules/onnxruntime-node/**'
+
+extraResources:
+  # `resources/bin` holds ffmpeg.exe, ffprobe.exe, whisper-cli.exe, yt-dlp.exe
+  # plus checksums.json. release.yml verifies each against
+  # scripts/binaries.lock.json before packaging. A dev checkout has symlinks
+  # here instead, which is why the build checks for real files first.
+  - from: ../../resources/bin
+    to: bin
+    filter:
+      - '**/*'
+  - from: ../../LICENSE
+    to: LICENSE
+  - from: ../../THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
+    filter:
+      - '**/*'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: ../../assets/icon.ico
+  # Shown in the file's Properties → Details. Matches package.json version so
+  # About and the installer cannot disagree (§6.1).
+  fileAssociations:
+    - ext: cwpack
+      name: Clipwright Project Pack
+      description: Clipwright Studio project pack
+      role: Viewer
+    - ext: cwstyle
+      name: Clipwright Caption Style
+      description: Clipwright Studio caption style
+      role: Viewer
+    - ext: cwbrand
+      name: Clipwright Brand Kit
+      description: Clipwright Studio brand kit
+      role: Viewer
+
+nsis:
+  oneClick: false
+  perMachine: false # per-user by default, no admin rights needed (§6.1)
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  # `always` plus the wizard checkbox: the shortcut is created by default and the
+  # user can untick it (§6.1).
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Clipwright Studio
+  runAfterFinish: true
+  # §6.5: user data is never removed by an uninstall.
+  deleteAppDataOnUninstall: false
+  installerIcon: ../../assets/icon.ico
+  uninstallerIcon: ../../assets/icon.ico
+  installerHeaderIcon: ../../assets/icon.ico
+  # §6.1: the wizard shows the app licence and a link to third-party notices.
+  license: ../../LICENSE
+  artifactName: Clipwright-Studio-Setup-${version}-x64.exe
+
+portable:
+  artifactName: Clipwright-Studio-${version}-x64-portable.exe
+  # §6.3: app data goes next to the exe only when portable.flag exists; the
+  # default (flag absent) uses %APPDATA% like an installed copy. The main process
+  # checks for the flag at startup, so nothing is unpacked to a temp dir.
+  unpackDirName: ClipwrightStudio
+
+# §8.2 step 4/7: electron-builder writes latest.yml from this block and the app
+# reads it back for the cross-check half of §5.
+publish:
+  provider: github
+  owner: yetiwrld
+  repo: Main-ClipWright-
+  # Assets are public; no token is embedded in the build.
+  releaseType: release

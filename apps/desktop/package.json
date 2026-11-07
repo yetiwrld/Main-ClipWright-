@@ -9,9 +9,11 @@
   "main": "./dist/main/index.cjs",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.main.config.ts",
     "typecheck": "tsc --noEmit",
-    "dist:win": "pnpm build && electron-builder --win nsis portable --x64 --publish never"
+    "dist:win": "pnpm build && electron-builder --win nsis portable --x64 --publish never",
+    "build:renderer": "vite build",
+    "build:main": "vite build --config vite.main.config.ts"
   },
   "dependencies": {
     "@clipwright/ai-core": "workspace:*",
