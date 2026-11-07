@@ -600,6 +600,14 @@ export interface ClipwrightBridge {
   dismissUpdate(): Promise<UpdateStatePayload>;
   onUpdateState(callback: (state: UpdateStatePayload) => void): () => void;
 
+  // Update recovery (SPEC 15 §7)
+  getRecoveryState(): Promise<RecoveryStatePayload | null>;
+  restorePreviousVersion(): Promise<{ ok: boolean; error?: string }>;
+  dismissRecovery(): Promise<{ ok: boolean }>;
+
+  // Bundled tool integrity (SPEC 15 §6.1)
+  getToolIntegrity(): Promise<ToolIntegrityPayload | null>;
+
   // Export (SPEC 14)
   startExport(request: ExportStartRequestPayload): Promise<ExportStartResultPayload>;
   cancelExport(jobId: string): Promise<boolean>;
@@ -718,6 +726,23 @@ export interface UpdateProgressPayload {
   totalBytes: number;
   bytesPerSecond: number;
   etaSec: number | null;
+}
+
+/** What the Recovery window shows (SPEC 15 §7.3). Built in the main process. */
+export interface RecoveryStatePayload {
+  headline: string;
+  body: string[];
+  canRestorePrevious: boolean;
+  fromVersion: string;
+  toVersion: string;
+}
+
+/** Bundled-tool verification summary (SPEC 15 §6.1). */
+export interface ToolIntegrityPayload {
+  manifestPresent: boolean;
+  enabled: string[];
+  problems: string[];
+  summary: string | null;
 }
 
 export interface UpdateStatePayload {

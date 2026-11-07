@@ -498,6 +498,64 @@ describe('downloading and installing', () => {
     expect(updater.installed).toBe(true);
   });
 
+  it('refuses to install when preparation fails, and says why (§7.1)', async () => {
+    // The backups and journal are written before the installer runs. If that
+    // fails, installing anyway would risk the user's data for the sake of an
+    // update they can install tomorrow.
+    const { service, updater } = await readyService();
+    const failing = new UpdateService({
+      ...service['options'],
+      prepareInstall: async () => ({ ok: false, error: { code: 'disk', message: 'Not enough space to back up.' } as never }),
+    } as never);
+    await failing.check({ manual: true });
+    await failing.download();
+    const result = await failing.installAndRestart();
+
+    expect(result.ok).toBe(false);
+    expect(updater.installed).toBe(false);
+    expect(result.error?.message).toBe('Not enough space to back up.');
+    expect(failing.snapshot().status).toBe('error');
+  });
+
+  it('does not install when preparation throws', async () => {
+    const { service, updater } = await readyService();
+    const throwing = new UpdateService({
+      ...service['options'],
+      prepareInstall: async () => {
+        throw new Error('the workspace is read-only');
+      },
+    } as never);
+    await throwing.check({ manual: true });
+    await throwing.download();
+
+    const result = await throwing.installAndRestart();
+    expect(result.ok).toBe(false);
+    expect(updater.installed).toBe(false);
+    expect(throwing.snapshot().status).toBe('error');
+  });
+
+  it('runs preparation before handing over to the installer (§7.1)', async () => {
+    const { service, updater } = await readyService();
+    const order: string[] = [];
+    const ordered = new UpdateService({
+      ...service['options'],
+      prepareInstall: async () => {
+        order.push('prepare');
+        return { ok: true };
+      },
+      getUpdater: () => {
+        order.push('installer');
+        return updater;
+      },
+    } as never);
+    await ordered.check({ manual: true });
+    await ordered.download();
+    order.length = 0; // ignore the calls made while checking and downloading
+    await ordered.installAndRestart();
+
+    expect(order).toEqual(['prepare', 'installer']);
+  });
+
   it('cancels a download that is in flight', async () => {
     const { service } = await readyService();
     service.cancelDownload();

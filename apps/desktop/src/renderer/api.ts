@@ -337,6 +337,17 @@ export const api = {
     return getBridge()?.onUpdateState(callback) ?? (() => undefined);
   },
 
+  // ---- Update recovery (SPEC 15 §7) ----
+  async getRecoveryState() {
+    return requireBridge('Reading update recovery state').getRecoveryState();
+  },
+  async restorePreviousVersion() {
+    return requireBridge('Restoring the previous version').restorePreviousVersion();
+  },
+  async dismissRecovery() {
+    return requireBridge('Closing the recovery notice').dismissRecovery();
+  },
+
   // ---- Export (SPEC 14) ----
   async startExport(request: ExportStartRequestPayload) {
     return requireBridge('Exporting').startExport(request);

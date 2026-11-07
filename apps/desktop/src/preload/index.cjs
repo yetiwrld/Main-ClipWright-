@@ -169,6 +169,11 @@ contextBridge.exposeInMainWorld('clipwright', {
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
 
   // ---- Export (SPEC 14) ----
+  // ---- Update recovery (SPEC 15 §7.3–§7.5) ----
+  getRecoveryState: () => ipcRenderer.invoke('updates:recovery'),
+  restorePreviousVersion: () => ipcRenderer.invoke('updates:restore-previous'),
+  dismissRecovery: () => ipcRenderer.invoke('updates:dismiss-recovery'),
+
   // ---- Bundled tool integrity (SPEC 15 §6.1) ----
   getToolIntegrity: () => ipcRenderer.invoke('tools:integrity'),
 

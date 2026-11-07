@@ -8,7 +8,12 @@ import { ModelsPage } from './pages/ModelsPage.js';
 import { ProjectRoutes } from './pages/ProjectRoutes.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { SetupDialog } from './components/SetupDialog.js';
+import { RecoveryDialog } from './features/updates/RecoveryDialog.js';
 import { api, isDesktop } from './api.js';
+import type { RecoveryStatePayload } from './global.js';
+
+/** Where an unsigned build's releases live; used when a rollback is not possible. */
+const RELEASES_URL = 'https://github.com/yetiwrld/Main-ClipWright-/releases';
 
 export type Route =
   | { name: 'home' }
@@ -22,6 +27,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [isInProject, setIsInProject] = useState(false);
+  const [recovery, setRecovery] = useState<RecoveryStatePayload | null>(null);
 
   const navigate = useCallback((r: Route) => {
     setRoute(r);
@@ -35,6 +41,22 @@ export default function App() {
       .getSettings()
       .then((s) => {
         if (!cancelled) setSetupDialogOpen(!s.firstRunCompleted);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // SPEC 15 §7.3: ask once at startup whether the previous update failed. This
+  // runs before anything else so the window is not left looking broken.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let cancelled = false;
+    void api
+      .getRecoveryState()
+      .then((state) => {
+        if (!cancelled && state) setRecovery(state);
       })
       .catch(() => undefined);
     return () => {
@@ -114,6 +136,19 @@ export default function App() {
           onNavigate={navigate}
         />
       )}
+
+      <RecoveryDialog
+        open={recovery !== null}
+        state={recovery}
+        onRestorePrevious={() => api.restorePreviousVersion()}
+        onDismiss={() => {
+          setRecovery(null);
+          void api.dismissRecovery().catch(() => undefined);
+        }}
+        onOpenReleasesPage={() => {
+          window.open(RELEASES_URL, '_blank', 'noopener');
+        }}
+      />
     </div>
   );
 }

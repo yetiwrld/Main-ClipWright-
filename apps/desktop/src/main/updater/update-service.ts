@@ -95,6 +95,11 @@ export interface UpdateServiceOptions {
   now?: () => number;
   /** Installer authenticity, for the "Unsigned installer" notice (§6.4). */
   isInstallerSigned?: () => boolean;
+  /**
+   * §7.1: save projects, take backups and write the journal before installing.
+   * Returns false when the caller decided not to proceed.
+   */
+  prepareInstall?: () => Promise<{ ok: boolean; error?: UpdateError }>;
 }
 
 export type CheckResult =
@@ -479,6 +484,25 @@ export class UpdateService {
     if (this.state.status !== 'ready') {
       return { ok: false, error: createUpdateError('unknown', 'The update is not ready yet.') };
     }
+
+    // §7.1: the backups and the journal must be in place *before* the installer
+    // runs. If preparation fails, nothing is installed — an update that loses
+    // data is worse than an update that does not happen.
+    if (this.options.prepareInstall) {
+      try {
+        const prepared = await this.options.prepareInstall();
+        if (!prepared.ok) {
+          const error = prepared.error ?? createUpdateError('unknown', 'The update could not be prepared.');
+          this.apply({ type: 'install-failed', error });
+          return { ok: false, error };
+        }
+      } catch (error) {
+        const classified = this.toUpdateError(error);
+        this.apply({ type: 'install-failed', error: classified });
+        return { ok: false, error: classified };
+      }
+    }
+
     this.apply({ type: 'install-started' });
     try {
       const updater = this.options.getUpdater();

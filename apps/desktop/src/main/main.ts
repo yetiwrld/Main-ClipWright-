@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, net, protocol, shell, ipcMain, session } from 'electron';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import {
   buildSecureWindowConfig,
   CONTENT_SECURITY_POLICY,
@@ -23,6 +23,14 @@ import { UpdateService } from './updater/update-service.js';
 import { resolveTrustedKeys } from './updater/update-config.js';
 import { isSmokeTest, runSmokeTestAndExit } from './smoke-test.js';
 import { summariseIntegrity, verifyBundledTools } from './bin-integrity.js';
+import { UpdateJournalStore, scheduleBootConfirmation } from './updater/update-journal-store.js';
+import {
+  BOOT_CONFIRM_MS,
+  backupFolderName,
+  decideBootAction,
+  recoveryMessage,
+  type UpdateJournal,
+} from '@clipwright/update-core';
 import { STARTUP_CHECK_DELAY_MS, autoCheckIntervalMs, shouldAutoCheck } from '@clipwright/update-core';
 
 const isDev = !app.isPackaged;
@@ -132,6 +140,45 @@ function requireExportService(): ExportService {
   if (!exportService) throw new Error('Export service not ready');
   return exportService;
 }
+
+/**
+ * SPEC 15 §7.3 — what the Recovery window shows. Built in the main process so
+ * the renderer only has to render text it is given.
+ */
+interface RecoveryView {
+  headline: string;
+  body: string[];
+  canRestorePrevious: boolean;
+  fromVersion: string;
+  toVersion: string;
+}
+
+function buildRecoveryContext(input: {
+  journal: UpdateJournal;
+  hasPreviousInstaller: boolean;
+  hasBackups: boolean;
+}): RecoveryView {
+  const message = recoveryMessage({
+    fromVersion: input.journal.from,
+    toVersion: input.journal.to,
+    hasPreviousInstaller: input.hasPreviousInstaller,
+    hasBackups: input.hasBackups,
+    // §7.5: a journal only reaches this state after the new version ran, and the
+    // new version is the one that may have migrated the databases.
+    migrationRan: true,
+  });
+  return {
+    ...message,
+    fromVersion: input.journal.from,
+    toVersion: input.journal.to,
+  };
+}
+
+/** Set when the previous update failed to open the workspace. */
+let recoveryContext: RecoveryView | null = null;
+
+/** SPEC 15 §7 — the update journal for this app run. */
+let journalStore: UpdateJournalStore | null = null;
 
 /** Last bundled-tool verification result (SPEC 15 §6.1); null while checking. */
 let binIntegrityReport: Awaited<ReturnType<typeof verifyBundledTools>> | null = null;
@@ -757,6 +804,42 @@ function registerIPC(): void {
     return err === '' ? true : err;
   });
 
+  // ---- Update recovery (SPEC 15 §7.3–§7.5) ----
+  ipcMain.handle('updates:recovery', async () => recoveryContext);
+
+  ipcMain.handle('updates:restore-previous', async () => {
+    const context = recoveryContext;
+    const store = journalStore;
+    if (!context) return { ok: false, error: 'There is nothing to restore.' };
+    if (!store) return { ok: false, error: 'The update journal is not available.' };
+
+    const journal = await store.read();
+    const installer = journal ? await store.findPreviousInstaller(journal.from) : null;
+    if (!installer) {
+      return {
+        ok: false,
+        error: `The installer for ${context.fromVersion} was not kept. Download it from the releases page.`,
+      };
+    }
+
+    try {
+      // §7.5: run the cached installer, then quit. The user sees NSIS's own
+      // progress UI, so nothing here pretends to know how far along it is.
+      shell.openPath(installer);
+      if (journal) {
+        await store.write({ ...journal, status: 'rolled-back' });
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: `The previous version could not be started: ${String(error)}` };
+    }
+  });
+
+  ipcMain.handle('updates:dismiss-recovery', async () => {
+    recoveryContext = null;
+    return { ok: true };
+  });
+
   // ---- Bundled tool integrity (SPEC 15 §6.1) ----
   ipcMain.handle('tools:integrity', async () => {
     if (binIntegrityReport) {
@@ -883,6 +966,44 @@ app.whenReady().then(async () => {
   const storage = storageService;
   const secrets = secretStore;
   const log = logger;
+
+  // SPEC 15 §7: read the update journal before the window opens, record this
+  // launch, and start the 60-second confirmation timer. A crash state is handed
+  // to the renderer so it can show the Recovery window.
+  journalStore = new UpdateJournalStore({ workspaceDir: defaultWorkspace, userDataDir: userData });
+  let recoveryContext: ReturnType<typeof buildRecoveryContext> | null = null;
+  try {
+    const journal = await journalStore.read();
+    const runningVersion = app.getVersion();
+
+    if (journal && journal.to === runningVersion) {
+      const decision = decideBootAction(journal, runningVersion);
+      const launched = await journalStore.recordLaunch(runningVersion);
+      if (decision.action === 'recovery') {
+        recoveryContext = buildRecoveryContext({
+          journal: launched ?? journal,
+          hasPreviousInstaller: (await journalStore.findPreviousInstaller(journal.from)) !== null,
+          hasBackups: existsSync(join(journalStore.updatesDir, backupFolderName(journal.from, journal.startedAt))),
+        });
+        log.warn('Update recovery needed', { reason: decision.reason });
+      } else if (decision.action === 'confirm-pending') {
+        // §7.3: 60 seconds of running proves more than a successful launch.
+        scheduleBootConfirmation({
+          delayMs: BOOT_CONFIRM_MS,
+          onConfirm: async () => {
+            await journalStore?.recordConfirmed();
+            log.info('Update confirmed', { version: runningVersion });
+          },
+        });
+      }
+    }
+
+    // Housekeeping is not on the critical path for the window.
+    void journalStore.cleanup().catch(() => undefined);
+  } catch (error) {
+    // A journal problem must never stop the app from opening.
+    log.warn('Update journal could not be read', { error: String(error) });
+  }
 
   // SPEC 15 §6.1: verify the bundled binaries before anything spawns them. A
   // replaced ffmpeg is code execution with paths inside the user's workspace, so
