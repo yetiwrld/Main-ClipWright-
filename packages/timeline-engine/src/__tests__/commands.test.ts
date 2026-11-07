@@ -25,6 +25,11 @@ import {
   removeTransition,
   setWorkArea,
   clearWorkArea,
+  addKeyframe,
+  removeKeyframe,
+  updateKeyframe,
+  moveKeyframe,
+  duplicateKeyframe,
   splitItems,
   trimItem,
   trimItems,
@@ -951,6 +956,144 @@ describe('timeline commands', () => {
           expect(cleared.ok).toBe(true);
           if (cleared.ok) {
             expect(checkInvariantsMB(cleared.state)).toEqual([]);
+          }
+        }
+      }
+    });
+  });
+
+
+  describe('keyframes (SPEC 09 §17)', () => {
+    function kfFixture(): { state: TimelineState; itemId: string } {
+      const base = createDefaultTimeline({ id: 'kf-1', name: 'Keyframes' });
+      const track = base.tracks[0]!;
+      const item = createMediaItem({
+        id: 'kf-item',
+        trackId: track.id,
+        label: 'Animated clip',
+        mediaId: 'media-1',
+        startUs: 0,
+        durationUs: 4_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      return {
+        state: {
+          ...base,
+          tracks: base.tracks.map((candidate) =>
+            candidate.id === track.id ? { ...candidate, itemIds: [item.id] } : candidate,
+          ),
+          items: { [item.id]: item },
+        },
+        itemId: item.id,
+      };
+    }
+
+    it('adds a keyframe at a local time', () => {
+      const { state, itemId } = kfFixture();
+      const result = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.state.items[itemId];
+        expect(item.keyframes?.['opacity']).toHaveLength(1);
+        expect(item.keyframes!['opacity'][0].timeUs).toBe(1_000_000);
+        expect(item.keyframes!['opacity'][0].value).toBe(0.5);
+      }
+    });
+
+    it('keeps keyframes sorted by time', () => {
+      const { state, itemId } = kfFixture();
+      const r1 = addKeyframe(state, { itemId, property: 'opacity', timeUs: 3_000_000, value: 1, fps: 30 });
+      expect(r1.ok).toBe(true);
+      if (r1.ok) {
+        const r2 = addKeyframe(r1.state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0, fps: 30 });
+        expect(r2.ok).toBe(true);
+        if (r2.ok) {
+          const kfs = r2.state.items[itemId].keyframes!['opacity'];
+          expect(kfs[0].timeUs).toBe(1_000_000);
+          expect(kfs[1].timeUs).toBe(3_000_000);
+        }
+      }
+    });
+
+    it('refuses to add a duplicate keyframe at the same time', () => {
+      const { state, itemId } = kfFixture();
+      const r1 = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(r1.ok).toBe(true);
+      if (r1.ok) {
+        const r2 = addKeyframe(r1.state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.8, fps: 30 });
+        expect(r2.ok).toBe(false);
+      }
+    });
+
+    it('removes a keyframe', () => {
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const removed = removeKeyframe(added.state, { itemId, property: 'opacity', timeUs: 1_000_000, fps: 30 });
+        expect(removed.ok).toBe(true);
+        if (removed.ok) {
+          const item = removed.state.items[itemId];
+          expect(item.keyframes?.['opacity'] ?? []).toHaveLength(0);
+        }
+      }
+    });
+
+    it('updates a keyframe value', () => {
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = updateKeyframe(added.state, { itemId, property: 'opacity', timeUs: 1_000_000, patch: { value: 0.8 }, fps: 30 });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const kf = updated.state.items[itemId].keyframes!['opacity'][0];
+          expect(kf.value).toBe(0.8);
+        }
+      }
+    });
+
+    it('moves a keyframe to a new time', () => {
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const moved = moveKeyframe(added.state, { itemId, property: 'opacity', fromTimeUs: 1_000_000, toTimeUs: 2_000_000, fps: 30 });
+        expect(moved.ok).toBe(true);
+        if (moved.ok) {
+          const kf = moved.state.items[itemId].keyframes!['opacity'][0];
+          expect(kf.timeUs).toBe(2_000_000);
+        }
+      }
+    });
+
+    it('duplicates a keyframe to a new time', () => {
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const dup = duplicateKeyframe(added.state, { itemId, property: 'opacity', fromTimeUs: 1_000_000, toTimeUs: 3_000_000, fps: 30 });
+        expect(dup.ok).toBe(true);
+        if (dup.ok) {
+          const kfs = dup.state.items[itemId].keyframes!['opacity'];
+          expect(kfs).toHaveLength(2);
+          expect(kfs.map((kf) => kf.timeUs)).toEqual([1_000_000, 3_000_000]);
+        }
+      }
+    });
+
+    it('keeps invariants intact after keyframe operations', () => {
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const moved = moveKeyframe(added.state, { itemId, property: 'opacity', fromTimeUs: 1_000_000, toTimeUs: 2_000_000, fps: 30 });
+        expect(moved.ok).toBe(true);
+        if (moved.ok) {
+          const removed = removeKeyframe(moved.state, { itemId, property: 'opacity', timeUs: 2_000_000, fps: 30 });
+          expect(removed.ok).toBe(true);
+          if (removed.ok) {
+            expect(checkInvariantsMB(removed.state)).toEqual([]);
           }
         }
       }

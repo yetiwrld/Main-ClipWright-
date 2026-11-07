@@ -8,6 +8,7 @@ import { current, enablePatches, produceWithPatches, type Patch } from 'immer';
 // any command runs — including when the engine is imported by a test.
 enablePatches();
 import type { CompositionPayload, TimelineItem } from '@clipwright/project-schema';
+import type { Keyframe } from '@clipwright/project-schema/schemas';
 import { frameDurationUs, quantizeUs, type Fps } from './time';
 import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
 
@@ -1627,5 +1628,228 @@ export function clearWorkArea(
     inverse,
     affectedItemIds: [],
     notes: ['Work area cleared.'],
+  };
+}
+/**
+ * Add a keyframe for a property on an item (SPEC 09 §17).
+ * Keyframes are stored locally on the item; times are in item-local time
+ * (0 = item start).
+ */
+export function addKeyframe(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    property: string;
+    timeUs: number;
+    value: number | [number, number, number, number];
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const localTime = quantizeUs(Math.max(0, params.timeUs), params.fps);
+  const keyframes = item.keyframes ?? {};
+  const existing = keyframes[params.property] ?? [];
+
+  if (existing.some((kf) => kf.timeUs === localTime)) {
+    return fail('invalid', 'A keyframe already exists at that time.');
+  }
+
+  const sorted = [...existing, { timeUs: localTime, value: params.value, interpolation: 'linear' as const }].sort((a, b) => a.timeUs - b.timeUs);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.keyframes) target.keyframes = {};
+    target.keyframes[params.property] = sorted;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframe added.'],
+  };
+}
+
+/**
+ * Remove a keyframe (SPEC 09 §17). Delete key removes the selected keyframe.
+ */
+export function removeKeyframe(
+  state: TimelineState,
+  params: { itemId: string; property: string; timeUs: number; fps: Fps },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const keyframes = item.keyframes ?? {};
+  const existing = keyframes[params.property] ?? [];
+  const localTime = quantizeUs(params.timeUs, params.fps);
+
+  if (!existing.some((kf) => kf.timeUs === localTime)) {
+    return fail('not_found', 'No keyframe at that time.');
+  }
+
+  const filtered = existing.filter((kf) => kf.timeUs !== localTime);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.keyframes) return;
+    if (filtered.length === 0) {
+      delete target.keyframes[params.property];
+    } else {
+      target.keyframes[params.property] = filtered;
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframe removed.'],
+  };
+}
+
+/**
+ * Update a keyframe's value, easing, or interpolation (SPEC 09 §17).
+ */
+export function updateKeyframe(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    property: string;
+    timeUs: number;
+    patch: Partial<Pick<Keyframe, 'value' | 'interpolation' | 'easing'>>;
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const keyframes = item.keyframes ?? {};
+  const existing = keyframes[params.property] ?? [];
+  const localTime = quantizeUs(params.timeUs, params.fps);
+
+  const target = existing.find((kf) => kf.timeUs === localTime);
+  if (!target) return fail('not_found', 'No keyframe at that time.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const itemDraft = draft.items[params.itemId] as TimelineItem;
+    if (!itemDraft.keyframes) return;
+    const kfList = itemDraft.keyframes[params.property];
+    if (!kfList) return;
+    const kf = kfList.find((candidate) => candidate.timeUs === localTime);
+    if (!kf) return;
+    if (params.patch.value !== undefined) kf.value = params.patch.value;
+    if (params.patch.interpolation !== undefined) kf.interpolation = params.patch.interpolation;
+    if (params.patch.easing !== undefined) kf.easing = params.patch.easing;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframe updated.'],
+  };
+}
+
+/**
+ * Move a keyframe to a new local time (SPEC 09 §17). Times are quantized and
+ * kept within the item's duration.
+ */
+export function moveKeyframe(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    property: string;
+    fromTimeUs: number;
+    toTimeUs: number;
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const keyframes = item.keyframes ?? {};
+  const existing = keyframes[params.property] ?? [];
+  const fromLocal = quantizeUs(params.fromTimeUs, params.fps);
+  const toLocal = quantizeUs(Math.max(0, Math.min(params.toTimeUs, item.durationUs)), params.fps);
+
+  if (!existing.some((kf) => kf.timeUs === fromLocal)) {
+    return fail('not_found', 'No keyframe at that time.');
+  }
+
+  const moved = existing.map((kf) =>
+    kf.timeUs === fromLocal ? { ...kf, timeUs: toLocal } : kf,
+  ).sort((a, b) => a.timeUs - b.timeUs);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.keyframes) return;
+    target.keyframes[params.property] = moved;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframe moved.'],
+  };
+}
+
+/**
+ * Duplicate a keyframe to a new local time (SPEC 09 §17).
+ */
+export function duplicateKeyframe(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    property: string;
+    fromTimeUs: number;
+    toTimeUs: number;
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const keyframes = item.keyframes ?? {};
+  const existing = keyframes[params.property] ?? [];
+  const fromLocal = quantizeUs(params.fromTimeUs, params.fps);
+  const toLocal = quantizeUs(Math.max(0, Math.min(params.toTimeUs, item.durationUs)), params.fps);
+
+  const source = existing.find((kf) => kf.timeUs === fromLocal);
+  if (!source) return fail('not_found', 'No keyframe at that time.');
+  if (existing.some((kf) => kf.timeUs === toLocal)) {
+    return fail('invalid', 'A keyframe already exists at the target time.');
+  }
+
+  const withCopy = [...existing, { ...source, timeUs: toLocal }].sort((a, b) => a.timeUs - b.timeUs);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.keyframes) return;
+    target.keyframes[params.property] = withCopy;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframe duplicated.'],
   };
 }

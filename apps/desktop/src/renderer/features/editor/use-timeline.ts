@@ -26,6 +26,11 @@ import {
   removeTransition,
   setWorkArea,
   clearWorkArea,
+  addKeyframe,
+  removeKeyframe,
+  updateKeyframe,
+  moveKeyframe,
+  duplicateKeyframe,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -93,6 +98,11 @@ export interface TimelineApi {
   removeTransition: (itemId: string) => boolean;
   setWorkArea: (edge: 'in' | 'out', timeUs: number) => boolean;
   clearWorkArea: () => boolean;
+  addKeyframe: (itemId: string, property: string, timeUs: number, value: number | [number, number, number, number]) => boolean;
+  removeKeyframe: (itemId: string, property: string, timeUs: number) => boolean;
+  updateKeyframe: (itemId: string, property: string, timeUs: number, patch: { value?: number | [number, number, number, number]; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset'; easing?: { preset: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeInCubic' | 'easeOutCubic' | 'easeInOutCubic' | 'easeInBack' | 'easeOutBack' | 'easeOutBounce' | 'easeOutElastic' } }) => boolean;
+  moveKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
+  duplicateKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -396,6 +406,16 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Set work area', (s) => setWorkArea(s, { edge, timeUs, fps })),
       clearWorkArea: () =>
         run('Clear work area', (s) => clearWorkArea(s)),
+      addKeyframe: (itemId, property, timeUs, value) =>
+        run('Add keyframe', (s) => addKeyframe(s, { itemId, property, timeUs, value, fps })),
+      removeKeyframe: (itemId, property, timeUs) =>
+        run('Remove keyframe', (s) => removeKeyframe(s, { itemId, property, timeUs, fps })),
+      updateKeyframe: (itemId, property, timeUs, patch) =>
+        run('Update keyframe', (s) => updateKeyframe(s, { itemId, property, timeUs, patch, fps })),
+      moveKeyframe: (itemId, property, fromTimeUs, toTimeUs) =>
+        run('Move keyframe', (s) => moveKeyframe(s, { itemId, property, fromTimeUs, toTimeUs, fps })),
+      duplicateKeyframe: (itemId, property, fromTimeUs, toTimeUs) =>
+        run('Duplicate keyframe', (s) => duplicateKeyframe(s, { itemId, property, fromTimeUs, toTimeUs, fps })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),

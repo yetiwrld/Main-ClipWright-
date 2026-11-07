@@ -72,6 +72,11 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     removeTransition: vi.fn(() => true),
     setWorkArea: vi.fn(() => true),
     clearWorkArea: vi.fn(() => true),
+    addKeyframe: vi.fn(() => true),
+    removeKeyframe: vi.fn(() => true),
+    updateKeyframe: vi.fn(() => true),
+    moveKeyframe: vi.fn(() => true),
+    duplicateKeyframe: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -487,6 +492,17 @@ describe('timeline panel', () => {
     render(<TimelinePanel timeline={timeline} />);
     fireEvent.keyDown(window, { key: 'x', altKey: true });
     expect(timeline.clearWorkArea).toHaveBeenCalled();
+  });
+
+
+  it('keyframe methods exist on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.addKeyframe).toBe('function');
+    expect(typeof timeline.removeKeyframe).toBe('function');
+    expect(typeof timeline.updateKeyframe).toBe('function');
+    expect(typeof timeline.moveKeyframe).toBe('function');
+    expect(typeof timeline.duplicateKeyframe).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {
