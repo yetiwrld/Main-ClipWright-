@@ -9,6 +9,7 @@ import { ProjectRoutes } from './pages/ProjectRoutes.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { SetupDialog } from './components/SetupDialog.js';
 import { RecoveryDialog } from './features/updates/RecoveryDialog.js';
+import { UpdateNotice } from './features/updates/UpdateNotice.js';
 import { api, isDesktop } from './api.js';
 import type { RecoveryStatePayload } from './global.js';
 
@@ -28,6 +29,8 @@ export default function App() {
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [isInProject, setIsInProject] = useState(false);
   const [recovery, setRecovery] = useState<RecoveryStatePayload | null>(null);
+  // Bumping this tells the update notice to open its dialog (SPEC 15 §3).
+  const [showUpdateDialog, setShowUpdateDialog] = useState(0);
 
   const navigate = useCallback((r: Route) => {
     setRoute(r);
@@ -101,6 +104,9 @@ export default function App() {
           route={route}
           isInProject={isInProject}
           onNavigate={navigate}
+          updateChip={
+            <UpdateNotice showChip openRequest={showUpdateDialog} />
+          }
         />
         <div style={{
           flex: 1,
@@ -110,7 +116,13 @@ export default function App() {
         }}>
           {route.name === 'home' && <StartPage onNavigate={navigate} />}
           {route.name === 'projects' && <ProjectsPage onNavigate={navigate} />}
-          {route.name === 'settings' && <SettingsPage section={route.section} onNavigate={navigate} />}
+          {route.name === 'settings' && (
+            <SettingsPage
+              section={route.section}
+              onNavigate={navigate}
+              onShowUpdateDialog={() => setShowUpdateDialog((value) => value + 1)}
+            />
+          )}
           {route.name === 'models' && <ModelsPage />}
           {route.name === 'project' && (
             <ProjectRoutes

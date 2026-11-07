@@ -5,10 +5,13 @@ import { api, describeError, isDesktop } from '../api.js';
 import type { AppSettings, AppInfo } from '../global.js';
 import { AiProvidersSection } from '../sections/AiProvidersSection.js';
 import { PrivacySection } from '../sections/PrivacySection.js';
+import { UpdatesSettingsSection } from '../features/updates/UpdatesSettingsSection.js';
 
 interface Props {
   section: string;
   onNavigate: (r: Route) => void;
+  /** SPEC 15 §3 — opens the update dialog from the Settings row. */
+  onShowUpdateDialog: () => void;
 }
 
 const SECTIONS = [
@@ -22,7 +25,7 @@ const SECTIONS = [
   { id: 'about', label: 'About' },
 ];
 
-export function SettingsPage({ section, onNavigate }: Props) {
+export function SettingsPage({ section, onNavigate, onShowUpdateDialog }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -98,7 +101,7 @@ export function SettingsPage({ section, onNavigate }: Props) {
             {section === 'privacy' && (
               <PrivacySection settings={settings} onUpdateSettings={async (patch) => update(patch)} />
             )}
-            {section === 'updates' && <UpdatesSection settings={settings} update={update} />}
+            {section === 'updates' && <UpdatesSettingsSection onShowDialog={onShowUpdateDialog} />}
             {section === 'storage' && <StorageSection settings={settings} />}
             {section === 'about' && <AboutSection />}
           </div>
@@ -290,42 +293,6 @@ function PerformanceSection({ settings, update }: { settings: AppSettings; updat
   );
 }
 
-function UpdatesSection({ settings, update }: { settings: AppSettings; update: UpdateFn }) {
-  return (
-    <>
-      <SettingRow label="Check for updates" desc="How often Clipwright looks for a new version">
-        <select
-          value={String(settings.autoCheckUpdates ?? '1d')}
-          onChange={(e) => update({ autoCheckUpdates: e.target.value as AppSettings['autoCheckUpdates'] })}
-          style={selectStyle}
-        >
-          <option value="startup">On startup</option>
-          <option value="6h">Every 6 hours</option>
-          <option value="1d">Daily</option>
-          <option value="1w">Weekly</option>
-          <option value="never">Never</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="Update channel" desc="Beta builds get features earlier and change more often">
-        <select
-          value={String(settings.updateChannel ?? 'stable')}
-          onChange={(e) => update({ updateChannel: e.target.value as 'stable' | 'beta' })}
-          style={selectStyle}
-        >
-          <option value="stable">Stable</option>
-          <option value="beta">Beta</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="Keep yt-dlp current" desc="Site support changes often; updates are separate from the app">
-        <Toggle
-          label="Keep yt-dlp current"
-          value={Boolean(settings.ytDlpAutoUpdate)}
-          onChange={(v) => update({ ytDlpAutoUpdate: v })}
-        />
-      </SettingRow>
-    </>
-  );
-}
 
 function StorageSection({ settings }: { settings: AppSettings }) {
   return (

@@ -10,9 +10,11 @@ interface Props {
   route: Route;
   isInProject: boolean;
   onNavigate: (r: Route) => void;
+  /** SPEC 15 §4.1 — the update chip, rendered by the app shell. */
+  updateChip?: React.ReactNode;
 }
 
-export function TopBar({ route, isInProject, onNavigate }: Props) {
+export function TopBar({ route, isInProject, onNavigate, updateChip }: Props) {
   const [saveStatus, setSaveStatus] = useState<'Saved' | 'Saving…' | 'Recovered'>('Saved');
   const [bgTaskCount, setBgTaskCount] = useState(0);
 
@@ -84,6 +86,9 @@ export function TopBar({ route, isInProject, onNavigate }: Props) {
       {isInProject && route.name === 'project' && (
         <Stepper stage={route.stage} onNavigate={() => {}} />
       )}
+
+      {/* SPEC 15 §4.1 — update chip. Quiet by design: a dot, not a badge. */}
+      {updateChip}
 
       {/* Background tasks button */}
       {bgTaskCount > 0 && (
