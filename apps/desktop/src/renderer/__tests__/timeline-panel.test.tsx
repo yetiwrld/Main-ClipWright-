@@ -788,6 +788,42 @@ describe('timeline panel', () => {
     expect(container2.querySelector('[data-testid="save-state"]')?.textContent).toBe('Saved');
   });
 
+
+  it('Ctrl+A selects all unlocked clips', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+    expect(timeline.select).toHaveBeenCalled();
+    const calls = (timeline.select as unknown as { mock: { calls: Array<[unknown[], ...unknown[]]> } }).mock.calls;
+    const args = calls[0]![0] as unknown[];
+    expect(Array.isArray(args)).toBe(true);
+    expect(args.length).toBeGreaterThan(0);
+  });
+
+  it('Esc clears selection', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(timeline.clearSelection).toHaveBeenCalled();
+  });
+
+  it('Ctrl+J merges two caption segments', () => {
+    const state = fixture();
+    // Convert fixture items to caption type
+    const capA = { ...state.items['item-a'], type: 'caption' as const };
+    const capB = { ...state.items['item-b'], type: 'caption' as const };
+    const stateWithCaps = {
+      ...state,
+      items: { ...state.items, ['item-a']: capA, ['item-b']: capB },
+    };
+    const timeline = fakeTimeline(stateWithCaps, { selection: ['item-a', 'item-b'] });
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.keyDown(window, { key: 'j', ctrlKey: true });
+    expect(timeline.mergeCaptionSegments).toHaveBeenCalledWith('item-a', 'item-b');
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

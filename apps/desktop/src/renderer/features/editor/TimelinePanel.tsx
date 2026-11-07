@@ -606,6 +606,52 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         zoomBy(1 / 1.25);
         return;
       }
+      if (meta && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        const allIds = state ? Object.values(state.items).filter((item) => {
+          const track = state.tracks.find((t) => t.id === item.trackId);
+          return track && !track.locked;
+        }).map((item) => item.id) : [];
+        timeline.select(allIds);
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (drag) {
+          endDrag();
+          return;
+        }
+        if (selection.length > 0) {
+          timeline.clearSelection();
+        }
+        return;
+      }
+      if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        const dir = event.key === 'ArrowLeft' ? -1 : 1;
+        const step = event.shiftKey ? 10 * frame : frame;
+        if (selection.length) {
+          event.preventDefault();
+          timeline.move(
+            selection.map((id) => ({
+              itemId: id,
+              startUs: Math.max(0, (state?.items[id]?.startUs ?? 0) + dir * step),
+            })),
+            editMode,
+          );
+          return;
+        }
+      }
+      if (meta && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        // Merge captions: merge selected caption segments on the same track
+        if (selection.length >= 2) {
+          const first = state?.items[selection[0]];
+          const second = state?.items[selection[1]];
+          if (first && second && first.type === 'caption' && second.type === 'caption' && first.trackId === second.trackId) {
+            timeline.mergeCaptionSegments(selection[0], selection[1]);
+          }
+        }
+        return;
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
