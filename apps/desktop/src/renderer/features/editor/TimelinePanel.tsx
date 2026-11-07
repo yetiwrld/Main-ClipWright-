@@ -68,6 +68,7 @@ type DragState =
   | { kind: 'trim'; itemId: string; edge: 'start' | 'end' }
   | { kind: 'roll'; leftItemId: string; rightItemId: string }
   | { kind: 'work-area'; edge: 'in' | 'out' }
+  | { kind: 'keyframe'; itemId: string; property: string; fromTimeUs: number; pointerStartX: number }
   | null;
 
 export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
@@ -94,6 +95,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   } | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
   const [dragPreview, setDragPreview] = useState<{ itemId: string; startUs: number } | null>(null);
+  const [kfDragPreview, setKfDragPreview] = useState<{ itemId: string; property: string; toTimeUs: number } | null>(null);
   // Trim is previewed locally and committed once on release (one undo step).
   const [trimPreview, setTrimPreview] = useState<{
     itemId: string;
@@ -105,8 +107,10 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
-    type: 'clip' | 'track' | 'empty' | 'ruler' | 'marker';
+    type: 'clip' | 'track' | 'empty' | 'ruler' | 'marker' | 'keyframe';
     targetId?: string;
+    property?: string;
+    timeUs?: number;
   } | null>(null);
   const [rollPreview, setRollPreview] = useState<{
     leftItemId: string;
@@ -372,6 +376,13 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (drag.kind === 'roll') {
         setRollPreview({ leftItemId: drag.leftItemId, rightItemId: drag.rightItemId, us: snapped.us });
       }
+      if (drag.kind === 'keyframe') {
+        const deltaPx = event.clientX - drag.pointerStartX;
+        const deltaUs = deltaPx * (1000 / pxPerSecond);
+        const toTimeUs = Math.max(0, Math.round(drag.fromTimeUs + deltaUs));
+        // Update the keyframe position live via a local preview state.
+        setKfDragPreview({ itemId: drag.itemId, property: drag.property, toTimeUs });
+      }
     };
 
     const onUp = (event: PointerEvent) => {
@@ -384,6 +395,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (drag.kind === 'roll' && rollPreview) {
         timeline.roll(rollPreview.leftItemId, rollPreview.rightItemId, rollPreview.us);
       }
+      if (drag.kind === 'keyframe' && kfDragPreview) {
+        timeline.moveKeyframe(drag.itemId, drag.property, drag.fromTimeUs, kfDragPreview.toTimeUs);
+      }
       endDrag();
     };
 
@@ -393,7 +407,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [applySnap, drag, dragPreview, editMode, endDrag, rollPreview, timeAtPointer, timeline, trimPreview]);
+  }, [applySnap, drag, dragPreview, editMode, endDrag, kfDragPreview, pxPerSecond, rollPreview, timeAtPointer, timeline, trimPreview]);
 
   /** Drag on empty timeline area selects every clip the rectangle touches. */
   const beginMarquee = (event: React.PointerEvent) => {
@@ -1186,14 +1200,52 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                               key={`${property}-${kf.timeUs}`}
                               data-testid={`${item.id}-kf-${property}-${kf.timeUs}`}
                               title={`${property} @ ${kf.timeUs}us`}
+                              role="button"
+                              tabIndex={0}
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                setDrag({
+                                  kind: 'keyframe',
+                                  itemId: item.id,
+                                  property,
+                                  fromTimeUs: kf.timeUs,
+                                  pointerStartX: event.clientX,
+                                });
+                              }}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setMenu({
+                                  x: event.clientX,
+                                  y: event.clientY,
+                                  type: 'keyframe',
+                                  targetId: item.id,
+                                  property,
+                                  timeUs: kf.timeUs,
+                                });
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Delete' || event.key === 'Backspace') {
+                                  event.preventDefault();
+                                  timeline.removeKeyframe(item.id, property, kf.timeUs);
+                                }
+                                if (event.key === 'd' && (event.ctrlKey || event.metaKey)) {
+                                  event.preventDefault();
+                                  const offset = frameDurationUs(fps);
+                                  timeline.duplicateKeyframe(item.id, property, kf.timeUs, kf.timeUs + offset);
+                                }
+                              }}
                               style={{
                                 position: 'absolute',
                                 left: `${(kf.timeUs / item.durationUs) * 100}%`,
                                 transform: 'translateX(-50%)',
-                                width: 8,
-                                height: 8,
+                                width: 10,
+                                height: 10,
                                 background: 'var(--brand)',
                                 clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+                                cursor: 'grab',
+                                pointerEvents: 'auto',
                               }}
                             />
                           )),
@@ -1398,7 +1450,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                 ? rulerMenuItems(timeline, state, fps)
                 : menu.type === 'marker' && menu.targetId
                   ? markerMenuItems(menu.targetId, timeline, state)
-                  : emptyMenuItems(timeline)}
+                  : menu.type === 'keyframe' && menu.targetId && menu.property
+                    ? keyframeMenuItems(menu.targetId, menu.property, menu.timeUs ?? 0, timeline, fps)
+                    : emptyMenuItems(timeline)}
         />
       )}
 
@@ -1511,6 +1565,23 @@ function markerMenuItems(
     } },
     { id: 'sep1', label: '', onSelect: () => {} },
     { id: 'delete', label: 'Delete marker', icon: <Trash2 size={14} />, danger: true, onSelect: () => timeline.deleteMarker(markerId) },
+  ];
+}
+
+/** Keyframe diamond context menu items (SPEC 09 §17). */
+function keyframeMenuItems(
+  itemId: string,
+  property: string,
+  timeUs: number,
+  timeline: TimelineApi,
+  fps: 30 | 60,
+): MenuItem[] {
+  return [
+    { id: 'duplicate', label: 'Duplicate', icon: <Copy size={14} />, shortcut: 'Ctrl+D', onSelect: () => {
+      const offset = frameDurationUs(fps);
+      timeline.duplicateKeyframe(itemId, property, timeUs, timeUs + offset);
+    } },
+    { id: 'delete', label: 'Delete keyframe', icon: <Trash2 size={14} />, shortcut: 'Del', danger: true, onSelect: () => timeline.removeKeyframe(itemId, property, timeUs) },
   ];
 }
 

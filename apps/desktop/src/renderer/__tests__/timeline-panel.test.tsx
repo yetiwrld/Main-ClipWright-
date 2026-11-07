@@ -914,6 +914,59 @@ describe('Thumbnails (SPEC 09 §19)', () => {
   });
 });
 
+
+describe('Keyframe interactions (SPEC 09 §17)', () => {
+  function stateWithKfs() {
+    const state = fixture();
+    const itemWithKfs = {
+      ...state.items['item-a'],
+      keyframes: { opacity: [{ timeUs: 1_000_000, value: 0.5, interpolation: 'linear' as const }] },
+    };
+    return {
+      ...state,
+      items: { ...state.items, ['item-a']: itemWithKfs },
+    };
+  }
+
+  it('right-click on keyframe shows context menu with delete', () => {
+    const timeline = fakeTimeline(stateWithKfs());
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    // Toggle show keyframes to make the lane visible
+    fireEvent.click(screen.getByRole('button', { name: /^Show keyframes$/ }));
+
+    const kf = container.querySelector('[data-testid="item-a-kf-opacity-1000000"]')!;
+    expect(kf).toBeTruthy();
+    fireEvent.contextMenu(kf);
+
+    // Context menu should appear with delete option
+    const menu = container.querySelector('[role="menu"]') || document.querySelector('[role="menu"]');
+    expect(menu).toBeTruthy();
+    expect(screen.getByText('Delete keyframe')).toBeTruthy();
+  });
+
+  it('Delete key removes keyframe', () => {
+    const timeline = fakeTimeline(stateWithKfs());
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Show keyframes$/ }));
+
+    const kf = container.querySelector('[data-testid="item-a-kf-opacity-1000000"]')!;
+    fireEvent.keyDown(kf, { key: 'Delete' });
+
+    expect(timeline.removeKeyframe).toHaveBeenCalledWith('item-a', 'opacity', 1_000_000);
+  });
+
+  it('Ctrl+D duplicates keyframe', () => {
+    const timeline = fakeTimeline(stateWithKfs());
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Show keyframes$/ }));
+
+    const kf = container.querySelector('[data-testid="item-a-kf-opacity-1000000"]')!;
+    fireEvent.keyDown(kf, { key: 'd', ctrlKey: true });
+
+    expect(timeline.duplicateKeyframe).toHaveBeenCalledWith('item-a', 'opacity', 1_000_000, expect.any(Number));
+  });
+});
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

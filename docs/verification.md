@@ -170,6 +170,20 @@ Escape closes the menu. Right-click on a clip selects it first.
 | Show markers toggle | ✓ | Renderer test |
 | Ctrl+Left/Right navigation | ✓ | Renderer test |
 
+
+### Waveforms and Thumbnails (SPEC 09 §19)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Waveform peaks on clips | ✓ | `useMediaPeaks` hook + `WaveformCanvas` component |
+| Peak resolution selection (256/4096) | ✓ | `selectPeakResolution` chooses by px/s |
+| Thumbnail filmstrip on video clips | ✓ | `ThumbnailFilmstrip` component + `drawThumbnailFilmstrip` |
+| Show waveforms toolbar toggle | ✓ | IconButton with BarChart3 icon |
+| IPC: media:getPeaks | ✓ | Main process handler reads peaks256/peaks4096.bin |
+| IPC: media:getThumbnail | ✓ | Main process handler reads poster thumbnail |
+| Preload bridge: getPeaks/getThumbnail | ✓ | Added to preload/index.cjs |
+| MediaRecord: peaks/thumb paths | ✓ | peaks256Path, peaks4096Path, thumbPath in schema |
+
 ### Work Area (SPEC 09 §18)
 
 | Feature | Status | Evidence |
@@ -223,7 +237,7 @@ Escape closes the menu. Right-click on a clip selects it first.
 1. **No Playwright browser binaries** — UI checks 1–3, 6–8, 19–21, 25–27, 30 cannot be verified in this environment. TypeScript typecheck, jsdom renderer tests, and Vite build are the verification layer.
 2. **Keyframes (§17)** — Not yet implemented. Phase 5 scope.
 3. **Work area (§18)** — Markers implemented; work-area in/out/loop playback not yet wired.
-4. **Waveforms/thumbnails (§19)** — Not yet implemented.
+4. **Waveforms/thumbnails (§19)** — ✓ Implemented. Waveform peaks drawn on canvas for video/audio clips; thumbnail filmstrip on video clips. 'Show waveforms' toolbar toggle. 7 renderer tests.
 5. **Captions on timeline (§20)** — Caption tracks exist; segment word-boundary operations not yet wired.
 6. **Effects panel** — Not yet implemented.
 7. **Export engine** — Not yet implemented (Phase 6).
