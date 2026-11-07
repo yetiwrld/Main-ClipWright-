@@ -119,6 +119,78 @@ function requireStorage(): StorageService {
   return storageService;
 }
 
+/** Bytes handed to each provider during this run, for the data-sent log. */
+const uploadSizes = new Map<string, number>();
+
+function hostOfProvider(storage: StorageService, providerId: string): string {
+  const record = storage.listProviders().find((provider) => provider.id === providerId);
+  if (!record) return 'unknown';
+  try {
+    return new URL(record.baseUrl).host;
+  } catch {
+    return record.baseUrl;
+  }
+}
+
+/**
+ * Finds the 16 kHz mono WAV for a project, extracting it if the import predates
+ * this build. Never falls back to the source video: uploads must be audio only.
+ */
+async function resolveAudio16k(storage: StorageService, projectId: string, hinted: string): Promise<string> {
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const derived = join(storage.getProjectDir(projectId), 'derived', 'audio16k.wav');
+  if (existsSync(derived)) return derived;
+  if (hinted && hinted.toLowerCase().endsWith('.wav') && existsSync(hinted)) return hinted;
+
+  const project = storage.getProject(projectId);
+  const mediaId = project?.sourceMediaIds[0];
+  const media = mediaId ? storage.getMedia(mediaId) : undefined;
+  if (!media) throw new Error('This project has no media to transcribe. Import a video first.');
+
+  const { extractAudio16k } = await import('@clipwright/media-core');
+  return extractAudio16k(media.path, join(storage.getProjectDir(projectId), 'derived'), 0);
+}
+
+/** Wraps an adapter's transcription capability in the pipeline's provider shape. */
+async function buildTranscriptionProvider(
+  adapter: Awaited<ReturnType<typeof import('@clipwright/ai-core').getAdapter>>,
+  config: import('@clipwright/ai-core').ProviderConfig
+) {
+  const capability = adapter.transcription;
+  if (!capability) return null;
+  const sizeKey = config.id;
+
+  return {
+    id: config.name,
+    supportsWordTimestamps: capability.supportsWordTimestamps,
+    maxUploadBytes: capability.maxUploadBytes,
+    async transcribe(
+      audio: Buffer,
+      options: { language: string; prompt: string; signal: AbortSignal }
+    ): Promise<{ words: Array<{ text: string; startSec: number; endSec: number; confidence?: number }>; language: string; languageConfidence: number }> {
+      uploadSizes.set(sizeKey, (uploadSizes.get(sizeKey) ?? 0) + audio.byteLength);
+      const result = await capability.transcribe(config, {
+        audio,
+        language: options.language,
+        prompt: options.prompt,
+        timeoutMs: Math.max(config.timeoutMs, 120_000),
+        signal: options.signal,
+      });
+      return {
+        words: result.words.map((word) => ({
+          text: word.text,
+          startSec: word.startSec,
+          endSec: word.endSec,
+          confidence: word.confidence,
+        })),
+        language: result.language,
+        languageConfidence: result.languageConfidence,
+      };
+    },
+  };
+}
+
 function requireProviders(): ProviderService {
   if (!providers) throw new Error('AI services are not ready yet.');
   return providers;
@@ -414,13 +486,78 @@ function registerIPC(): void {
     });
 
     try {
+      const ai = await import('@clipwright/ai-core');
+
+      // The 16 kHz mono WAV is what both engines need; the source video is never
+      // uploaded, and we do not trust the renderer's path (SPEC 06 §8).
+      const audioPath = await resolveAudio16k(storage, request.projectId, request.audioPath);
+
+      const modelSnapshot = models?.snapshot();
+      const installedModels = modelSnapshot?.whisper.filter((card) => card.status === 'installed') ?? [];
+      const ollamaOverview = await models?.ollama().catch(() => null);
+      const route = requireProviders().resolveTask(
+        'transcription',
+        {
+          whisperModelInstalled: installedModels.length > 0,
+          whisperModelName: installedModels[0]?.id,
+          ollamaAvailable: Boolean(ollamaOverview && ollamaOverview.status.state === 'running' && ollamaOverview.models.length),
+          ollamaModel: ollamaOverview?.models[0]?.name,
+        },
+        connectivity?.peek() ?? null
+      );
+
+      if (!route.ok) {
+        const message = `${route.message}${route.fix.length ? ` (${route.fix.map((fix) => fix.label).join(', ')})` : ''}`;
+        emit({ failed: true, message });
+        throw new Error(message);
+      }
+
+      let providerHandle: Awaited<ReturnType<typeof buildTranscriptionProvider>> = null;
+      let model = request.model;
+      let engine: 'whisper-local' | 'online' = 'whisper-local';
+
+      if (route.route === 'provider' && route.providerId) {
+        const record = storage.listProviders().find((provider) => provider.id === route.providerId);
+        if (!record) throw new Error('That provider no longer exists.');
+        const config = requireProviders().toConfig(record);
+        providerHandle = await buildTranscriptionProvider(ai.getAdapter(record.kind), config);
+        if (!providerHandle) throw new Error(`${record.name} cannot accept audio for transcription.`);
+        engine = 'online';
+        model = route.model ?? record.models.transcription ?? record.name;
+      } else if (route.route === 'whisper') {
+        engine = 'whisper-local';
+        const preferred = route.model ?? request.model;
+        model = installedModels.some((card) => card.id === preferred)
+          ? preferred
+          : (installedModels[0]?.id ?? preferred);
+      } else if (route.route === 'heuristic' || route.route === 'ollama') {
+        throw new Error('This task needs a transcription engine, not a language model. Install a Whisper model.');
+      }
+
+      emit({ percent: 0, phase: engine === 'online' ? `Transcribing with ${route.providerName ?? 'provider'}` : 'Transcribing' });
+
       const result = await runTranscription(
         storage,
         resolve(storage.getWorkspaceDir(), 'Models', 'whisper'),
-        request,
+        { ...request, audioPath, engine, model, provider: providerHandle ?? undefined },
         (p) => emit({ ...p, phase: 'Transcribing', detail: p.liveText }),
         controller.signal
       );
+
+      if (engine === 'online' && route.providerId && route.sendsDataOffDevice) {
+        const providerId = route.providerId;
+        const category = requireProviders().categoryFor('transcription');
+        const bytes = uploadSizes.get(providerHandle?.id ?? '') ?? 0;
+        uploadSizes.delete(providerHandle?.id ?? '');
+        consents?.recordTransfer({
+          providerHost: hostOfProvider(storage, providerId),
+          task: 'transcription',
+          category,
+          approxBytes: bytes,
+        });
+        consents?.consumeOneTime(providerId, category);
+      }
+
       emit({ percent: 100, phase: 'Transcription complete', result });
       return result;
     } catch (err) {

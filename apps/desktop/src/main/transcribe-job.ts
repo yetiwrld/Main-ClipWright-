@@ -8,11 +8,19 @@
 
 import { join } from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
-import { transcribeAudio, listInstalledModels, type Transcript } from '@clipwright/ai-core';
+import {
+  WHISPER_CATALOG,
+  findWhisperModel,
+  listInstalledModels,
+  transcribeAudio,
+  type Transcript,
+  type TranscriptionProvider,
+} from '@clipwright/ai-core';
 import type { StorageService } from './storage/storage-service.js';
 
 export interface TranscribeJobRequest {
   projectId: string;
+  /** 16 kHz mono WAV. The handler resolves it rather than trusting a renderer path. */
   audioPath: string;
   mediaId: string;
   model: string;
@@ -20,6 +28,8 @@ export interface TranscribeJobRequest {
   engine: 'whisper-local' | 'online';
   threads?: number;
   chunkDurationSec?: number;
+  /** Present only when the router chose an online provider (SPEC 06 §6.1). */
+  provider?: TranscriptionProvider;
 }
 
 export interface TranscribeJobProgress {
@@ -46,14 +56,20 @@ export async function runTranscription(
   onProgress: (p: TranscribeJobProgress) => void,
   signal: AbortSignal
 ): Promise<TranscribeJobResult> {
-  const installed = listInstalledModels(modelsDir);
-  if (!installed.some((m) => m.name === request.model)) {
-    throw new Error(`The model "${request.model}" is not installed. Open Models and install it first.`);
+  if (request.engine === 'whisper-local') {
+    const installed = listInstalledModels(modelsDir);
+    if (!installed.some((m) => m.name === request.model)) {
+      throw new Error(`The model "${request.model}" is not installed. Open Models and install it first.`);
+    }
+  } else if (!request.provider) {
+    throw new Error('Online transcription needs a provider that can accept audio. Add one in Settings → AI providers.');
   }
 
   const projectDir = storage.getProjectDir(request.projectId);
   const workDir = join(projectDir, 'cache', 'whisper');
   await mkdir(workDir, { recursive: true });
+
+  const startWall = Date.now();
 
   try {
     const transcript = await transcribeAudio({
@@ -62,7 +78,8 @@ export async function runTranscription(
       language: request.language || 'auto',
       model: request.model,
       engine: request.engine,
-      modelPath: join(modelsDir, `ggml-${request.model}.bin`),
+      modelPath: join(modelsDir, findWhisperModel(request.model)?.fileName ?? `${request.model}.bin`),
+      provider: request.provider,
       chunkDurationSec: request.chunkDurationSec ?? 30,
       threads: request.threads ?? 4,
       signal,
@@ -78,14 +95,31 @@ export async function runTranscription(
       },
     });
 
-    await storage.saveTranscript(request.projectId, transcript as never);
+    // The engine does not know the project; stamp the real media id and a version
+    // that increments, so moments can tell when a transcript has changed.
+    const existing = storage.getTranscript(request.projectId);
+    const stamped: Transcript = {
+      ...transcript,
+      mediaId: request.mediaId,
+      version: existing ? (existing.version ?? 1) + 1 : 1,
+      engine: request.engine,
+      model: request.model,
+    };
+    await storage.saveTranscript(request.projectId, stamped as never);
     storage.updateProject(request.projectId, { stage: 'moments' } as never);
 
+    // Measured throughput makes "≈ N× real time" an observation, not a claim.
+    const audioSec = stamped.durationUs / 1_000_000;
+    const elapsedSec = Math.max(0.001, (Date.now() - startWall) / 1000);
+    if (request.engine === 'whisper-local' && audioSec > 0) {
+      storage.saveModelThroughput(request.model, Math.round((audioSec / elapsedSec) * 100) / 100, 'whisper');
+    }
+
     return {
-      transcript,
-      wordCount: transcript.words.length,
-      language: transcript.language,
-      model: transcript.model,
+      transcript: stamped,
+      wordCount: stamped.words.length,
+      language: stamped.language,
+      model: stamped.model,
       durationSec: Math.round(transcript.durationUs / 1_000_000),
     };
   } finally {
