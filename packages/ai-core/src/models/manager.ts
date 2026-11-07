@@ -71,6 +71,11 @@ export class ModelManager {
     this.options.machine = machine;
   }
 
+  /** Swaps the progress listener (a closed window must stop receiving events). */
+  setProgressSink(sink: ((event: DownloadProgressEvent) => void) | undefined): void {
+    this.options.onProgress = sink;
+  }
+
   get whisperDir(): string {
     return this.options.whisperDir;
   }

@@ -718,6 +718,33 @@ export const AppSettingsSchema = z
         editor_ai: z.string().optional(),
       })
       .default({}),
+    /** SPEC 06 §7.3 — address of the local Ollama server (may be on the LAN). */
+    ollamaBaseUrl: z.string().default('http://localhost:11434'),
+    /** Context window handed to local models; the moments batch planner reads this. */
+    llmNumCtx: z.union([z.literal(4096), z.literal(8192), z.literal(16384), z.literal(32768)]).default(8192),
+    llmMaxConcurrent: z.number().int().min(1).max(4).default(2),
+    providerTimeoutSec: z.number().int().min(15).max(300).default(60),
+    /** SPEC 06 §8 — the only background outbound calls the user can switch off. */
+    privacy: z
+      .object({
+        updateCheck: z.boolean().default(true),
+        ytDlpUpdate: z.boolean().default(true),
+        crashReports: z.boolean().default(false),
+      })
+      .default({}),
+    /** Speech model used by new projects; 'auto' picks from RAM and language. */
+    defaultWhisperModel: z.string().default('auto'),
+    /** Moment defaults, remembered per workspace (SPEC 07 §5). */
+    momentDefaults: z
+      .object({
+        contentType: z
+          .enum(['auto', 'podcast', 'talking_head', 'tutorial', 'gaming', 'lecture', 'other'])
+          .default('auto'),
+        targetMinSec: z.number().int().min(3).max(600).default(20),
+        targetMaxSec: z.number().int().min(5).max(600).default(60),
+        count: z.union([z.literal('auto'), z.number().int().min(1).max(50)]).default('auto'),
+      })
+      .default({}),
     updateChannel: z.enum(['stable', 'beta']).default('stable'),
     autoCheckUpdates: z.enum(['startup', '6h', '1d', '1w', 'never']).default('1d'),
     ytDlpAutoUpdate: z.boolean().default(true),

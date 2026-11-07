@@ -63,6 +63,24 @@ export const WORKSPACE_FOLDERS = [
   'Updates',
 ] as const;
 
+export interface ConsentRecord {
+  id: string;
+  providerId: string;
+  /** What may be sent: 'transcript' | 'audio' | 'test_payload'. */
+  category: string;
+  /** 'once' survives for a single task; 'always' persists. */
+  scope: string;
+  grantedAt: string;
+}
+
+export interface DataSentEntry {
+  ts: string;
+  providerHost: string;
+  task: string;
+  category: string;
+  approxBytes: number;
+}
+
 export interface RecoveryCheckResult {
   needsRecovery: boolean;
   lockedByLiveProcess: boolean;
@@ -1156,6 +1174,95 @@ export class StorageService {
   public deleteProvider(providerId: string): void {
     this.workspaceDb.prepare('DELETE FROM providers WHERE id = ?').run(providerId);
     this.workspaceDb.prepare('DELETE FROM consents WHERE provider_id = ?').run(providerId);
+  }
+
+  /* ==========================================================================
+   * CONSENT AND DATA-SENT LOG (Spec 06 §8)
+   *
+   * Consents are not secrets: they live in workspace.db so the Privacy screen
+   * can list them, and they travel with the workspace. The log records only
+   * metadata — never transcript text, never audio.
+   * ======================================================================== */
+
+  public listConsents(): ConsentRecord[] {
+    return this.workspaceDb
+      .prepare('SELECT id, provider_id, category, scope, granted_at FROM consents ORDER BY granted_at DESC')
+      .all<{ id: string; provider_id: string; category: string; scope: string; granted_at: string }>()
+      .map((row) => ({
+        id: row.id,
+        providerId: row.provider_id,
+        category: row.category,
+        scope: row.scope,
+        grantedAt: row.granted_at,
+      }));
+  }
+
+  public saveConsent(consent: ConsentRecord): ConsentRecord {
+    this.workspaceDb
+      .prepare(
+        `INSERT INTO consents (id, provider_id, category, scope, granted_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET scope = excluded.scope, granted_at = excluded.granted_at`
+      )
+      .run(consent.id, consent.providerId, consent.category, consent.scope, consent.grantedAt);
+    return consent;
+  }
+
+  public findConsent(providerId: string, category: string): ConsentRecord | undefined {
+    return this.listConsents().find((c) => c.providerId === providerId && c.category === category);
+  }
+
+  public deleteConsent(id: string): void {
+    this.workspaceDb.prepare('DELETE FROM consents WHERE id = ?').run(id);
+  }
+
+  public deleteConsentsForProvider(providerId: string): void {
+    this.workspaceDb.prepare('DELETE FROM consents WHERE provider_id = ?').run(providerId);
+  }
+
+  public appendDataSent(entry: DataSentEntry): void {
+    this.workspaceDb
+      .prepare('INSERT INTO data_sent_log (ts, provider_host, task, category, approx_bytes) VALUES (?, ?, ?, ?, ?)')
+      .run(entry.ts, entry.providerHost, entry.task, entry.category, Math.round(entry.approxBytes));
+  }
+
+  public listDataSent(limit = 200): DataSentEntry[] {
+    return this.workspaceDb
+      .prepare(
+        'SELECT ts, provider_host, task, category, approx_bytes FROM data_sent_log ORDER BY id DESC LIMIT ?'
+      )
+      .all<{ ts: string; provider_host: string; task: string; category: string; approx_bytes: number }>(limit)
+      .map((row) => ({
+        ts: row.ts,
+        providerHost: row.provider_host,
+        task: row.task,
+        category: row.category,
+        approxBytes: row.approx_bytes,
+      }));
+  }
+
+  public clearDataSent(): number {
+    const row = this.workspaceDb.prepare('SELECT COUNT(*) AS n FROM data_sent_log').get<{ n: number }>();
+    this.workspaceDb.prepare('DELETE FROM data_sent_log').run();
+    return row?.n ?? 0;
+  }
+
+  /** Records a measured model throughput so later runs can show "≈ N× real time". */
+  public saveModelThroughput(modelId: string, throughputFactor: number, category = 'whisper'): void {
+    this.workspaceDb
+      .prepare(
+        `INSERT INTO models (id, category, name, status, size_bytes, throughput_factor, payload_json)
+         VALUES (?, ?, ?, 'installed', 0, ?, '{}')
+         ON CONFLICT(id) DO UPDATE SET throughput_factor = excluded.throughput_factor, status = 'installed'`
+      )
+      .run(modelId, category, modelId, throughputFactor);
+  }
+
+  public listModelThroughputs(category = 'whisper'): Record<string, number> {
+    const rows = this.workspaceDb
+      .prepare('SELECT id, throughput_factor FROM models WHERE category = ? AND throughput_factor IS NOT NULL')
+      .all<{ id: string; throughput_factor: number }>(category);
+    return Object.fromEntries(rows.map((row) => [row.id, row.throughput_factor]));
   }
 
   /* ==========================================================================

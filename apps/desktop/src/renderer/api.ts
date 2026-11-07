@@ -1,7 +1,11 @@
 import type {
+  AiTask,
   ClipwrightBridge,
   IngestRequestPayload,
   JobProgressPayload,
+  ModelDownloadProgressPayload,
+  MomentsProgressPayload,
+  ProviderSaveInput,
   TranscribeRequestPayload,
 } from './global.js';
 
@@ -126,6 +130,121 @@ export const api = {
   },
   onModelProgress(callback: (p: { modelName: string; percent: number }) => void) {
     return getBridge()?.onModelProgress(callback) ?? (() => undefined);
+  },
+
+  // ---- AI providers (SPEC 06) ----
+  async listProviders() {
+    return requireBridge('Loading AI providers').aiListProviders();
+  },
+  async saveProvider(input: ProviderSaveInput) {
+    return requireBridge('Saving the provider').aiSaveProvider(input);
+  },
+  async removeProvider(providerId: string) {
+    return requireBridge('Removing the provider').aiRemoveProvider(providerId);
+  },
+  async testProvider(providerId: string) {
+    return requireBridge('Testing the provider').aiTestProvider(providerId);
+  },
+  async listProviderModels(providerId: string) {
+    return requireBridge('Listing that provider’s models').aiListProviderModels(providerId);
+  },
+  async setDefaultProvider(task: AiTask, providerId: string | null) {
+    return requireBridge('Changing the default provider').aiSetDefaultProvider(task, providerId);
+  },
+  async routeFor(task: AiTask) {
+    return requireBridge('Checking which AI can run this').aiRoute(task);
+  },
+  async connectivity(force = false) {
+    return requireBridge('Checking the connection').aiConnectivity(force);
+  },
+
+  // ---- Consent and privacy ----
+  async grantConsent(providerId: string, category: string, scope: 'once' | 'always') {
+    return requireBridge('Recording your choice').aiGrantConsent({ providerId, category, scope });
+  },
+  async revokeConsent(providerId: string, category: string) {
+    return requireBridge('Revoking permission').aiRevokeConsent(providerId, category);
+  },
+  async privacyOverview() {
+    return requireBridge('Loading privacy details').aiPrivacyOverview();
+  },
+  async clearDataSentLog() {
+    return requireBridge('Clearing the log').aiClearDataSentLog();
+  },
+  async exportDataSentLog() {
+    return requireBridge('Exporting the log').aiExportDataSentLog();
+  },
+
+  // ---- Local models ----
+  async modelSnapshot() {
+    return requireBridge('Loading local models').aiModelSnapshot();
+  },
+  async downloadModel(modelId: string) {
+    return requireBridge('Starting the download').aiDownloadModel(modelId);
+  },
+  async cancelModelDownload(modelId: string) {
+    return getBridge()?.aiCancelModelDownload(modelId) ?? false;
+  },
+  async deleteSpeechModel(modelId: string) {
+    return requireBridge('Deleting that model').aiDeleteModel(modelId);
+  },
+  async verifyModel(modelId: string) {
+    return requireBridge('Verifying that model').aiVerifyModel(modelId);
+  },
+  async setDefaultModel(modelId: string) {
+    return requireBridge('Setting the default model').aiSetDefaultModel(modelId);
+  },
+  async openModelsFolder() {
+    return requireBridge('Opening the models folder').aiOpenModelsFolder();
+  },
+  onModelDownloadProgress(callback: (p: ModelDownloadProgressPayload) => void) {
+    return getBridge()?.onModelDownloadProgress(callback) ?? (() => undefined);
+  },
+
+  // ---- Ollama ----
+  async ollamaOverview() {
+    return requireBridge('Checking Ollama').aiOllamaOverview();
+  },
+  async pullOllamaModel(modelName: string) {
+    return requireBridge('Pulling that model').aiPullOllamaModel(modelName);
+  },
+  async cancelOllamaPull(modelName: string) {
+    return getBridge()?.aiCancelOllamaPull(modelName) ?? false;
+  },
+  async deleteOllamaModel(modelName: string) {
+    return requireBridge('Deleting that model').aiDeleteOllamaModel(modelName);
+  },
+  async testOllamaModel(modelName: string) {
+    return requireBridge('Testing that model').aiTestOllamaModel(modelName);
+  },
+  async setOllamaBaseUrl(baseUrl: string) {
+    return requireBridge('Saving the Ollama address').aiSetOllamaBaseUrl(baseUrl);
+  },
+  onOllamaPullProgress(callback: (p: { model: string; status: string; percent: number }) => void) {
+    return getBridge()?.onOllamaPullProgress(callback) ?? (() => undefined);
+  },
+
+  // ---- Moments (SPEC 07) ----
+  async listMoments(projectId: string) {
+    return requireBridge('Loading moments').listMoments(projectId);
+  },
+  async analyzeMoments(request: Parameters<ClipwrightBridge['analyzeMoments']>[0]) {
+    return requireBridge('Finding moments').analyzeMoments(request);
+  },
+  async updateMoment(projectId: string, patch: Parameters<ClipwrightBridge['updateMoment']>[1]) {
+    return requireBridge('Updating that moment').updateMoment(projectId, patch);
+  },
+  async addManualMoment(projectId: string, range: { startUs: number; endUs: number; title?: string }) {
+    return requireBridge('Adding that range').addManualMoment(projectId, range);
+  },
+  async rescoreMoment(projectId: string, momentId: string) {
+    return requireBridge('Re-scoring that moment').rescoreMoment(projectId, momentId);
+  },
+  async createClips(projectId: string, momentIds: string[], options?: { openFirst?: boolean }) {
+    return requireBridge('Creating clips').createClips(projectId, momentIds, options);
+  },
+  onMomentsProgress(callback: (p: MomentsProgressPayload) => void) {
+    return getBridge()?.onMomentsProgress(callback) ?? (() => undefined);
   },
 
   // ---- App ----

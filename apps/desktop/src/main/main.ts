@@ -1,5 +1,6 @@
-import { app, BrowserWindow, shell, ipcMain, session } from 'electron';
+import { app, BrowserWindow, dialog, shell, ipcMain, session } from 'electron';
 import { join, resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import {
   buildSecureWindowConfig,
   CONTENT_SECURITY_POLICY,
@@ -11,12 +12,22 @@ import { Logger } from './storage/logger.js';
 import { SecretStore } from './storage/secret-store.js';
 import { ingestMedia, type IngestRequest } from './media-pipeline.js';
 import { runTranscription, type TranscribeJobRequest } from './transcribe-job.js';
+import { ProviderService } from './ai/provider-service.js';
+import { ConsentService } from './ai/consent-service.js';
+import { ModelService } from './ai/model-service.js';
+import { MomentsService } from './ai/moments-service.js';
+import { ConnectivityService, type ProcessingMode } from '@clipwright/ai-core';
 
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let storageService: StorageService | null = null;
 let secretStore: SecretStore | null = null;
 let logger: Logger | null = null;
+let providers: ProviderService | null = null;
+let consents: ConsentService | null = null;
+let models: ModelService | null = null;
+let moments: MomentsService | null = null;
+let connectivity: ConnectivityService | null = null;
 
 /** Running long jobs, keyed by the id the renderer uses to cancel them. */
 const activeJobs = new Map<string, AbortController>();
@@ -92,6 +103,27 @@ function createWindow(): BrowserWindow {
 function requireStorage(): StorageService {
   if (!storageService) throw new Error('Storage service not ready');
   return storageService;
+}
+
+function requireProviders(): ProviderService {
+  if (!providers) throw new Error('AI services are not ready yet.');
+  return providers;
+}
+function requireConsents(): ConsentService {
+  if (!consents) throw new Error('AI services are not ready yet.');
+  return consents;
+}
+function requireModels(): ModelService {
+  if (!models) throw new Error('Model manager is not ready yet.');
+  return models;
+}
+function requireMoments(): MomentsService {
+  if (!moments) throw new Error('Moment analysis is not ready yet.');
+  return moments;
+}
+function requireConnectivity(): ConnectivityService {
+  if (!connectivity) throw new Error('Connectivity check is not ready yet.');
+  return connectivity;
 }
 
 function registerIPC(): void {
@@ -207,7 +239,16 @@ function registerIPC(): void {
 
   // ---- Settings */
   ipcMain.handle('settings:get', async () => requireStorage().getSettings());
-  ipcMain.handle('settings:update', async (_event, patch) => requireStorage().updateSettings(patch));
+  ipcMain.handle('settings:update', async (_event, patch) => {
+    const updated = requireStorage().updateSettings(patch);
+    // Offline mode must take effect immediately: the connectivity probe stops
+    // and the router refuses to send anything.
+    if (patch && 'processingMode' in patch) {
+      connectivity?.setOfflineMode(updated.processingMode === ('offline' as ProcessingMode));
+      connectivity?.invalidate();
+    }
+    return updated;
+  });
   ipcMain.handle('settings:reset', async () => requireStorage().resetSettings());
 
   // ---- Secret store (never persisted in the workspace) */
@@ -414,6 +455,129 @@ function registerIPC(): void {
     return true;
   });
 
+  // ---- AI providers, models, consent and moments (SPEC 06 & 07) */
+  const push = (channel: string, payload: unknown) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  };
+
+  // Progress is a push, not a poll: the window gets every download and batch tick.
+  models?.setProgressSink((event) => push('ai:modelProgress', event));
+  moments?.setProgressSink((progress) => push('ai:momentsProgress', progress));
+
+  ipcMain.handle('ai:providers:list', async () => requireProviders().list());
+  ipcMain.handle('ai:providers:save', async (_event, input) => requireProviders().save(input));
+  ipcMain.handle('ai:providers:remove', async (_event, providerId: string) => {
+    requireProviders().remove(providerId);
+    return true;
+  });
+  ipcMain.handle('ai:providers:test', async (_event, providerId: string) => requireProviders().test(providerId));
+  ipcMain.handle('ai:providers:models', async (_event, providerId: string) => requireProviders().listModels(providerId));
+  ipcMain.handle('ai:providers:setDefault', async (_event, task, providerId: string | null) =>
+    requireProviders().setDefault(task, providerId)
+  );
+  ipcMain.handle('ai:route', async (_event, task) => {
+    const modelSnapshot = requireModels().snapshot();
+    const installed = modelSnapshot.whisper.filter((card) => card.status === 'installed');
+    let ollamaAvailable = false;
+    let ollamaModel: string | undefined;
+    try {
+      const overview = await requireModels().ollama();
+      ollamaAvailable = overview.status.state === 'running' && overview.models.length > 0;
+      ollamaModel = overview.models[0]?.name;
+    } catch {
+      ollamaAvailable = false;
+    }
+    const state = await requireConnectivity().check();
+    return requireProviders().resolveTask(
+      task,
+      {
+        whisperModelInstalled: installed.length > 0,
+        whisperModelName: installed[0]?.id,
+        ollamaAvailable,
+        ollamaModel,
+      },
+      state
+    );
+  });
+  ipcMain.handle('ai:connectivity', async (_event, force?: boolean) => requireConnectivity().check(force));
+
+  // ---- Consent and privacy */
+  ipcMain.handle('ai:consent:grant', async (_event, decision) => requireConsents().grant(decision));
+  ipcMain.handle('ai:consent:revoke', async (_event, providerId: string, category) => {
+    requireConsents().revoke(providerId, category);
+    return true;
+  });
+  ipcMain.handle('ai:privacy:overview', async () => requireConsents().overview());
+  ipcMain.handle('ai:privacy:clearLog', async () => requireConsents().clearLog());
+  ipcMain.handle('ai:privacy:exportCsv', async () => {
+    const csv = requireConsents().toCsv();
+    const target = await dialog.showSaveDialog({
+      title: 'Save data-sent log',
+      defaultPath: 'clipwright-data-sent.csv',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (target.canceled || !target.filePath) return null;
+    writeFileSync(target.filePath, csv, 'utf8');
+    return target.filePath;
+  });
+
+  // ---- Local models */
+  ipcMain.handle('ai:models:snapshot', async () => requireModels().snapshot());
+  ipcMain.handle('ai:models:download', async (_event, modelId: string) => requireModels().downloadWhisper(modelId));
+  ipcMain.handle('ai:models:cancel', async (_event, modelId: string) => requireModels().cancelDownload(modelId));
+  ipcMain.handle('ai:models:delete', async (_event, modelId: string) => {
+    await requireModels().deleteWhisper(modelId);
+    return true;
+  });
+  ipcMain.handle('ai:models:verify', async (_event, modelId: string) => requireModels().verifyWhisper(modelId));
+  ipcMain.handle('ai:models:setDefault', async (_event, modelId: string) =>
+    requireStorage().updateSettings({ defaultWhisperModel: modelId })
+  );
+  ipcMain.handle('ai:models:openFolder', async () => {
+    const folder = requireModels().snapshot().folders.whisper;
+    const error = await shell.openPath(folder);
+    return error || folder;
+  });
+  ipcMain.handle('ai:models:recordSpeed', async (_event, modelId: string, throughputFactor: number) => {
+    requireModels().recordSpeed(modelId, throughputFactor);
+    return true;
+  });
+
+  // ---- Ollama */
+  ipcMain.handle('ai:ollama:overview', async () => requireModels().ollama());
+  ipcMain.handle('ai:ollama:pull', async (event, modelName: string) => {
+    const sender = event.sender;
+    await requireModels().pullOllama(modelName, (progress) => {
+      if (!sender.isDestroyed()) sender.send('ai:ollamaProgress', progress);
+    });
+    return true;
+  });
+  ipcMain.handle('ai:ollama:cancel', async (_event, modelName: string) => requireModels().cancelOllamaPull(modelName));
+  ipcMain.handle('ai:ollama:delete', async (_event, modelName: string) => {
+    await requireModels().deleteOllama(modelName);
+    return true;
+  });
+  ipcMain.handle('ai:ollama:test', async (_event, modelName: string) => requireModels().testOllama(modelName));
+  ipcMain.handle('ai:ollama:setBaseUrl', async (_event, baseUrl: string) =>
+    requireStorage().updateSettings({ ollamaBaseUrl: baseUrl.trim() })
+  );
+
+  // ---- Moments */
+  ipcMain.handle('moments:list', async (_event, projectId: string) => requireMoments().list(projectId));
+  ipcMain.handle('moments:analyze', async (_event, request) => requireMoments().analyze(request));
+  ipcMain.handle('moments:update', async (_event, projectId: string, patch) =>
+    requireMoments().updateMoment(projectId, patch)
+  );
+  ipcMain.handle('moments:addManual', async (_event, projectId: string, range) =>
+    requireMoments().addManualMoment(projectId, range)
+  );
+  ipcMain.handle('moments:rescore', async (_event, projectId: string, momentId: string) =>
+    requireMoments().rescore(projectId, momentId)
+  );
+  ipcMain.handle('moments:createClips', async (_event, projectId: string, momentIds: string[], options) =>
+    requireMoments().createClips(projectId, momentIds, options ?? {})
+  );
+
   // ---- App info */
   ipcMain.handle('app:info', async () => ({
     version: app.getVersion(),
@@ -444,6 +608,18 @@ app.whenReady().then(() => {
     storageService.initWorkspaceFolders(defaultWorkspace);
   } catch (err) {
     logger.error('Failed to initialise workspace', { error: String(err) });
+  }
+
+  const storage = storageService;
+  const secrets = secretStore;
+  const log = logger;
+  if (storage && secrets && log) {
+    providers = new ProviderService(storage, secrets, log);
+    consents = new ConsentService(storage, log);
+    models = new ModelService(storage, providers, log);
+    moments = new MomentsService(storage, providers, models, consents, log);
+    connectivity = new ConnectivityService();
+    connectivity.setOfflineMode(storage.getSettings().processingMode === 'offline');
   }
 
   registerIPC();
