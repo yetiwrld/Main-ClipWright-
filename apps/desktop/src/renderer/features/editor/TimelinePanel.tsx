@@ -93,7 +93,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
-    type: 'clip' | 'track' | 'empty' | 'ruler';
+    type: 'clip' | 'track' | 'empty' | 'ruler' | 'marker';
     targetId?: string;
   } | null>(null);
   const [rollPreview, setRollPreview] = useState<{
@@ -1095,7 +1095,19 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           {state.markers.map((marker) => (
             <div
               key={marker.id}
+              data-testid={`marker-${marker.id}`}
               title={marker.name}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setMenu({ x: event.clientX, y: event.clientY, type: 'marker', targetId: marker.id });
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const name = window.prompt('Marker name', marker.name);
+                if (name !== null) timeline.updateMarker(marker.id, { name });
+              }}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -1103,7 +1115,8 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                 width: 2,
                 height: 8,
                 background: marker.color ?? 'var(--brand)',
-                pointerEvents: 'none',
+                pointerEvents: 'auto',
+                cursor: 'pointer',
               }}
             />
           ))}
@@ -1121,7 +1134,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
               ? trackMenuItems(menu.targetId, timeline, state)
               : menu.type === 'ruler'
                 ? rulerMenuItems(timeline, state, fps)
-                : emptyMenuItems(timeline)}
+                : menu.type === 'marker' && menu.targetId
+                  ? markerMenuItems(menu.targetId, timeline, state)
+                  : emptyMenuItems(timeline)}
         />
       )}
 
@@ -1216,6 +1231,24 @@ function rulerMenuItems(
     { id: 'clear-work', label: 'Clear work area', icon: <Trash2 size={14} />, disabled: !state.workArea, disabledReason: 'No work area set', onSelect: () => timeline.clearWorkArea() },
     { id: 'sep1', label: '', onSelect: () => {} },
     { id: 'fit', label: 'Fit project', icon: <Maximize2 size={14} />, onSelect: () => timeline.run('Fit project', (s) => ({ ok: true, state: s, patches: [], inverse: [], affectedItemIds: [], notes: ['Fit to project.'] })) },
+  ];
+}
+
+/** Marker context menu items (SPEC 09 §18, §21). */
+function markerMenuItems(
+  markerId: string,
+  timeline: TimelineApi,
+  state: TimelineState,
+): MenuItem[] {
+  const marker = state.markers.find((m) => m.id === markerId);
+  if (!marker) return [];
+  return [
+    { id: 'rename', label: 'Rename', icon: <Flag size={14} />, onSelect: () => {
+      const name = window.prompt('Marker name', marker.name);
+      if (name !== null) timeline.updateMarker(markerId, { name });
+    } },
+    { id: 'sep1', label: '', onSelect: () => {} },
+    { id: 'delete', label: 'Delete marker', icon: <Trash2 size={14} />, danger: true, onSelect: () => timeline.deleteMarker(markerId) },
   ];
 }
 

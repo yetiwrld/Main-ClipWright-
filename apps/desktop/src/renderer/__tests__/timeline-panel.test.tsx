@@ -661,6 +661,19 @@ describe('timeline panel', () => {
     fireEvent.keyDown(window, { key: 'k' });
   });
 
+
+  it('marker right-click shows rename and delete menu', () => {
+    const state = fixture();
+    const marker = { id: 'mk-1', timeUs: 2_000_000, name: 'Scene 1', color: '#FFB000' };
+    const stateWithMarker = { ...state, markers: [marker] };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithMarker)} />);
+    const markerEl = container.querySelector('[data-testid="marker-mk-1"]') as HTMLElement;
+    expect(markerEl).toBeTruthy();
+    fireEvent.contextMenu(markerEl, { clientX: 100, clientY: 20 });
+    expect(screen.getByText('Rename')).toBeTruthy();
+    expect(screen.getByText('Delete marker')).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
