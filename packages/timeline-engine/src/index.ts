@@ -49,6 +49,8 @@ export {
   setTrackMuted,
   setTrackMagnetic,
   rollAt,
+  detachAudio,
+  unlink,
   type CommandOk,
   type CommandError,
   type CommandResult,

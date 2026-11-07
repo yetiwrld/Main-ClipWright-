@@ -13,6 +13,8 @@ import {
   setTrackMuted,
   setTrackMagnetic,
   rollAt,
+  detachAudio,
+  unlink,
   splitItems,
   trimItem,
   trimItems,
@@ -359,6 +361,44 @@ describe('timeline commands', () => {
     expect(first.startUs + first.durationUs).toBeLessThanOrEqual(second.startUs + second.durationUs);
     expect(second.durationUs).toBeGreaterThanOrEqual(33_333);
     expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('detaches audio into a linked audio item and mutes the video', () => {
+    const { state, ids } = fixture();
+    const result = detachAudio(state, { videoItemId: ids.first, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const video = result.state.items[ids.first]!;
+    expect(video.muted).toBe(true);
+    expect(video.linkId).toBeTruthy();
+    // A new audio item appears on an audio track sharing the linkId.
+    const linked = Object.values(result.state.items).filter(
+      (item) => item.linkId === video.linkId && item.id !== ids.first,
+    );
+    expect(linked).toHaveLength(1);
+    expect(linked[0]!.type).toBe('audio');
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('unlink removes the shared linkId from every member', () => {
+    const { state, ids } = fixture();
+    const detached = detachAudio(state, { videoItemId: ids.first, fps: 30 });
+    expect(detached.ok).toBe(true);
+    if (!detached.ok) return;
+    const video = detached.state.items[ids.first]!;
+    const result = unlink(detached.state, { itemId: ids.first });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const videoAfter = result.state.items[ids.first]!;
+    expect(videoAfter.linkId).toBeUndefined();
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('refuses to detach audio from a non-video item', () => {
+    const { state, ids } = fixture();
+    const result = detachAudio(state, { videoItemId: ids.third, fps: 30 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('invalid');
   });
 
   it('refuses a rolling edit across non-adjacent clips', () => {

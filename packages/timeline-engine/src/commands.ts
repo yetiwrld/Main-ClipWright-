@@ -1097,6 +1097,109 @@ export function setTrackMuted(
 }
 
 /**
+ * Detach audio from a video item (SPEC 09 §9.6): creates a linked audio item
+ * on the first available audio track at the same time range, mutes the video's
+ * embedded audio, and shares a linkId so both move together.
+ */
+export function detachAudio(
+  state: TimelineState,
+  params: { videoItemId: string; fps: Fps },
+): CommandResult {
+  const video = state.items[params.videoItemId];
+  if (!video) return fail('not_found', 'That item no longer exists.');
+  if (video.type !== 'video') return fail('invalid', 'Only video items have audio to detach.');
+
+  const startUs = quantizeUs(video.startUs, params.fps);
+  const durationUs = quantizeUs(video.durationUs, params.fps);
+
+  // Try each unlocked audio track; pick the first one where the detached
+  // audio does not overlap an existing item.
+  const audioTracks = state.tracks.filter(
+    (candidate) => candidate.kind === 'audio' && !candidate.locked,
+  );
+  const audioTrack = audioTracks.find((track) => {
+    return !track.itemIds.some((id) => {
+      const existing = state.items[id];
+      if (!existing) return false;
+      return startUs < itemEndUs(existing) && existing.startUs < startUs + durationUs;
+    });
+  });
+  if (!audioTrack) {
+    return fail('invalid', 'No free audio track to detach audio onto.');
+  }
+
+  const linkId = `link-${Date.now()}`;
+  const audioId = `${params.videoItemId}-audio`;
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const audioItem = {
+      ...video,
+      id: audioId,
+      trackId: audioTrack.id,
+      type: 'audio' as const,
+      startUs,
+      durationUs,
+      linkId,
+      muted: false,
+    };
+    draft.items[audioId] = audioItem;
+    draft.tracks = draft.tracks.map((track) =>
+      track.id === audioTrack.id
+        ? { ...track, itemIds: [...track.itemIds, audioId] }
+        : track,
+    );
+    const videoTarget = draft.items[params.videoItemId] as TimelineItem;
+    videoTarget.linkId = linkId;
+    videoTarget.muted = true;
+    sortTrackItems(draft, audioTrack.id);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.videoItemId, audioId],
+    notes: ['Audio detached and linked.'],
+  };
+}
+
+/**
+ * Unlink items that share a linkId (SPEC 09 §9.6): each item keeps its position
+ * but loses the link, so they can be edited independently.
+ */
+export function unlink(
+  state: TimelineState,
+  params: { itemId: string },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (!item.linkId) return fail('invalid', 'That item is not linked.');
+
+  const linkId = item.linkId;
+  const affected: string[] = [];
+  for (const candidate of Object.values(state.items)) {
+    if (candidate.linkId === linkId) affected.push(candidate.id);
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of affected) {
+      const target = draft.items[id] as TimelineItem;
+      delete target.linkId;
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: affected,
+    notes: ['Link removed.'],
+  };
+}
+
+/**
  * Paste copied items (SPEC 09 §12): the earliest item lands at `atUs`, relative
  * spacing and track offsets are preserved, and Normal placement rules apply.
  */
