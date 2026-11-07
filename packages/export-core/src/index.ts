@@ -95,6 +95,15 @@ export {
 } from './encoder.js';
 export type { EncoderCapabilities, EncoderInputs, HardwareEncoderId, VideoEncoderChoice } from './encoder.js';
 
+// Quick presets (§3.5)
+export {
+  BUILT_IN_QUICK_PRESETS,
+  validateQuickPresets,
+  findQuickPreset,
+  applyQuickPreset,
+} from './quick-presets.js';
+export type { QuickPreset, QuickPresetSettings, QuickPresetFile, PresetValidationIssue } from './quick-presets.js';
+
 // Subtitles
 export {
   generateSrt,

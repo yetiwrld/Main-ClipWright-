@@ -11,7 +11,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { ProbeResult } from '@clipwright/export-core';
-import { detectCapabilities, type EncoderCapabilities } from '@clipwright/export-core';
+import {
+  detectCapabilities,
+  type EncoderCapabilities,
+  type HardwareEncoderId,
+} from '@clipwright/export-core';
 import { getFFmpegPath, getFFprobePath } from '@clipwright/media-core';
 
 /** Resolve the bundled binary, falling back to whichever path exists first. */
@@ -420,4 +424,61 @@ export function audioDecodeArgs(sourcePath: string, inUs: number, durationUs: nu
     '-f', 'f32le',
     '-',
   ];
+}
+
+/**
+ * SPEC 14 §3.4 — detect and validate hardware encoders.
+ *
+ * Order matters: NVENC is tried first because it is the most common working
+ * path on machines that have one, then Quick Sync, then AMF, then VideoToolbox.
+ * Each candidate is *validated by encoding*, since listing an encoder proves
+ * nothing about whether the driver works.
+ *
+ * Results are cached for the app run: a validation pass costs a fraction of a
+ * second but there is no reason to repeat it for every export.
+ */
+let hardwareCache: { encoder: HardwareEncoderId | null; attempts: Array<{ codec: string; ok: boolean; reason?: string }> } | null = null;
+
+const HARDWARE_CANDIDATES: Array<{ id: HardwareEncoderId; codec: string }> = [
+  { id: 'nvenc', codec: 'h264_nvenc' },
+  { id: 'qsv', codec: 'h264_qsv' },
+  { id: 'amf', codec: 'h264_amf' },
+  { id: 'videotoolbox', codec: 'h264_videotoolbox' },
+];
+
+export interface HardwareValidationResult {
+  /** First encoder that produced a frame, or `null` for CPU-only. */
+  encoder: HardwareEncoderId | null;
+  /** Every candidate that was tried, with the reason it failed. */
+  attempts: Array<{ codec: string; ok: boolean; reason?: string }>;
+}
+
+/** Validate the available hardware encoders once per app run (§3.4). */
+export async function validateHardwareEncoders(
+  options: { force?: boolean; signal?: AbortSignal } = {},
+): Promise<HardwareValidationResult> {
+  if (hardwareCache && !options.force) return hardwareCache;
+  const present = await listEncoders();
+  const attempts: HardwareValidationResult['attempts'] = [];
+  let chosen: HardwareEncoderId | null = null;
+
+  for (const candidate of HARDWARE_CANDIDATES) {
+    if (options.signal?.aborted) break;
+    if (!present.has(candidate.codec)) {
+      // Not compiled into this build: that is a fact, not a failure to report.
+      attempts.push({ codec: candidate.codec, ok: false, reason: 'not in this ffmpeg build' });
+      continue;
+    }
+    const result = await probeHardwareEncoder(candidate.codec, options.signal);
+    attempts.push({ codec: candidate.codec, ok: result.ok, reason: result.reason });
+    if (result.ok && !chosen) chosen = candidate.id;
+  }
+
+  hardwareCache = { encoder: chosen, attempts };
+  return hardwareCache;
+}
+
+/** Clear the cached hardware result (Settings → Performance "Test again"). */
+export function resetHardwareCache(): void {
+  hardwareCache = null;
 }

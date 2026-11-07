@@ -20,6 +20,8 @@ import {
   moovIsAtStart,
   probeHardwareEncoder,
   probeOutputFile,
+  resetHardwareCache,
+  validateHardwareEncoders,
 } from '../export/ffmpeg-runner.js';
 
 const TMP = join(process.cwd(), '.tmp-runner-it');
@@ -184,6 +186,22 @@ describe.skipIf(!HAS_FFMPEG)('capabilities and hardware probe', () => {
     const result = await probeHardwareEncoder('libx264');
     expect(result.ok).toBe(true);
   });
+
+  it('validates hardware encoders by encoding, and caches the answer', async () => {
+    resetHardwareCache();
+    const first = await validateHardwareEncoders();
+    // Whatever this machine has, every candidate is accounted for.
+    expect(first.attempts.length).toBeGreaterThan(0);
+    expect(first.attempts.every((attempt) => typeof attempt.ok === 'boolean')).toBe(true);
+    // A CPU-only machine reports null rather than guessing an encoder.
+    expect(first.encoder === null || typeof first.encoder === 'string').toBe(true);
+
+    const second = await validateHardwareEncoders();
+    expect(second).toBe(first); // cached
+
+    const forced = await validateHardwareEncoders({ force: true });
+    expect(forced).not.toBe(first); // re-tested on demand
+  }, 60_000);
 
   it('rejects an encoder that does not exist', async () => {
     const result = await probeHardwareEncoder('h264_not_a_real_encoder');

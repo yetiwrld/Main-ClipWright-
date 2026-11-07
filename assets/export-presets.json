@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "description": "SPEC 14 §3.5 built-in quick presets. Conveniences only: they never claim platform-specific rules.",
+  "presets": [
+    {
+      "id": "short-form-vertical",
+      "label": "Short-form vertical",
+      "description": "1080×1920 at 30 fps, H.264 Standard quality.",
+      "settings": {
+        "preset": "1080p",
+        "aspect": "9:16",
+        "fps": 30,
+        "format": "mp4",
+        "quality": "standard",
+        "audioBitrate": 192,
+        "includeAudio": true,
+        "burnCaptions": true,
+        "saveSubtitles": false,
+        "normaliseLoudness": false,
+        "targetLufs": -16
+      }
+    },
+    {
+      "id": "landscape-1080p",
+      "label": "Landscape 1080p",
+      "description": "1920×1080 at 30 fps, H.264 Standard quality.",
+      "settings": {
+        "preset": "1080p",
+        "aspect": "16:9",
+        "fps": 30,
+        "format": "mp4",
+        "quality": "standard",
+        "audioBitrate": 192,
+        "includeAudio": true,
+        "burnCaptions": true,
+        "saveSubtitles": false,
+        "normaliseLoudness": false,
+        "targetLufs": -16
+      }
+    },
+    {
+      "id": "high-quality-4k",
+      "label": "High quality 4K",
+      "description": "4K UHD (3840×2160) at 30 fps, H.264 Maximum quality. Slow on most computers.",
+      "settings": {
+        "preset": "4k-uhd",
+        "aspect": "16:9",
+        "fps": 30,
+        "format": "mp4",
+        "quality": "maximum",
+        "audioBitrate": 256,
+        "includeAudio": true,
+        "burnCaptions": true,
+        "saveSubtitles": false,
+        "normaliseLoudness": false,
+        "targetLufs": -16
+      }
+    },
+    {
+      "id": "small-file",
+      "label": "Small file for sharing",
+      "description": "720p at 30 fps, Draft quality. Quick to make, quick to send.",
+      "settings": {
+        "preset": "720p",
+        "aspect": "16:9",
+        "fps": 30,
+        "format": "mp4",
+        "quality": "draft",
+        "audioBitrate": 128,
+        "includeAudio": true,
+        "burnCaptions": true,
+        "saveSubtitles": false,
+        "normaliseLoudness": false,
+        "targetLufs": -16
+      }
+    },
+    {
+      "id": "square-1080",
+      "label": "Square 1080",
+      "description": "1080×1080 at 30 fps, H.264 Standard quality.",
+      "settings": {
+        "preset": "1080p",
+        "aspect": "1:1",
+        "fps": 30,
+        "format": "mp4",
+        "quality": "standard",
+        "audioBitrate": 192,
+        "includeAudio": true,
+        "burnCaptions": true,
+        "saveSubtitles": false,
+        "normaliseLoudness": false,
+        "targetLufs": -16
+      }
+    }
+  ]
+}

@@ -41,6 +41,7 @@ import {
   firstErrorLine,
   probeOutputFile,
   run,
+  validateHardwareEncoders,
 } from './ffmpeg-runner.js';
 
 /** A frame source produces exactly the plan's frames as `yuv420p` bytes. */
@@ -85,6 +86,8 @@ export interface ExportJobInput {
   frameSource: FrameSource;
   /** Optional override for the encoder (e.g. cached hardware validation). */
   encoder?: VideoEncoderChoice;
+  /** Force the software encoder even when hardware validated (§3.4). */
+  forceCpu?: boolean;
   /** Title metadata; defaults to the output file name. */
   title?: string;
   /** Run the slow full decode during validation (default true). */
@@ -141,7 +144,15 @@ export async function runExportJob(
     input.tempDir ?? dirname(input.outputPath),
     `${basenameWithoutExtension(input.outputPath)}.partial.${extension}`,
   );
-  const encoder = input.encoder ?? chooseVideoEncoder(plan);
+  // §3.4 "Auto": hardware only when it was validated by a real test encode.
+  let encoder = input.encoder;
+  if (!encoder) {
+    let validatedHardware: import('@clipwright/export-core').HardwareEncoderId | null = null;
+    if (!input.forceCpu && plan.format === 'mp4') {
+      validatedHardware = (await validateHardwareEncoders()).encoder;
+    }
+    encoder = chooseVideoEncoder(plan, { validatedHardware, forceCpu: input.forceCpu });
+  }
   const write = (line: string) => {
     log.push(`${new Date().toISOString()} ${line}`);
   };
