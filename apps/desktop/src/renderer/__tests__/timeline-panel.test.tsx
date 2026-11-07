@@ -564,6 +564,21 @@ describe('timeline panel', () => {
     expect(typeof timeline.deleteMarker).toBe('function');
   });
 
+
+  it('ruler context menu shows marker and work area actions', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    // Right-click on the ruler canvas area
+    const rulerArea = container.querySelector('canvas') as HTMLElement;
+    expect(rulerArea).toBeTruthy();
+    fireEvent.contextMenu(rulerArea, { clientX: 100, clientY: 20 });
+    expect(screen.getByText('Add marker')).toBeTruthy();
+    expect(screen.getByText('Set work-area in')).toBeTruthy();
+    expect(screen.getByText('Set work-area out')).toBeTruthy();
+    expect(screen.getByText('Fit project')).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

@@ -93,7 +93,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
-    type: 'clip' | 'track' | 'empty';
+    type: 'clip' | 'track' | 'empty' | 'ruler';
     targetId?: string;
   } | null>(null);
   const [rollPreview, setRollPreview] = useState<{
@@ -708,7 +708,14 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         >
           {state.tracks.length} tracks
         </div>
-        <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }} onPointerDown={beginScrub}>
+        <div
+          style={{ position: 'relative', flex: 1, overflow: 'hidden' }}
+          onPointerDown={beginScrub}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setMenu({ x: event.clientX, y: event.clientY, type: 'ruler' });
+          }}
+        >
           <canvas ref={rulerRef} style={{ width: '100%', height: 28, display: 'block' }} />
         </div>
       </div>
@@ -1089,7 +1096,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
             ? clipMenuItems(menu.targetId, timeline, state, fps, selection)
             : menu.type === 'track' && menu.targetId
               ? trackMenuItems(menu.targetId, timeline, state)
-              : emptyMenuItems(timeline)}
+              : menu.type === 'ruler'
+                ? rulerMenuItems(timeline, state, fps)
+                : emptyMenuItems(timeline)}
         />
       )}
 
@@ -1167,6 +1176,23 @@ function trackMenuItems(
     { id: 'add-track-below', label: 'Add track below', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },
     { id: 'sep2', label: '', onSelect: () => {} },
     { id: 'delete-track', label: 'Delete track', icon: <Trash2 size={14} />, danger: true, disabled: track.role === 'main', disabledReason: 'The main track cannot be deleted', onSelect: () => timeline.deleteTrack(trackId) },
+  ];
+}
+
+/** Ruler context menu items (SPEC 09 §21). */
+function rulerMenuItems(
+  timeline: TimelineApi,
+  state: TimelineState,
+  fps: number,
+): MenuItem[] {
+  const duration = projectDurationUs(state);
+  return [
+    { id: 'add-marker', label: 'Add marker', icon: <Flag size={14} />, onSelect: () => timeline.addMarkerAt(playheadStore.get()) },
+    { id: 'set-in', label: 'Set work-area in', icon: <ChevronDown size={14} />, onSelect: () => timeline.setWorkArea('in', playheadStore.get()) },
+    { id: 'set-out', label: 'Set work-area out', icon: <ChevronUp size={14} />, onSelect: () => timeline.setWorkArea('out', playheadStore.get()) },
+    { id: 'clear-work', label: 'Clear work area', icon: <Trash2 size={14} />, disabled: !state.workArea, disabledReason: 'No work area set', onSelect: () => timeline.clearWorkArea() },
+    { id: 'sep1', label: '', onSelect: () => {} },
+    { id: 'fit', label: 'Fit project', icon: <Maximize2 size={14} />, onSelect: () => timeline.run('Fit project', (s) => ({ ok: true, state: s, patches: [], inverse: [], affectedItemIds: [], notes: ['Fit to project.'] })) },
   ];
 }
 
