@@ -120,9 +120,12 @@ export function crossCheckLatestYml(manifest: ReleaseManifest, latest: LatestYml
 
   if (manifest.version !== latest.version) problems.push('version-mismatch');
 
-  for (const expected of manifest.files) {
-    const published = latest.files.find((file) => file.path === expected.name);
-    if (!published) {
+  // The dangerous direction is: `latest.yml` points at a file the signed
+  // manifest does not cover. electron-updater would happily download it, so
+  // every file it names must appear in the signed manifest with matching hashes.
+  for (const published of latest.files) {
+    const expected = manifest.files.find((file) => file.name === published.path);
+    if (!expected) {
       problems.push('missing-file');
       continue;
     }
@@ -130,6 +133,13 @@ export function crossCheckLatestYml(manifest: ReleaseManifest, latest: LatestYml
     // digest so a base64/hex difference is not mistaken for tampering.
     if (normaliseSha512(published.sha512) !== expected.sha512) problems.push('hash-mismatch');
     if (published.size !== undefined && published.size !== expected.size) problems.push('hash-mismatch');
+  }
+
+  // And the installer the app itself offers must be one of them: a manifest that
+  // lists only the portable exe would leave the setup path unverifiable.
+  const installer = manifest.files.find((file) => /-Setup-.*-x64\.exe$/i.test(file.name));
+  if (installer && !latest.files.some((file) => file.path === installer.name)) {
+    problems.push('missing-file');
   }
 
   if (problems.length === 0) {

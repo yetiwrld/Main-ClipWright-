@@ -114,6 +114,36 @@ describe('crossCheckLatestYml', () => {
     expect(result.problems).toContain('missing-file');
   });
 
+  it('fails when latest.yml points at a file the signed manifest does not cover', () => {
+    // electron-updater would download this happily, so it is the dangerous
+    // direction: an unsigned file named by the feed.
+    const manifest = makeManifest();
+    const latest = latestFor(manifest);
+    latest.files.push({ path: 'Evil-Setup-1.3.0-x64.exe', sha512: sha512('evil') });
+    expect(crossCheckLatestYml(manifest, latest).problems).toContain('missing-file');
+  });
+
+  it('allows the signed manifest to cover more than latest.yml lists', () => {
+    // electron-builder's latest.yml names the setup exe; the manifest also covers
+    // the portable exe. That is a normal release, not a mismatch.
+    const manifest = makeManifest();
+    manifest.files.push({
+      name: 'Clipwright-Studio-1.3.0-x64-portable.exe',
+      size: 80_000_000,
+      sha256: sha256('portable'),
+      sha512: sha512('portable'),
+    });
+    expect(crossCheckLatestYml(manifest, latestFor(manifest)).ok).toBe(true);
+  });
+
+  it('fails when the setup installer is missing from latest.yml', () => {
+    // The app installs the setup exe; if the feed does not name it, the path the
+    // app actually uses would be unverified.
+    const manifest = makeManifest();
+    const latest = latestFor(manifest, { files: [] });
+    expect(crossCheckLatestYml(manifest, latest).problems).toContain('missing-file');
+  });
+
   it('fails when the size disagrees', () => {
     const manifest = makeManifest();
     const latest = latestFor(manifest);
