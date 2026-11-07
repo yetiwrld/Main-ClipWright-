@@ -84,6 +84,8 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     removeEffect: vi.fn(() => true),
     toggleEffectEnabled: vi.fn(() => true),
     updateEffectParams: vi.fn(() => true),
+    updateMarker: vi.fn(() => true),
+    deleteMarker: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -552,6 +554,14 @@ describe('timeline panel', () => {
     expect(typeof timeline.removeEffect).toBe('function');
     expect(typeof timeline.toggleEffectEnabled).toBe('function');
     expect(typeof timeline.updateEffectParams).toBe('function');
+  });
+
+
+  it('marker methods exist on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.updateMarker).toBe('function');
+    expect(typeof timeline.deleteMarker).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

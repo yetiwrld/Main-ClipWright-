@@ -73,6 +73,8 @@ export {
   removeEffect,
   toggleEffectEnabled,
   updateEffectParams,
+  updateMarker,
+  deleteMarker,
   type CommandOk,
   type CommandError,
   type CommandResult,

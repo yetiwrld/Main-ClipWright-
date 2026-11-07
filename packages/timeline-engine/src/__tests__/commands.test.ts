@@ -37,6 +37,8 @@ import {
   removeEffect,
   toggleEffectEnabled,
   updateEffectParams,
+  updateMarker,
+  deleteMarker,
   splitItems,
   trimItem,
   trimItems,
@@ -1333,6 +1335,55 @@ describe('timeline commands', () => {
           if (removed.ok) {
             expect(checkInvariantsMB(removed.state)).toEqual([]);
           }
+        }
+      }
+    });
+  });
+
+
+  describe('markers (SPEC 09 §18)', () => {
+    function markerFixture(): { state: TimelineState; markerId: string } {
+      const base = createDefaultTimeline({ id: 'mk-1', name: 'Markers' });
+      const marker = { id: 'mk-1', timeUs: 2_000_000, name: 'Marker 1', color: '#FFB000' };
+      return { state: { ...base, markers: [marker] }, markerId: marker.id };
+    }
+
+    it('updates a marker name and color', () => {
+      const { state, markerId } = markerFixture();
+      const result = updateMarker(state, { markerId, patch: { name: 'Scene 1', color: '#FF0000' } });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const marker = result.state.markers.find((m) => m.id === markerId);
+        expect(marker?.name).toBe('Scene 1');
+        expect(marker?.color).toBe('#FF0000');
+      }
+    });
+
+    it('deletes a marker', () => {
+      const { state, markerId } = markerFixture();
+      const result = deleteMarker(state, { markerId });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.state.markers).toHaveLength(0);
+      }
+    });
+
+    it('refuses to update a nonexistent marker', () => {
+      const { state } = markerFixture();
+      const result = updateMarker(state, { markerId: 'nope', patch: { name: 'X' } });
+      expect(result.ok).toBe(false);
+    });
+
+    it('keeps invariants intact after marker operations', () => {
+      const { state, markerId } = markerFixture();
+      const updated = updateMarker(state, { markerId, patch: { name: 'New' } });
+      expect(updated.ok).toBe(true);
+      if (updated.ok) {
+        expect(checkInvariantsMB(updated.state)).toEqual([]);
+        const deleted = deleteMarker(updated.state, { markerId });
+        expect(deleted.ok).toBe(true);
+        if (deleted.ok) {
+          expect(checkInvariantsMB(deleted.state)).toEqual([]);
         }
       }
     });

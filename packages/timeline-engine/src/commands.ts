@@ -9,6 +9,7 @@ import { current, enablePatches, produceWithPatches, type Patch } from 'immer';
 enablePatches();
 import type { CompositionPayload, TimelineItem } from '@clipwright/project-schema';
 import type { Keyframe } from '@clipwright/project-schema/schemas';
+import type { Marker } from '@clipwright/project-schema/schemas';
 import { frameDurationUs, quantizeUs, type Fps } from './time';
 import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
 
@@ -2200,5 +2201,60 @@ export function updateEffectParams(
     inverse,
     affectedItemIds: [params.itemId],
     notes: ['Effect params updated.'],
+  };
+}
+/**
+ * Update a marker's name, note, or color (SPEC 09 §18).
+ * Double-click a marker to edit in the app; this is the engine command.
+ */
+export function updateMarker(
+  state: TimelineState,
+  params: {
+    markerId: string;
+    patch: Partial<Pick<Marker, 'name' | 'note' | 'color'>>;
+  },
+): CommandResult {
+  const marker = state.markers.find((m) => m.id === params.markerId);
+  if (!marker) return fail('not_found', 'That marker no longer exists.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.markers.find((m) => m.id === params.markerId);
+    if (!target) return;
+    if (params.patch.name !== undefined) target.name = params.patch.name;
+    if (params.patch.note !== undefined) target.note = params.patch.note;
+    if (params.patch.color !== undefined) target.color = params.patch.color;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: ['Marker updated.'],
+  };
+}
+
+/**
+ * Delete a marker (SPEC 09 §18). Delete key removes the selected marker.
+ */
+export function deleteMarker(
+  state: TimelineState,
+  params: { markerId: string },
+): CommandResult {
+  const marker = state.markers.find((m) => m.id === params.markerId);
+  if (!marker) return fail('not_found', 'That marker no longer exists.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.markers = draft.markers.filter((m) => m.id !== params.markerId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: ['Marker deleted.'],
   };
 }

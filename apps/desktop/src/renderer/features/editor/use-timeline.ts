@@ -38,6 +38,8 @@ import {
   removeEffect,
   toggleEffectEnabled,
   updateEffectParams,
+  updateMarker,
+  deleteMarker,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -117,6 +119,8 @@ export interface TimelineApi {
   removeEffect: (itemId: string, effectId: string) => boolean;
   toggleEffectEnabled: (itemId: string, effectId: string) => boolean;
   updateEffectParams: (itemId: string, effectId: string, params: Record<string, number | boolean | string>) => boolean;
+  updateMarker: (markerId: string, patch: { name?: string; note?: string; color?: string }) => boolean;
+  deleteMarker: (markerId: string) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -444,6 +448,10 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Toggle effect', (s) => toggleEffectEnabled(s, { itemId, effectId })),
       updateEffectParams: (itemId, effectId, params) =>
         run('Update effect params', (s) => updateEffectParams(s, { itemId, effectId, params })),
+      updateMarker: (markerId, patch) =>
+        run('Update marker', (s) => updateMarker(s, { markerId, patch })),
+      deleteMarker: (markerId) =>
+        run('Delete marker', (s) => deleteMarker(s, { markerId })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
