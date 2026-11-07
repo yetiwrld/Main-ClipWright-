@@ -128,6 +128,11 @@ export class MomentsService {
       };
     }
 
+    // Basic scoring is always available, so a refusal (no provider, no model,
+    // no consent) degrades to heuristics with an explanation instead of failing.
+    const fallbackNote = route.ok
+      ? null
+      : `${route.message} Moments were scored locally with Basic scoring instead.`;
     const llm = route.ok ? this.buildLlmHandle(route) : null;
     const outcome: DetectionOutcome = await detectMoments({
       input,
@@ -136,6 +141,8 @@ export class MomentsService {
       excludeRanges: request.excludeRanges,
       onProgress: (progress) => this.progressSink?.(progress),
     });
+
+    if (fallbackNote) outcome.notes.unshift(fallbackNote);
 
     if (llm) {
       // "Allow once" is used up by the run that asked for it.
@@ -209,6 +216,11 @@ export class MomentsService {
 
     const settings = this.momentSettings(project, { projectId });
     const input = this.buildInput(project, transcript, settings);
+    // Basic scoring is always available, so a refusal (no provider, no model,
+    // no consent) degrades to heuristics with an explanation instead of failing.
+    const fallbackNote = route.ok
+      ? null
+      : `${route.message} Moments were scored locally with Basic scoring instead.`;
     const llm = route.ok ? this.buildLlmHandle(route) : null;
 
     const outcome = await detectMoments({

@@ -212,7 +212,9 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
           setAnalyzing(false);
           return;
         }
-        if (!result.route.ok) {
+        if (!result.route.ok && result.route.reason !== 'needs_consent' && result.moments.length === 0) {
+          // The service already explained why it fell back; only a run that
+          // produced nothing at all is an error worth blocking on.
           setError(result.route.message);
           setAnalyzing(false);
           return;

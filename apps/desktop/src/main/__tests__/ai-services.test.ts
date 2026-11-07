@@ -366,6 +366,18 @@ describe('MomentsService', () => {
     expect(storage.getProject(project.id)?.stage).toBe('moments');
   });
 
+  it('degrade to basic scoring with an explanation when online mode has no provider', async () => {
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'online' });
+
+    const result = await moments.analyze({ projectId: project.id });
+
+    expect(result.route.ok).toBe(false);
+    expect(result.moments.length).toBeGreaterThan(0);
+    expect(result.mode).toBe('heuristic');
+    expect(result.notes[0]).toMatch(/Basic scoring/i);
+  });
+
   it('writes a clip composition with captions and one video item', async () => {
     const project = projectWithTranscript();
     storage.updateSettings({ processingMode: 'offline' });
