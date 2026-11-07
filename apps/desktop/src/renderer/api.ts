@@ -1,6 +1,8 @@
 import type {
   AiTask,
   ClipwrightBridge,
+  ExportProgressPayload,
+  ExportStartRequestPayload,
   IngestRequestPayload,
   JobProgressPayload,
   ModelDownloadProgressPayload,
@@ -303,6 +305,47 @@ export const api = {
   },
   onMomentsProgress(callback: (p: MomentsProgressPayload) => void) {
     return getBridge()?.onMomentsProgress(callback) ?? (() => undefined);
+  },
+
+  // ---- Export (SPEC 14) ----
+  async startExport(request: ExportStartRequestPayload) {
+    return requireBridge('Exporting').startExport(request);
+  },
+  async cancelExport(jobId: string) {
+    return requireBridge('Cancelling that export').cancelExport(jobId);
+  },
+  async retryExport(jobId: string) {
+    return requireBridge('Retrying that export').retryExport(jobId);
+  },
+  async dismissExport(jobId: string) {
+    return requireBridge('Closing that export').dismissExport(jobId);
+  },
+  async getExportQueue() {
+    return requireBridge('Reading the export queue').getExportQueue();
+  },
+  async setExportConcurrency(value: number) {
+    return requireBridge('Saving that setting').setExportConcurrency(value);
+  },
+  async listExportHistory(projectId?: string) {
+    return requireBridge('Reading export history').listExportHistory(projectId);
+  },
+  async getExportJob(jobId: string) {
+    return requireBridge('Reading the export').getExportJob(jobId);
+  },
+  async getExportSpeed(projectId?: string) {
+    return requireBridge('Reading export speed').getExportSpeed(projectId);
+  },
+  async planExport(settings: Record<string, unknown>) {
+    return requireBridge('Preparing the export').planExport(settings);
+  },
+  async exportSubtitles(settings: Record<string, unknown>) {
+    return requireBridge('Preparing subtitles').exportSubtitles(settings);
+  },
+  async openExportFolder(filePath: string) {
+    return requireBridge('Opening that folder').openExportFolder(filePath);
+  },
+  onExportProgress(callback: (p: ExportProgressPayload) => void) {
+    return getBridge()?.onExportProgress(callback) ?? (() => undefined);
   },
 
   // ---- App ----

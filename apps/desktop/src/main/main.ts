@@ -18,6 +18,7 @@ import { ConsentService } from './ai/consent-service.js';
 import { ModelService } from './ai/model-service.js';
 import { MomentsService } from './ai/moments-service.js';
 import { ConnectivityService, type ProcessingMode } from '@clipwright/ai-core';
+import { ExportService, type StartExportRequest } from './export/export-service.js';
 
 const isDev = !app.isPackaged;
 
@@ -117,6 +118,14 @@ function createWindow(): BrowserWindow {
 function requireStorage(): StorageService {
   if (!storageService) throw new Error('Storage service not ready');
   return storageService;
+}
+
+/** The export queue lives for the whole app run (SPEC 14 §6). */
+let exportService: ExportService | null = null;
+
+function requireExportService(): ExportService {
+  if (!exportService) throw new Error('Export service not ready');
+  return exportService;
 }
 
 /** Bytes handed to each provider during this run, for the data-sent log. */
@@ -671,40 +680,54 @@ function registerIPC(): void {
   });
 
   // ---- Export (SPEC 14) ----
-  ipcMain.handle('export:start', async (_event, jobId: string, settings: unknown) => {
+  ipcMain.handle('export:start', async (_event, request: StartExportRequest) => {
+    const service = requireExportService();
+    const outcome = await service.start(request);
+    if (!outcome.ok) {
+      // Plain-language refusal (§8) rather than a half-started job.
+      return { ok: false, error: outcome.error, action: outcome.action };
+    }
+    return { ok: true, job: outcome.job, outputPath: outcome.outputPath };
+  });
+
+  ipcMain.handle('export:cancel', async (_event, jobId: string) => requireExportService().cancel(jobId));
+
+  ipcMain.handle('export:retry', async (_event, jobId: string) => requireExportService().retry(jobId));
+
+  ipcMain.handle('export:dismiss', async (_event, jobId: string) => requireExportService().dismiss(jobId));
+
+  ipcMain.handle('export:queue', async () => requireExportService().snapshot());
+
+  ipcMain.handle('export:setConcurrency', async (_event, value: number) => {
+    requireExportService().setMaxConcurrent(value);
+    return requireExportService().getMaxConcurrent();
+  });
+
+  ipcMain.handle('export:history', async (_event, projectId?: string) =>
+    requireExportService().listHistory(projectId),
+  );
+
+  ipcMain.handle('export:job', async (_event, jobId: string) => requireExportService().getJob(jobId) ?? null);
+
+  ipcMain.handle('export:speed', async (_event, projectId?: string) =>
+    requireExportService().averageSpeed(projectId),
+  );
+
+  ipcMain.handle('export:plan', async (_event, settings: unknown) => {
     const { buildExportPlan } = await import('@clipwright/export-core');
-    const storage = requireStorage();
-    // Build the export plan from settings.
-    const plan = buildExportPlan(settings as never);
-    // TODO: Start the actual render pipeline (hidden window + ffmpeg).
-    // For now, return the plan so the renderer can display it.
-    return { jobId, plan };
-  });
-
-  ipcMain.handle('export:cancel', async (_event, jobId: string) => {
-    // TODO: Kill the encoder, decoders, mixer and hidden window.
-    return true;
-  });
-
-  ipcMain.handle('export:history', async () => {
-    // TODO: Read from workspace.db export_history table.
-    return [];
-  });
-
-  ipcMain.handle('export:job', async (_event, jobId: string) => {
-    // TODO: Read job status from the job queue.
-    return null;
+    return buildExportPlan(settings as never);
   });
 
   ipcMain.handle('export:subtitles', async (_event, settings: unknown) => {
-    const { generateSubtitles, extractCuesFromItems } = await import('@clipwright/export-core');
     const { buildExportPlan } = await import('@clipwright/export-core');
-    const plan = buildExportPlan(settings as never);
-    const cues = extractCuesFromItems(plan.items as never);
-    return {
-      srt: plan.subtitleFormats.includes('srt') ? generateSubtitles(cues, 'srt') : null,
-      vtt: plan.subtitleFormats.includes('vtt') ? generateSubtitles(cues, 'vtt') : null,
-    };
+    const { buildSubtitleContents } = await import('./export/export-service.js');
+    return buildSubtitleContents(buildExportPlan(settings as never));
+  });
+
+  ipcMain.handle('export:openFolder', async (_event, filePath: string) => {
+    const { dirname } = await import('node:path');
+    shell.showItemInFolder(filePath || dirname(filePath));
+    return true;
   });
 }
 
@@ -732,6 +755,26 @@ app.whenReady().then(() => {
     moments = new MomentsService(storage, providers, models, consents, log);
     connectivity = new ConnectivityService();
     connectivity.setOfflineMode(storage.getSettings().processingMode === 'offline');
+
+    // SPEC 14 §6: the export queue survives window reloads for the whole run and
+    // streams progress to every renderer window.
+    exportService = new ExportService({
+      storage: {
+        getWorkspaceDir: () => storage.getWorkspaceDir(),
+        getMedia: (mediaId) => storage.getMedia(mediaId),
+        saveExportHistory: (record) => storage.saveExportHistory(record),
+        listExportHistory: (opts) => storage.listExportHistory(opts),
+        averageExportSpeed: (projectId) => storage.averageExportSpeed(projectId),
+      },
+      onProgress: (progress) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send('export:progress', progress);
+        }
+      },
+    });
+    // Anything left mid-flight from a previous session is reported honestly
+    // rather than silently resumed (§6 "restarted" messaging).
+    exportService.markInterrupted();
   }
 
   // Serves `clipwright-media://media/<mediaId>` from the media registry only.

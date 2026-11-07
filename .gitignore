@@ -48,3 +48,4 @@ Thumbs.db
 .tmp-runner-it/
 .tmp-export-runner/
 .tmp-export-queue/
+.tmp-export-service/

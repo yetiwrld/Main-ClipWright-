@@ -589,9 +589,114 @@ export interface ClipwrightBridge {
   ): Promise<CreateClipsResultPayload>;
   onMomentsProgress(callback: (p: MomentsProgressPayload) => void): () => void;
 
+  // Export (SPEC 14)
+  startExport(request: ExportStartRequestPayload): Promise<ExportStartResultPayload>;
+  cancelExport(jobId: string): Promise<boolean>;
+  retryExport(jobId: string): Promise<ExportJobPayload | null>;
+  dismissExport(jobId: string): Promise<boolean>;
+  getExportQueue(): Promise<ExportQueuePayload>;
+  setExportConcurrency(value: number): Promise<number>;
+  listExportHistory(projectId?: string): Promise<ExportHistoryPayload[]>;
+  getExportJob(jobId: string): Promise<ExportJobPayload | null>;
+  getExportSpeed(projectId?: string): Promise<number | null>;
+  planExport(settings: Record<string, unknown>): Promise<Record<string, unknown>>;
+  exportSubtitles(settings: Record<string, unknown>): Promise<{ srt: string | null; vtt: string | null }>;
+  openExportFolder(filePath: string): Promise<boolean>;
+  onExportProgress(callback: (p: ExportProgressPayload) => void): () => void;
+
   // App
   getAppInfo(): Promise<AppInfo>;
   openPath(targetPath: string): Promise<boolean | string>;
+}
+
+/* ------------------------------------------------------------------ export */
+
+export type ExportJobStatusPayload =
+  | 'queued'
+  | 'rendering'
+  | 'measuring-loudness'
+  | 'encoding'
+  | 'finalising'
+  | 'verifying'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface ExportJobPayload {
+  id: string;
+  compositionId: string;
+  projectId: string;
+  name: string;
+  status: ExportJobStatusPayload;
+  percent: number;
+  framesDone: number;
+  totalFrames: number;
+  speedFactor: number;
+  etaSec: number | null;
+  message: string;
+  validationStatus?: 'verified' | 'warnings' | 'failed';
+  verdict?: string;
+  error?: string;
+  outputPath: string;
+  settingsSnapshot: Record<string, unknown>;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface ExportQueuePayload {
+  jobs: ExportJobPayload[];
+  running: number;
+  maxConcurrent: number;
+}
+
+export interface ExportProgressPayload {
+  jobId: string;
+  name?: string;
+  status: ExportJobStatusPayload;
+  percent: number;
+  framesDone: number;
+  totalFrames: number;
+  speedFactor: number;
+  etaSec: number | null;
+  message: string;
+}
+
+export interface ExportStartRequestPayload {
+  jobId: string;
+  name: string;
+  /** Export settings, shaped like `ExportSettings` in export-core. */
+  settings: Record<string, unknown>;
+  snapshotLabel?: string;
+  outputDir?: string;
+  fileName?: string;
+  clashPolicy?: 'auto-number' | 'replace' | 'ask';
+  fullDecode?: boolean;
+}
+
+export type ExportStartResultPayload =
+  | { ok: true; job: ExportJobPayload; outputPath: string }
+  | { ok: false; error: string; action: 'relink' | 'choose-folder' | 'retry' | 'change-settings' | 'none' };
+
+export interface ExportHistoryPayload {
+  id: string;
+  projectId: string;
+  compId: string;
+  outputPath: string;
+  name: string;
+  status: 'verified' | 'warnings' | 'failed' | 'cancelled';
+  verdict: string;
+  validationReport?: unknown;
+  presetLabel: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationSeconds: number;
+  sizeBytes: number;
+  elapsedMs: number;
+  speedFactor: number;
+  createdAt: string;
+  fileMissing: boolean;
 }
 
 declare global {

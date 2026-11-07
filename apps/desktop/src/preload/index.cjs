@@ -169,9 +169,21 @@ contextBridge.exposeInMainWorld('clipwright', {
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
 
   // ---- Export (SPEC 14) ----
-  startExport: (jobId, settings) => ipcRenderer.invoke('export:start', jobId, settings),
+  startExport: (request) => ipcRenderer.invoke('export:start', request),
   cancelExport: (jobId) => ipcRenderer.invoke('export:cancel', jobId),
-  listExportHistory: () => ipcRenderer.invoke('export:history'),
+  retryExport: (jobId) => ipcRenderer.invoke('export:retry', jobId),
+  dismissExport: (jobId) => ipcRenderer.invoke('export:dismiss', jobId),
+  getExportQueue: () => ipcRenderer.invoke('export:queue'),
+  setExportConcurrency: (value) => ipcRenderer.invoke('export:setConcurrency', value),
+  listExportHistory: (projectId) => ipcRenderer.invoke('export:history', projectId),
   getExportJob: (jobId) => ipcRenderer.invoke('export:job', jobId),
+  getExportSpeed: (projectId) => ipcRenderer.invoke('export:speed', projectId),
+  planExport: (settings) => ipcRenderer.invoke('export:plan', settings),
   exportSubtitles: (settings) => ipcRenderer.invoke('export:subtitles', settings),
+  openExportFolder: (filePath) => ipcRenderer.invoke('export:openFolder', filePath),
+  onExportProgress: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('export:progress', handler);
+    return () => ipcRenderer.removeListener('export:progress', handler);
+  },
 });
