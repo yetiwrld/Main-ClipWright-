@@ -76,6 +76,7 @@ export {
   updateMarker,
   deleteMarker,
   setViewState,
+  renameTrack,
   type CommandOk,
   type CommandError,
   type CommandResult,

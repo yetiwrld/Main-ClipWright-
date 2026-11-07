@@ -88,6 +88,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     updateMarker: vi.fn(() => true),
     deleteMarker: vi.fn(() => true),
     setViewState: vi.fn(() => true),
+    renameTrack: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),

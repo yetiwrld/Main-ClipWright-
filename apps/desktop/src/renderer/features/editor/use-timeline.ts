@@ -41,6 +41,7 @@ import {
   updateMarker,
   deleteMarker,
   setViewState,
+  renameTrack,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -123,6 +124,7 @@ export interface TimelineApi {
   updateMarker: (markerId: string, patch: { name?: string; note?: string; color?: string }) => boolean;
   deleteMarker: (markerId: string) => boolean;
   setViewState: (patch: { pxPerSecond?: number; scrollX?: number; scrollY?: number; headerWidthPx?: number }) => boolean;
+  renameTrack: (trackId: string, name: string) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -456,6 +458,8 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Delete marker', (s) => deleteMarker(s, { markerId })),
       setViewState: (patch) =>
         run('Set view state', (s) => setViewState(s, patch)),
+      renameTrack: (trackId, name) =>
+        run('Rename track', (s) => renameTrack(s, { trackId, name })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),

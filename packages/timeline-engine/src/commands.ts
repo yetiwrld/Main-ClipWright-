@@ -2291,3 +2291,30 @@ export function setViewState(
     notes: ['View state updated.'],
   };
 }
+/**
+ * Rename a track (SPEC 09 §9.1, §22 F2). The track name is displayed in the
+ * track header and used in export metadata.
+ */
+export function renameTrack(
+  state: TimelineState,
+  params: { trackId: string; name: string },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  const trimmed = params.name.trim();
+  if (trimmed.length === 0) return fail('invalid', 'Track name cannot be empty.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (target) target.name = trimmed;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: ['Track renamed.'],
+  };
+}

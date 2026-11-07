@@ -40,6 +40,7 @@ import {
   updateMarker,
   deleteMarker,
   setViewState,
+  renameTrack,
   splitItems,
   trimItem,
   trimItems,
@@ -1406,6 +1407,29 @@ describe('timeline commands', () => {
         expect(moved.state.viewState?.scrollX).toBe(500);
       }
     }
+  });
+
+
+  it('renames a track', () => {
+    const { state } = fixture();
+    const result = renameTrack(state, { trackId: state.tracks[0]!.id, name: 'Main clip' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const track = result.state.tracks.find((t) => t.id === state.tracks[0]!.id);
+      expect(track?.name).toBe('Main clip');
+    }
+  });
+
+  it('refuses to rename a track with empty name', () => {
+    const { state } = fixture();
+    const result = renameTrack(state, { trackId: state.tracks[0]!.id, name: '   ' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses to rename a nonexistent track', () => {
+    const { state } = fixture();
+    const result = renameTrack(state, { trackId: 'nope', name: 'X' });
+    expect(result.ok).toBe(false);
   });
 
   it('all commands keep the invariants intact', () => {
