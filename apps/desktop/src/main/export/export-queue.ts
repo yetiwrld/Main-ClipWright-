@@ -33,6 +33,8 @@ export interface QueuedExport {
   settings: ExportSettings;
   outputPath: string;
   audioPath?: string;
+  /** Non-fatal audio-mix problems carried into the finished banner. */
+  audioWarnings?: string[];
   /** Built fresh when the job starts, so a retry gets a clean frame source. */
   createFrameSource: (plan: ExportPlan) => FrameSource | Promise<FrameSource>;
   /** Immutable snapshot label shown in the banner (§6). */
@@ -115,6 +117,7 @@ export class ExportQueue {
     settings: ExportSettings;
     outputPath: string;
     audioPath?: string;
+    audioWarnings?: string[];
     createFrameSource: (plan: ExportPlan) => FrameSource | Promise<FrameSource>;
     snapshotLabel?: string;
     fullDecode?: boolean;
@@ -137,6 +140,7 @@ export class ExportQueue {
       settings: snapshot,
       outputPath: options.outputPath,
       audioPath: options.audioPath,
+      audioWarnings: options.audioWarnings,
       createFrameSource: options.createFrameSource,
       snapshotLabel: options.snapshotLabel ?? `the version from ${new Date().toLocaleTimeString()}`,
       fullDecode: options.fullDecode ?? true,
@@ -260,6 +264,7 @@ export class ExportQueue {
           settings: entry.settings,
           outputPath: entry.outputPath,
           audioPath: entry.audioPath,
+          audioWarnings: entry.audioWarnings,
           frameSource,
           title: job.name,
           fullDecode: entry.fullDecode,

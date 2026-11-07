@@ -95,6 +95,27 @@ export {
 } from './encoder.js';
 export type { EncoderCapabilities, EncoderInputs, HardwareEncoderId, VideoEncoderChoice } from './encoder.js';
 
+// Audio mix (§5 / SPEC 12 §6.1)
+export {
+  MIX_SAMPLE_RATE,
+  MIX_CHANNELS,
+  LIMITER_CEILING_DB,
+  usToSamples,
+  samplesToUs,
+  createClip,
+  clipEndSamples,
+  applyItemProcessing,
+  mixClipInto,
+  duckingCurve,
+  applyGainCurve,
+  peakLevel,
+  amplitudeToDb,
+  isSilent,
+  limit,
+  fitLength,
+} from './audio-mix.js';
+export type { ItemMixParams, PcmClip } from './audio-mix.js';
+
 // Quick presets (§3.5)
 export {
   BUILT_IN_QUICK_PRESETS,

@@ -74,6 +74,8 @@ export interface ExportPlan {
   audioBitrate: AudioBitrate;
   /** Total number of frames to render. */
   totalFrames: number;
+  /** Start of the exported range on the timeline, in microseconds. */
+  rangeStartUs: number;
   /** Duration in microseconds. */
   durationUs: number;
   /** Duration in seconds. */
@@ -235,6 +237,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
     maxBitrate: settings.maxBitrate,
     audioBitrate: settings.audioBitrate,
     totalFrames,
+    rangeStartUs,
     durationUs: rangeDurationUs,
     durationSeconds,
     items,

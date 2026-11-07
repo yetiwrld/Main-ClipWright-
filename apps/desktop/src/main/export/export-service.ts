@@ -11,7 +11,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, stat, statfs } from 'node:fs/promises';
+import { mkdir, rm, stat, statfs } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import {
   buildExportPlan,
@@ -26,6 +26,7 @@ import type { ExportHistoryRecord } from '@clipwright/project-schema';
 import { ExportQueue, cleanupPartialFiles, type QueueSnapshot } from './export-queue.js';
 import { solidColourFrameSource, writeSubtitleSidecars, type FrameSource } from './export-runner.js';
 import { createDecodeFrameSource } from './decode-frame-source.js';
+import { buildAudioMix, planAudioItems } from './audio-mixer.js';
 
 /** Where the caller asked the file to go, and how to handle a name clash. */
 export type ClashPolicy = 'auto-number' | 'replace' | 'ask';
@@ -129,6 +130,32 @@ export class ExportService {
     }
 
     const outputPath = resolution.path;
+
+    // ---- Audio: mix it now, so a job never starts without the sound it promised
+    // (SPEC 14 §5). The WAV lands next to the temp file and is deleted on success.
+    let audioPath: string | undefined;
+    let audioWarnings: string[] = [];
+    if (plan.includeAudio) {
+      const audioItems = planAudioItems(plan, (mediaId) => this.storage.getMedia(mediaId)?.path);
+      if (audioItems.length > 0) {
+        const mixPath = join(this.storage.getWorkspaceDir(), 'Cache', 'export', `${request.jobId}.wav`);
+        audioPath = mixPath;
+        try {
+          const mix = await buildAudioMix({ plan, items: audioItems, wavPath: mixPath });
+          audioWarnings = mix.warnings;
+        } catch (err) {
+          return {
+            ok: false,
+            error:
+              err instanceof Error && err.message
+                ? err.message
+                : 'The audio for this clip could not be prepared.',
+            action: 'retry',
+          };
+        }
+      }
+    }
+
     const createFrameSource = request.createFrameSource
       ?? ((exportPlan: ExportPlan) => this.defaultFrameSource(exportPlan));
 
@@ -138,6 +165,8 @@ export class ExportService {
         name: request.name,
         settings: request.settings,
         outputPath,
+        audioPath,
+        audioWarnings,
         createFrameSource,
         snapshotLabel: request.snapshotLabel,
         fullDecode: request.fullDecode ?? true,
@@ -334,6 +363,12 @@ export class ExportService {
     } catch {
       // History is a convenience; never fail a good export over it.
     }
+
+    // The mix WAV can be as large as duration x 48000 x 8 bytes (§5.2); it has
+    // done its job once the file is published or the job is finished.
+    await rm(join(this.storage.getWorkspaceDir(), 'Cache', 'export', `${result.job.id}.wav`), {
+      force: true,
+    }).catch(() => undefined);
   }
 }
 

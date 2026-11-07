@@ -80,6 +80,8 @@ export interface ExportJobInput {
   outputPath: string;
   /** Absolute path of the audio mix WAV, when the plan includes audio. */
   audioPath?: string;
+  /** Non-fatal problems from the audio mix, surfaced in the finished banner. */
+  audioWarnings?: string[];
   /** Scratch directory for the `.partial` file. */
   tempDir?: string;
   /** Frame producer. */
@@ -109,6 +111,8 @@ export interface ExportJobResult {
   error?: string;
   /** Detailed log, kept out of the UI but available under "Details". */
   log: string[];
+  /** Non-fatal problems (e.g. a source file whose audio ran short). */
+  warnings: string[];
   plan: ExportPlan;
 }
 
@@ -184,6 +188,7 @@ export async function runExportJob(
       elapsedMs,
       speedFactor: plan.durationSeconds > 0 ? elapsedMs / 1000 === 0 ? 0 : plan.durationSeconds / (elapsedMs / 1000) : 0,
       sizeBytes: 0,
+      warnings: [...(input.audioWarnings ?? [])],
       log,
       plan,
       ...patch,

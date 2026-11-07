@@ -49,3 +49,5 @@ Thumbs.db
 .tmp-export-runner/
 .tmp-export-queue/
 .tmp-export-service/
+.tmp-decode-source/
+.tmp-audio-mixer/

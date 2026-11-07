@@ -38,7 +38,12 @@ Two consequences worth knowing:
 | **Work area** | The in/out points set on the timeline (`I`/`O`). Unavailable when no work area is set. |
 
 Audio is included when the composition has any, unless *Include audio* is turned
-off. Captions are burned in by default and can also be written as a sidecar file.
+off. Each clip's own sound is decoded from the original file, placed at its
+timeline position, faded and panned as the timeline says, then mixed down to a
+48 kHz stereo file that is muxed into the export. If a clip is set to duck the
+music underneath it, that happens in the mix; if *Normalise loudness* is on, the
+whole mix is brought to −16 LUFS and held under a −1 dB true-peak ceiling.
+Captions are burned in by default and can also be written as a sidecar file.
 
 ### 2.2 Resolution presets (the short-side rule)
 
@@ -221,6 +226,11 @@ Raw ffmpeg output is never shown in the interface. It stays in the job log.
 - **Restart-from-scratch.** A failed or interrupted export restarts from the
   beginning; resumable rendering (`specs/14` §9) is not implemented.
 - **No frame blending.** Frame-rate conversion uses nearest-time selection.
+- **Audio is mixed, but effect and filter chains are not.** Clip gain, fades,
+  panning, ducking and loudness normalisation are applied; equaliser, reverb or
+  any other effect from the audio rack is not. A clip whose audio cannot be read
+  for its full length is padded silently and reported as a warning rather than
+  failing the export.
 - **4K 60 fps on CPU is slower than real time.** It completes and validates, but
   a long clip can take a while.
 - **Video is decoded and composited, but the full compositor is not yet in the

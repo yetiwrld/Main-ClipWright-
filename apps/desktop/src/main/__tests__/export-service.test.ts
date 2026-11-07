@@ -6,7 +6,7 @@
  * on a name clash, what blocks an export before it starts, and whether the
  * history row tells the truth about the file on disk.
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -318,6 +318,91 @@ describe.skipIf(!HAS_FFMPEG)('ExportService with real media', () => {
     const [record] = storage.history;
     expect(record, 'the export should be recorded').toBeTruthy();
     expect(record.status, JSON.stringify(record.validationReport, null, 2)).toBe('verified');
+  }, 180_000);
+});
+
+describe.skipIf(!HAS_FFMPEG)('ExportService audio', () => {
+  let counter = 0;
+  const jobId = () => `aud-${counter++}-${Date.now().toString(36)}`;
+
+  it('mixes the source audio into the published file', async () => {
+    // A real clip that has a tone on it. With no frameSource override and no
+    // audioPath passed in, the service must decode the footage *and* build the
+    // mix itself (SPEC 14 §4.2, §5).
+    mkdirSync(join(TMP, 'audio-src'), { recursive: true });
+    const mediaPath = join(TMP, 'audio-src', 'tone.mp4');
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=30:duration=2',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=2',
+        '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', '-shortest', '-y', mediaPath],
+      { stdio: 'ignore' },
+    );
+
+    const storage = makeStorage({
+      getMedia: (mediaId) => (mediaId === 'media-tone' ? { path: mediaPath } : undefined),
+    });
+    const service = new ExportService({ storage });
+    const outcome = await service.start({
+      jobId: jobId(),
+      name: 'With sound',
+      settings: makeSettings({
+        includeAudio: true,
+        normaliseLoudness: false,
+        items: [
+          {
+            id: 'item-tone',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-tone',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+          },
+        ],
+      }),
+      outputDir: join(TMP, 'audio-out'),
+      fullDecode: false,
+    });
+    expect(outcome.ok).toBe(true);
+    await service.whenIdle();
+
+    const [record] = storage.history;
+    expect(record, 'the export should be recorded').toBeTruthy();
+    if (!outcome.ok) return;
+
+    // The published file must really carry sound, not just claim to.
+    const streamInfo = execFileSync(
+      ffprobePath(),
+      ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type',
+        '-of', 'csv=p=0', outcome.outputPath],
+      { encoding: 'utf8' },
+    );
+    expect(streamInfo.trim()).toContain('audio');
+
+    // ...and the loudness checks must have been *measured*, not guessed.
+    // Checks 13 (peak) and 14 (loudness) are the audio ones; both must have been
+    // measured against the real file rather than skipped.
+    const report = record.validationReport as
+      | { checks: Array<{ id: number | string; name: string; status: string; measured?: unknown }> }
+      | undefined;
+    const checks = report?.checks ?? [];
+    const audioChecks = checks.filter((check) => String(check.id).startsWith('13.'));
+    expect(audioChecks.length).toBeGreaterThan(0);
+    for (const check of audioChecks) {
+      expect(check.status, `${check.name}: ${JSON.stringify(check)}
+`).not.toBe('fail');
+      expect(check.measured, `${check.name} was not measured`).toBeTruthy();
+    }
+
+    // The big temp WAV is cleaned up once the file is published.
+    const mixFiles = readdirSync(join(TMP, 'Cache', 'export')).filter((name) => name.endsWith('.wav'));
+    expect(mixFiles, `leftover mixes: ${mixFiles.join(', ')}`).toHaveLength(0);
   }, 180_000);
 });
 
