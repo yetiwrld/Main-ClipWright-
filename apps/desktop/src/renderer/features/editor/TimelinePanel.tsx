@@ -971,7 +971,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                         overflow: 'hidden',
                       }}
                     >
-                      {item.label}
+                      {item.type === 'caption' && item.captionSegment?.text
+                        ? item.captionSegment.text
+                        : item.label}
                     </span>
                     <span
                       data-testid={`${item.id}-right-handle`}

@@ -610,6 +610,45 @@ describe('timeline panel', () => {
     expect(screen.getByText('blur')).toBeTruthy();
   });
 
+
+  it('renders caption text instead of label on caption items', () => {
+    const base = fixture();
+    const captionTrack = base.tracks.find((t) => t.kind === 'caption')!;
+    const capItem = {
+      ...createMediaItem({
+        id: 'cap-vis',
+        trackId: captionTrack.id,
+        label: 'Caption label',
+        mediaId: 'media-1',
+        type: 'video',
+        startUs: 0,
+        durationUs: 2_000_000,
+        sourceDurationUs: 10_000_000,
+      }),
+      type: 'caption' as const,
+      captionSegment: {
+        id: 'seg-vis',
+        wordRefs: [],
+        startUs: 0,
+        endUs: 2_000_000,
+        text: 'Hello world',
+        lines: ['Hello world'],
+        manualTiming: false,
+        manualText: false,
+      },
+    };
+    const stateWithCap = {
+      ...base,
+      tracks: base.tracks.map((t) =>
+        t.id === captionTrack.id ? { ...t, itemIds: [...t.itemIds, capItem.id] } : t,
+      ),
+      items: { ...base.items, [capItem.id]: capItem },
+    };
+    render(<TimelinePanel timeline={fakeTimeline(stateWithCap)} />);
+    expect(screen.getByText('Hello world')).toBeTruthy();
+    expect(screen.queryByText('Caption label clip')).toBeNull();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
