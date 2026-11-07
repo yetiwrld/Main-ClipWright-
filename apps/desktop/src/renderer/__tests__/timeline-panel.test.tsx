@@ -765,6 +765,16 @@ describe('timeline panel', () => {
     expect(typeof timeline.setViewState).toBe('function');
   });
 
+
+  it('toggles follow playhead', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    const followButton = screen.getByRole('button', { name: /^Follow playhead: on$/ });
+    expect(followButton).toBeTruthy();
+    fireEvent.click(followButton);
+    expect(screen.getByRole('button', { name: /^Follow playhead: off$/ })).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

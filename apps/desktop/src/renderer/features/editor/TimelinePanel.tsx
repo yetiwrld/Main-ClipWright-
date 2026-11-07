@@ -80,6 +80,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [showKeyframes, setShowKeyframes] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
   const [loopPlayback, setLoopPlayback] = useState(false);
+  const [followPlayhead, setFollowPlayhead] = useState(true);
   const [marquee, setMarquee] = useState<{
     x1: number;
     y1: number;
@@ -610,6 +611,17 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editMode, fps, rippleAllTracks, selection, state, timeline]);
 
+  // Follow playhead: scroll the timeline so the playhead stays visible (SPEC 09 §6.7)
+  useEffect(() => {
+    if (!followPlayhead) return;
+    const current = playheadStore.get();
+    const x = current * pxPerSecond / 1_000_000;
+    const canvasWidth = canvasRef.current?.clientWidth ?? 0;
+    if (x < scrollX || x > scrollX + canvasWidth - 48) {
+      setScrollX(Math.max(0, x - canvasWidth / 2));
+    }
+  }, [followPlayhead, pxPerSecond, scrollX]);
+
   if (!state) {
     return (
       <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
@@ -759,6 +771,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
           <IconButton label={playback.isPlaying ? 'Pause' : 'Play'} shortcut='Space' size={28} icon={playback.isPlaying ? <Pause size={14} /> : <Play size={14} />} onClick={playback.toggle} />
           <IconButton label={loopPlayback ? 'Loop playback: on' : 'Loop playback: off'} size={28} active={loopPlayback} icon={<Repeat size={14} />} onClick={() => setLoopPlayback((value) => !value)} />
+          <IconButton label={followPlayhead ? 'Follow playhead: on' : 'Follow playhead: off'} size={28} active={followPlayhead} icon={<Lock size={14} />} onClick={() => setFollowPlayhead((value) => !value)} />
           <PlayheadReadout durationUs={durationUs} fps={fps} />
           <IconButton label="Zoom out" size={28} icon={<Minus size={14} />} onClick={() => zoomBy(1 / 1.25)} />
           <div style={{ width: 96 }}>
