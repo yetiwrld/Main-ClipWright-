@@ -33,6 +33,10 @@ import {
   splitCaptionSegment,
   mergeCaptionSegments,
   trimCaptionSegment,
+  applyEffect,
+  removeEffect,
+  toggleEffectEnabled,
+  updateEffectParams,
   splitItems,
   trimItem,
   trimItems,
@@ -1222,6 +1226,114 @@ describe('timeline commands', () => {
       expect(split.ok).toBe(true);
       if (split.ok) {
         expect(checkInvariantsMB(split.state)).toEqual([]);
+      }
+    });
+  });
+
+
+  describe('effects (SPEC 09 §17)', () => {
+    function effectFixture(): { state: TimelineState; itemId: string } {
+      const base = createDefaultTimeline({ id: 'eff-1', name: 'Effects' });
+      const track = base.tracks[0]!;
+      const item = createMediaItem({
+        id: 'eff-item',
+        trackId: track.id,
+        label: 'Effected clip',
+        mediaId: 'media-1',
+        startUs: 0,
+        durationUs: 4_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      return {
+        state: {
+          ...base,
+          tracks: base.tracks.map((candidate) =>
+            candidate.id === track.id ? { ...candidate, itemIds: [item.id] } : candidate,
+          ),
+          items: { [item.id]: item },
+        },
+        itemId: item.id,
+      };
+    }
+
+    it('applies an effect to an item', () => {
+      const { state, itemId } = effectFixture();
+      const result = applyEffect(state, { itemId, effectId: 'blur', params: { amount: 5 } });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.state.items[itemId];
+        expect(item.effects).toHaveLength(1);
+        expect(item.effects![0].effectId).toBe('blur');
+        expect(item.effects![0].params).toEqual({ amount: 5 });
+      }
+    });
+
+    it('refuses to apply a duplicate effect', () => {
+      const { state, itemId } = effectFixture();
+      const r1 = applyEffect(state, { itemId, effectId: 'blur' });
+      expect(r1.ok).toBe(true);
+      if (r1.ok) {
+        const r2 = applyEffect(r1.state, { itemId, effectId: 'blur' });
+        expect(r2.ok).toBe(false);
+      }
+    });
+
+    it('removes an effect', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur' });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const removed = removeEffect(added.state, { itemId, effectId: 'blur' });
+        expect(removed.ok).toBe(true);
+        if (removed.ok) {
+          const item = removed.state.items[itemId];
+          expect(item.effects ?? []).toHaveLength(0);
+        }
+      }
+    });
+
+    it('toggles effect enabled state', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur' });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const toggled = toggleEffectEnabled(added.state, { itemId, effectId: 'blur' });
+        expect(toggled.ok).toBe(true);
+        if (toggled.ok) {
+          const item = toggled.state.items[itemId];
+          expect(item.effects![0].enabled).toBe(false);
+        }
+      }
+    });
+
+    it('updates effect params', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur', params: { amount: 5 } });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = updateEffectParams(added.state, { itemId, effectId: 'blur', params: { amount: 10 } });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const item = updated.state.items[itemId];
+          expect(item.effects![0].params.amount).toBe(10);
+        }
+      }
+    });
+
+    it('keeps invariants intact after effect operations', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur' });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const toggled = toggleEffectEnabled(added.state, { itemId, effectId: 'blur' });
+        expect(toggled.ok).toBe(true);
+        if (toggled.ok) {
+          const removed = removeEffect(toggled.state, { itemId, effectId: 'blur' });
+          expect(removed.ok).toBe(true);
+          if (removed.ok) {
+            expect(checkInvariantsMB(removed.state)).toEqual([]);
+          }
+        }
       }
     });
   });

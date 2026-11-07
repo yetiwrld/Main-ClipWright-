@@ -2058,3 +2058,147 @@ export function trimCaptionSegment(
     return { ok: true, state: nextState, patches, inverse, affectedItemIds: [params.itemId], notes: ['Caption trimmed at word boundary.'] };
   }
 }
+/**
+ * Apply an effect to an item (SPEC 09 §15.5, §17). Effects are stored on
+ * the item's `effects` array as EffectInstance {id, effectId, enabled, params}.
+ */
+export function applyEffect(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    effectId: string;
+    params?: Record<string, number | boolean | string>;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const existing = item.effects ?? [];
+  if (existing.some((e) => e.effectId === params.effectId)) {
+    return fail('invalid', 'That effect is already applied.');
+  }
+
+  const instance = {
+    id: `eff-${Date.now()}`,
+    effectId: params.effectId,
+    enabled: true,
+    params: params.params ?? {},
+  };
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.effects) target.effects = [];
+    target.effects.push(instance);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Effect applied.'],
+  };
+}
+
+/**
+ * Remove an effect from an item (SPEC 09 §21 — context menu 'Replace
+ * transition · Delete' and effects panel remove button).
+ */
+export function removeEffect(
+  state: TimelineState,
+  params: { itemId: string; effectId: string },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const existing = item.effects ?? [];
+  if (!existing.some((e) => e.effectId === params.effectId)) {
+    return fail('not_found', 'That effect is not applied.');
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.effects) return;
+    target.effects = target.effects.filter((e) => e.effectId !== params.effectId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Effect removed.'],
+  };
+}
+
+/**
+ * Toggle an effect's enabled state (SPEC 09 §17 — effects panel toggle).
+ */
+export function toggleEffectEnabled(
+  state: TimelineState,
+  params: { itemId: string; effectId: string },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const existing = item.effects ?? [];
+  const instance = existing.find((e) => e.effectId === params.effectId);
+  if (!instance) return fail('not_found', 'That effect is not applied.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.effects) return;
+    const eff = target.effects.find((e) => e.effectId === params.effectId);
+    if (eff) eff.enabled = !eff.enabled;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Effect toggled.'],
+  };
+}
+
+/**
+ * Update an effect's params (SPEC 09 §17 — inspector effect params).
+ */
+export function updateEffectParams(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    effectId: string;
+    params: Record<string, number | boolean | string>;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const existing = item.effects ?? [];
+  const instance = existing.find((e) => e.effectId === params.effectId);
+  if (!instance) return fail('not_found', 'That effect is not applied.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.effects) return;
+    const eff = target.effects.find((e) => e.effectId === params.effectId);
+    if (eff) eff.params = { ...eff.params, ...params.params };
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Effect params updated.'],
+  };
+}

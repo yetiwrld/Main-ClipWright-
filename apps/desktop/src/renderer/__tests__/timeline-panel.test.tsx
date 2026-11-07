@@ -80,6 +80,10 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     splitCaptionSegment: vi.fn(() => true),
     mergeCaptionSegments: vi.fn(() => true),
     trimCaptionSegment: vi.fn(() => true),
+    applyEffect: vi.fn(() => true),
+    removeEffect: vi.fn(() => true),
+    toggleEffectEnabled: vi.fn(() => true),
+    updateEffectParams: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -538,6 +542,16 @@ describe('timeline panel', () => {
     fireEvent.click(toggle);
     const lane = container.querySelector('[data-testid="item-a-keyframe-lane"]');
     expect(lane).toBeTruthy();
+  });
+
+
+  it('effect methods exist on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.applyEffect).toBe('function');
+    expect(typeof timeline.removeEffect).toBe('function');
+    expect(typeof timeline.toggleEffectEnabled).toBe('function');
+    expect(typeof timeline.updateEffectParams).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {
