@@ -27,6 +27,14 @@ export interface PlannedItem {
   active: boolean;
   /** Whether this item has audio. */
   hasAudio: boolean;
+  /**
+   * Caption text for `caption` items.
+   *
+   * Carried through so subtitle sidecars can be generated from the plan without
+   * reaching back into the composition (SPEC 14 §4.4: sidecars are independent
+   * of the burn-in path).
+   */
+  captionText?: string;
 }
 
 /** Export plan describing the full render. */
@@ -130,6 +138,8 @@ export interface ExportSettings {
     disabled: boolean;
     muted: boolean;
     hasAudio: boolean;
+    /** Caption text, for `caption` items (feeds the subtitle sidecars). */
+    captionSegment?: { text: string };
   }>;
 }
 
@@ -198,6 +208,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         sourceDurationUs: item.sourceDurationUs ?? item.durationUs,
         active: overlaps,
         hasAudio,
+        captionText: item.captionSegment?.text,
       };
     })
     .filter((item) => item.active);

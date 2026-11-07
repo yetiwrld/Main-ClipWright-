@@ -59,21 +59,30 @@ export function generateSubtitles(
   return format === 'srt' ? generateSrt(cues) : generateVtt(cues);
 }
 
-/** Extract caption cues from timeline items. */
+/**
+ * Extract caption cues from planned items.
+ *
+ * Accepts both the planner's flattened `captionText` and the composition's
+ * nested `captionSegment`, so callers can pass either shape without silently
+ * producing empty subtitles.
+ */
 export function extractCuesFromItems(
   items: Array<{
-    id: string;
+    id?: string;
+    itemId?: string;
     type: string;
     startUs: number;
     durationUs: number;
+    captionText?: string;
     captionSegment?: { text: string };
   }>,
 ): CaptionCue[] {
   return items
-    .filter((item) => item.type === 'caption' && item.captionSegment)
+    .filter((item) => item.type === 'caption')
     .map((item) => ({
       startUs: item.startUs,
       endUs: item.startUs + item.durationUs,
-      text: item.captionSegment!.text,
-    }));
+      text: item.captionText ?? item.captionSegment?.text ?? '',
+    }))
+    .filter((cue) => cue.text.trim().length > 0);
 }

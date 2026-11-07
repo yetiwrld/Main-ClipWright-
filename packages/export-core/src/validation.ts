@@ -301,18 +301,30 @@ export function validateExport(
   );
 
   // 10: A/V sync — stream start times within one frame (optional → warning).
+  // With no audio stream there is nothing to desynchronise, so the check is
+  // satisfied by construction rather than left unmeasured.
   checks.push(
-    measuredCheck(10, 'A/V sync', {
-      required: false,
-      measured:
-        probe.videoStartSeconds !== undefined && probe.audioStartSeconds !== undefined
-          ? `video ${probe.videoStartSeconds.toFixed(3)} s, audio ${probe.audioStartSeconds.toFixed(3)} s`
-          : undefined,
-      expected: '< 1 frame apart',
-      passes: () =>
-        Math.abs((probe.videoStartSeconds ?? 0) - (probe.audioStartSeconds ?? 0)) < 1 / plan.fps,
-      notMeasured: 'start times not probed',
-    }),
+    probe.hasAudioStream
+      ? measuredCheck(10, 'A/V sync', {
+          required: false,
+          measured:
+            probe.videoStartSeconds !== undefined && probe.audioStartSeconds !== undefined
+              ? `video ${probe.videoStartSeconds.toFixed(3)} s, audio ${probe.audioStartSeconds.toFixed(3)} s`
+              : undefined,
+          expected: '< 1 frame apart',
+          passes: () =>
+            Math.abs((probe.videoStartSeconds ?? 0) - (probe.audioStartSeconds ?? 0)) < 1 / plan.fps,
+          notMeasured: 'start times not probed',
+        })
+      : {
+          id: 10,
+          name: 'A/V sync',
+          status: 'pass',
+          measured: 'no audio stream',
+          expected: '< 1 frame apart',
+          required: false,
+          detail: 'Nothing to synchronise.',
+        },
   );
 
   // 11: Black frames outside planned ranges (optional → warning).
@@ -413,7 +425,10 @@ export function validateExport(
         const mbps = (probe.videoBitrateBps ?? 0) / 1_000_000;
         if (plan.videoBitrate) return Math.abs(mbps - plan.videoBitrate) / plan.videoBitrate <= 0.35;
         // CRF mode: only reject values that could not be a real video stream.
-        return mbps > 0.05 && mbps < 500;
+        // The floor is deliberately low: a static or simple composition legitimately
+        // encodes to a few hundredths of a Mbps at draft CRF (a flat colour frame
+        // costs almost nothing), so a higher floor would flag honest output.
+        return mbps > 0.001 && mbps < 500;
       },
       notMeasured: 'bitrate not reported',
     }),

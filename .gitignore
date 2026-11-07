@@ -45,3 +45,5 @@ Thumbs.db
 
 # Encoder integration test scratch output
 .tmp-export-it/
+.tmp-runner-it/
+.tmp-export-runner/

@@ -634,6 +634,47 @@ export const JobRecordSchema = z
 
 export type JobRecord = z.infer<typeof JobRecordSchema>;
 
+/**
+ * SPEC 14 §6 — one row per finished export in `export_history`.
+ *
+ * Keeps the settings that produced the file (so *Re-export* can repeat them
+ * exactly), the result, the validation report and the measured timings used to
+ * improve later time estimates.
+ */
+export const ExportHistoryRecordSchema = z
+  .object({
+    id: z.string().min(1),
+    projectId: z.string().min(1),
+    compId: z.string().min(1),
+    /** Final path of the exported file. */
+    outputPath: z.string().min(1),
+    /** Human name shown in the queue/history row. */
+    name: z.string().default(''),
+    status: z.enum(['verified', 'warnings', 'failed', 'cancelled']),
+    /** `Done ✓ Verified` etc., precomputed for the row. */
+    verdict: z.string().default(''),
+    /** Immutable snapshot of the export settings, for Re-export. */
+    settings: z.record(z.string(), z.unknown()).default({}),
+    /** The full `ValidationReport` (SPEC 14 §7). */
+    validationReport: z.unknown().optional(),
+    presetLabel: z.string().default(''),
+    width: z.number().int().positive().default(0),
+    height: z.number().int().positive().default(0),
+    fps: z.number().positive().default(0),
+    durationSeconds: z.number().nonnegative().default(0),
+    sizeBytes: z.number().nonnegative().default(0),
+    /** Measured wall-clock time, used to calibrate later estimates (§6 Timing). */
+    elapsedMs: z.number().nonnegative().default(0),
+    /** Throughput as a multiple of real time (2.4 = 2.4× real time). */
+    speedFactor: z.number().nonnegative().default(0),
+    createdAt: z.string().min(1),
+    /** Set when the file has since gone missing (§6 History). */
+    fileMissing: z.boolean().default(false),
+  })
+  .passthrough();
+
+export type ExportHistoryRecord = z.infer<typeof ExportHistoryRecordSchema>;
+
 export const ProviderRecordSchema = z
   .object({
     id: z.string().min(1),

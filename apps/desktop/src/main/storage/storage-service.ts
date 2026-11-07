@@ -26,6 +26,8 @@ import {
   MomentSchema,
   JobRecord,
   JobRecordSchema,
+  ExportHistoryRecord,
+  ExportHistoryRecordSchema,
   ProviderRecord,
   ProviderRecordSchema,
   AppSettings,
@@ -1263,6 +1265,99 @@ export class StorageService {
       .prepare('SELECT id, throughput_factor FROM models WHERE category = ? AND throughput_factor IS NOT NULL')
       .all<{ id: string; throughput_factor: number }>(category);
     return Object.fromEntries(rows.map((row) => [row.id, row.throughput_factor]));
+  }
+
+  /* ==========================================================================
+   * EXPORT HISTORY (SPEC 14 §6)
+   * ======================================================================== */
+
+  /** Record a finished export so the queue and Settings → Exports can show it. */
+  public saveExportHistory(record: ExportHistoryRecord): ExportHistoryRecord {
+    const validated = ExportHistoryRecordSchema.parse(record);
+    this.workspaceDb
+      .prepare(
+        `INSERT INTO export_history (id, project_id, comp_id, output_path, status, created_at, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           status = excluded.status,
+           output_path = excluded.output_path,
+           payload_json = excluded.payload_json`
+      )
+      .run(
+        validated.id,
+        validated.projectId,
+        validated.compId,
+        validated.outputPath,
+        validated.status,
+        validated.createdAt,
+        JSON.stringify(validated)
+      );
+    return validated;
+  }
+
+  /**
+   * List export history, newest first.
+   *
+   * Files deleted outside the app are reported as `fileMissing` rather than
+   * being silently dropped (SPEC 14 §6 "files deleted outside the app show
+   * *File missing*"). Rows that fail schema validation are quarantined by
+   * `readValidatedRows` instead of crashing the list.
+   */
+  public listExportHistory(options: { projectId?: string; limit?: number } = {}): ExportHistoryRecord[] {
+    const limit = Math.max(1, options.limit ?? 200);
+    const where = options.projectId
+      ? `WHERE project_id = '${options.projectId.replace(/'/g, "''")}' ORDER BY created_at DESC LIMIT ${limit}`
+      : `ORDER BY created_at DESC LIMIT ${limit}`;
+    return readValidatedRows(
+      this.workspaceDb,
+      'export_history',
+      'id',
+      'payload_json',
+      ExportHistoryRecordSchema,
+      where
+    ).items.map((record) => ({ ...record, fileMissing: !fs.existsSync(record.outputPath) }));
+  }
+
+  public getExportHistory(id: string): ExportHistoryRecord | undefined {
+    const row = this.workspaceDb
+      .prepare('SELECT payload_json FROM export_history WHERE id = ?')
+      .get<{ payload_json: string }>(id);
+    if (!row) return undefined;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.payload_json);
+    } catch {
+      return undefined;
+    }
+    const validated = ExportHistoryRecordSchema.safeParse(parsed);
+    if (!validated.success) return undefined;
+    return { ...validated.data, fileMissing: !fs.existsSync(validated.data.outputPath) };
+  }
+
+  public deleteExportHistory(id: string): void {
+    this.workspaceDb.prepare('DELETE FROM export_history WHERE id = ?').run(id);
+  }
+
+  /**
+   * Average measured speed factor for recent successful exports, so the export
+   * dialog can show a time estimate calibrated to this machine (SPEC 14 §3.4 /
+   * §6 Timing). Returns `null` before the first export ("Estimating…").
+   */
+  public averageExportSpeed(projectId?: string): number | null {
+    const where = projectId
+      ? `WHERE status IN ('verified','warnings') AND project_id = '${projectId.replace(/'/g, "''")}' ORDER BY created_at DESC LIMIT 20`
+      : `WHERE status IN ('verified','warnings') ORDER BY created_at DESC LIMIT 20`;
+    const rows = readValidatedRows(
+      this.workspaceDb,
+      'export_history',
+      'id',
+      'payload_json',
+      ExportHistoryRecordSchema,
+      where
+    ).items;
+    const speeds = rows.map((row) => row.speedFactor).filter((value) => value > 0);
+    if (speeds.length === 0) return null;
+    return speeds.reduce((sum, value) => sum + value, 0) / speeds.length;
   }
 
   /* ==========================================================================
