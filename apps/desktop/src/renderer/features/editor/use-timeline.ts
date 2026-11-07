@@ -19,6 +19,13 @@ import {
   trimItems,
   moveItemsToTrack,
   rollAt,
+  detachAudio,
+  unlink,
+  toggleItemDisabled,
+  addTrack,
+  toggleTrackLock,
+  toggleTrackHidden,
+  deleteTrack,
   groupItems,
   pasteItems,
   ungroupItems,
@@ -73,6 +80,13 @@ export interface TimelineApi {
   addMarkerAt: (atUs: number) => boolean;
   toggleMute: (trackId: string) => boolean;
   toggleMagnetic: (trackId: string) => boolean;
+  detachAudio: (itemId: string) => boolean;
+  unlink: (itemId: string) => boolean;
+  toggleDisabled: (itemId: string) => boolean;
+  addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
+  toggleTrackLock: (trackId: string) => boolean;
+  toggleTrackHidden: (trackId: string) => boolean;
+  deleteTrack: (trackId: string) => boolean;
   placeMedia: (input: {
     mediaId: string;
     label: string;
@@ -359,6 +373,13 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
             magnetic: !s.tracks.find((t) => t.id === trackId)?.magnetic,
           }),
         ),
+      detachAudio: (itemId) => run('Detach audio', (s) => detachAudio(s, { videoItemId: itemId, fps })),
+      unlink: (itemId) => run('Unlink', (s) => unlink(s, { itemId })),
+      toggleDisabled: (itemId) => run('Toggle disabled', (s) => toggleItemDisabled(s, { itemId })),
+      addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
+      toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
+      toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
+      deleteTrack: (trackId) => run('Delete track', (s) => deleteTrack(s, { trackId })),
       placeMedia: (input) => {
         return run('Add clip', (s) => {
           const mainTrack = s.tracks.find((track) => track.role === 'main');

@@ -64,6 +64,13 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     move: vi.fn(() => true),
     trim: vi.fn(() => true),
     roll: vi.fn(() => true),
+    detachAudio: vi.fn(() => true),
+    unlink: vi.fn(() => true),
+    toggleDisabled: vi.fn(() => true),
+    addTrack: vi.fn(() => true),
+    toggleTrackLock: vi.fn(() => true),
+    toggleTrackHidden: vi.fn(() => true),
+    deleteTrack: vi.fn(() => true),
     split: vi.fn(() => true),
     splitAt: vi.fn(() => true),
     trimToPlayhead: vi.fn(() => true),
@@ -299,6 +306,99 @@ describe('timeline panel', () => {
     const toggle = getByRole('button', { name: /^Magnetic Main video: on$/ });
     fireEvent.click(toggle);
     expect(timeline.toggleMagnetic).toHaveBeenCalledWith(state.tracks[0]!.id);
+  });
+
+
+  it('opens a clip context menu on right-click with clip actions', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    const clip = screen.getByRole('button', { name: 'Opening line clip' });
+    fireEvent.contextMenu(clip, { clientX: 50, clientY: 50 });
+    // Menu shows items like Cut, Copy, Paste, Duplicate, Delete
+    expect(screen.getByText('Cut')).toBeTruthy();
+    expect(screen.getByText('Copy')).toBeTruthy();
+    expect(screen.getByText('Paste')).toBeTruthy();
+    expect(screen.getByText('Duplicate')).toBeTruthy();
+    expect(screen.getByText('Delete')).toBeTruthy();
+  });
+
+  it('clip menu Duplicate calls timeline.duplicate', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Opening line clip' }), { clientX: 50, clientY: 50 });
+    fireEvent.click(screen.getByText('Duplicate'));
+    expect(timeline.duplicate).toHaveBeenCalled();
+  });
+
+  it('clip menu Delete calls timeline.remove with false (no ripple)', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Opening line clip' }), { clientX: 50, clientY: 50 });
+    fireEvent.click(screen.getByText('Delete'));
+    expect(timeline.remove).toHaveBeenCalledWith(false, false);
+  });
+
+  it('clip menu Ripple delete calls timeline.remove with true', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Opening line clip' }), { clientX: 50, clientY: 50 });
+    fireEvent.click(screen.getByText('Ripple delete'));
+    expect(timeline.remove).toHaveBeenCalledWith(true, false);
+  });
+
+  it('opens a track header context menu on right-click', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    // Right-click on the Main video track header area
+    const header = screen.getByText('Main video');
+    fireEvent.contextMenu(header, { clientX: 100, clientY: 100 });
+    expect(screen.getByText('Mute')).toBeTruthy();
+    expect(screen.getByText('Lock')).toBeTruthy();
+    expect(screen.getByText('Add track above')).toBeTruthy();
+    expect(screen.getByText('Add track below')).toBeTruthy();
+  });
+
+  it('track menu Mute calls timeline.toggleMute', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.contextMenu(screen.getByText('Main video'), { clientX: 100, clientY: 100 });
+    fireEvent.click(screen.getByText('Mute'));
+    expect(timeline.toggleMute).toHaveBeenCalledWith(state.tracks[0]!.id);
+  });
+
+  it('track menu Delete track is disabled for the main track', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    fireEvent.contextMenu(screen.getByText('Main video'), { clientX: 100, clientY: 100 });
+    const deleteBtn = screen.getByText('Delete track');
+    // The button should be disabled (aria-disabled or disabled prop)
+    expect(deleteBtn.getAttribute('aria-disabled') || deleteBtn.closest('[disabled]')).toBeTruthy();
+  });
+
+  it('empty track area context menu shows Paste and Add track', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    expect(emptyArea).toBeTruthy();
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    expect(screen.getByText('Paste')).toBeTruthy();
+    expect(screen.getByText('Add marker here')).toBeTruthy();
+    expect(screen.getByText('Add track')).toBeTruthy();
+  });
+
+  it('Escape closes the context menu', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Opening line clip' }), { clientX: 50, clientY: 50 });
+    expect(screen.getByText('Cut')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByText('Cut')).toBeNull();
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

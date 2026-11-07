@@ -1096,6 +1096,105 @@ export function setTrackMuted(
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }
 
+/** Toggle the disabled flag on an item (SPEC 09 §12, context menu Enable/Disable). */
+export function toggleItemDisabled(
+  state: TimelineState,
+  params: { itemId: string },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    target.disabled = !target.disabled;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [params.itemId], notes: [] };
+}
+
+/** Add a new track of the given kind above (or below) a reference track. */
+export function addTrack(
+  state: TimelineState,
+  params: { kind: 'video' | 'audio' | 'text' | 'caption'; aboveTrackId?: string },
+): CommandResult {
+  const kinds: Record<string, string> = {
+    video: 'New video',
+    audio: 'New audio',
+    text: 'New text',
+    caption: 'New captions',
+  };
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const order = draft.tracks.length;
+    const newTrack = {
+      id: `trk_new_${Date.now()}`,
+      role: 'overlay' as const,
+      kind: params.kind,
+      name: kinds[params.kind],
+      order,
+      hidden: false,
+      locked: false,
+      muted: false,
+      solo: false,
+      heightPx: 48,
+      itemIds: [],
+      auto: false,
+    };
+    if (params.aboveTrackId) {
+      const refIndex = draft.tracks.findIndex((t) => t.id === params.aboveTrackId);
+      if (refIndex >= 0) {
+        draft.tracks.splice(refIndex, 0, newTrack);
+      } else {
+        draft.tracks.push(newTrack);
+      }
+    } else {
+      draft.tracks.push(newTrack);
+    }
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: ['Track added.'] };
+}
+
+/** Toggle the lock flag on a track (SPEC 09 §9.1). */
+export function toggleTrackLock(
+  state: TimelineState,
+  params: { trackId: string },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (target) target.locked = !target.locked;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/** Toggle the hidden flag on a track (SPEC 09 §9.1). */
+export function toggleTrackHidden(
+  state: TimelineState,
+  params: { trackId: string },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (target) target.hidden = !target.hidden;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/** Delete a track and its items (SPEC 09 §21, track header context menu). */
+export function deleteTrack(
+  state: TimelineState,
+  params: { trackId: string },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.tracks = draft.tracks.filter((candidate) => candidate.id !== params.trackId);
+    for (const id of track.itemIds) {
+      delete draft.items[id];
+    }
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: track.itemIds, notes: ['Track deleted.'] };
+}
+
 /**
  * Detach audio from a video item (SPEC 09 §9.6): creates a linked audio item
  * on the first available audio track at the same time range, mutes the video's

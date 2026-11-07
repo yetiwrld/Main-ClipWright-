@@ -15,12 +15,21 @@ import {
   Scissors,
   Shuffle,
   Trash2,
+  Users,
+  Eye,
+  EyeOff,
+  Unlink,
+  Power,
+  Folder,
+  Settings,
   Volume2,
   VolumeX,
 } from 'lucide-react';
 import {
   Button,
+  ContextMenu,
   IconButton,
+  type MenuItem,
   SegmentedControl,
   Slider,
   TimecodeField,
@@ -79,6 +88,12 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   } | null>(null);
   const [snapGuide, setSnapGuide] = useState<number | null>(null);
   // Rolling edit preview: the junction position under the pointer.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'clip' | 'track' | 'empty';
+    targetId?: string;
+  } | null>(null);
   const [rollPreview, setRollPreview] = useState<{
     leftItemId: string;
     rightItemId: string;
@@ -256,6 +271,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     setTrimPreview(null);
     setRollPreview(null);
     setSnapGuide(null);
+    setMenu(null);
   }, []);
 
   useEffect(() => {
@@ -677,6 +693,10 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           {tracks.map((track) => (
             <div
               key={track.id}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY, type: 'track', targetId: track.id });
+              }}
               style={{
                 height: track.heightPx,
                 display: 'flex',
@@ -801,6 +821,11 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                     tabIndex={0}
                     aria-label={`${item.label} clip`}
                     aria-pressed={selected}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      timeline.select([item.id]);
+                      setMenu({ x: event.clientX, y: event.clientY, type: 'clip', targetId: item.id });
+                    }}
                     onPointerDown={(event) => {
                       event.stopPropagation();
                       if (event.button !== 0) return;
@@ -887,6 +912,11 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
               })}
               {track.itemIds.length === 0 && (
                 <div
+                  data-testid={`empty-area-${track.id}`}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setMenu({ x: event.clientX, y: event.clientY, type: 'empty', targetId: track.id });
+                  }}
                   style={{
                     position: 'absolute',
                     inset: 0,
@@ -951,6 +981,19 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         </div>
       </div>
 
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={menu.type === 'clip' && menu.targetId
+            ? clipMenuItems(menu.targetId, timeline, state, fps, selection)
+            : menu.type === 'track' && menu.targetId
+              ? trackMenuItems(menu.targetId, timeline, state)
+              : emptyMenuItems(timeline)}
+        />
+      )}
+
       {timeline.notes.length > 0 && (
         <div
           role="status"
@@ -972,6 +1015,71 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       )}
     </div>
   );
+}
+
+/** Clip context menu items (SPEC 09 §21). */
+function clipMenuItems(
+  itemId: string,
+  timeline: TimelineApi,
+  state: TimelineState,
+  fps: number,
+  selection: string[],
+): MenuItem[] {
+  const item = state.items[itemId];
+  if (!item) return [];
+  const hasSelection = selection.length > 0;
+  const isLinked = !!item.linkId;
+  const canDetach = item.type === 'video';
+
+  return [
+    { id: 'cut', label: 'Cut', icon: <ClipboardCopy size={14} />, shortcut: 'Ctrl+X', onSelect: () => timeline.cut() },
+    { id: 'copy', label: 'Copy', icon: <ClipboardCopy size={14} />, shortcut: 'Ctrl+C', onSelect: () => timeline.copy() },
+    { id: 'paste', label: 'Paste', icon: <ClipboardPaste size={14} />, shortcut: 'Ctrl+V', onSelect: () => timeline.paste(playheadStore.get()) },
+    { id: 'sep1', label: '', onSelect: () => {} },
+    { id: 'duplicate', label: 'Duplicate', icon: <Copy size={14} />, shortcut: 'Ctrl+D', onSelect: () => timeline.duplicate() },
+    { id: 'delete', label: 'Delete', icon: <Trash2 size={14} />, shortcut: 'Del', danger: true, onSelect: () => timeline.remove(false, false) },
+    { id: 'ripple', label: 'Ripple delete', icon: <Trash2 size={14} />, shortcut: 'Shift+Del', danger: true, onSelect: () => timeline.remove(true, false) },
+    { id: 'split', label: 'Split at playhead', icon: <Scissors size={14} />, onSelect: () => timeline.split(playheadStore.get()) },
+    { id: 'sep2', label: '', onSelect: () => {} },
+    { id: 'detach', label: 'Detach audio', icon: <Volume2 size={14} />, disabled: !canDetach, disabledReason: 'Only video items have audio to detach', onSelect: () => timeline.detachAudio(itemId) },
+    { id: 'unlink', label: 'Unlink', icon: <Unlink size={14} />, disabled: !isLinked, disabledReason: 'This item is not linked', onSelect: () => timeline.unlink(itemId) },
+    { id: 'group', label: 'Group', icon: <Users size={14} />, disabled: selection.length < 2, disabledReason: 'Select two or more clips to group', onSelect: () => timeline.group() },
+    { id: 'ungroup', label: 'Ungroup', icon: <Users size={14} />, disabled: !item.groupId, disabledReason: 'This clip is not in a group', onSelect: () => timeline.ungroup() },
+    { id: 'sep3', label: '', onSelect: () => {} },
+    { id: 'toggle-disabled', label: item.disabled ? 'Enable' : 'Disable', icon: <Power size={14} />, onSelect: () => timeline.toggleDisabled(itemId) },
+  ];
+}
+
+/** Track header context menu items (SPEC 09 §9.1). */
+function trackMenuItems(
+  trackId: string,
+  timeline: TimelineApi,
+  state: TimelineState,
+): MenuItem[] {
+  const track = state.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return [];
+
+  return [
+    { id: 'mute', label: track.muted ? 'Unmute' : 'Mute', icon: track.muted ? <Volume2 size={14} /> : <VolumeX size={14} />, onSelect: () => timeline.toggleMute(trackId) },
+    { id: 'lock', label: track.locked ? 'Unlock' : 'Lock', icon: <Lock size={14} />, onSelect: () => timeline.toggleTrackLock(trackId) },
+    { id: 'hide', label: track.hidden ? 'Show' : 'Hide', icon: track.hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: () => timeline.toggleTrackHidden(trackId) },
+    { id: 'sep1', label: '', onSelect: () => {} },
+    { id: 'add-track', label: 'Add track above', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video', trackId) },
+    { id: 'add-track-below', label: 'Add track below', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },
+    { id: 'sep2', label: '', onSelect: () => {} },
+    { id: 'delete-track', label: 'Delete track', icon: <Trash2 size={14} />, danger: true, disabled: track.role === 'main', disabledReason: 'The main track cannot be deleted', onSelect: () => timeline.deleteTrack(trackId) },
+  ];
+}
+
+/** Empty track area context menu items (SPEC 09 §21). */
+function emptyMenuItems(
+  timeline: TimelineApi,
+): MenuItem[] {
+  return [
+    { id: 'paste', label: 'Paste', icon: <ClipboardPaste size={14} />, onSelect: () => timeline.paste(playheadStore.get()) },
+    { id: 'marker', label: 'Add marker here', icon: <Flag size={14} />, onSelect: () => timeline.addMarkerAt(playheadStore.get()) },
+    { id: 'add-track', label: 'Add track', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },
+  ];
 }
 
 /**

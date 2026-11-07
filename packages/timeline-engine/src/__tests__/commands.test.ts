@@ -15,6 +15,11 @@ import {
   rollAt,
   detachAudio,
   unlink,
+  toggleItemDisabled,
+  addTrack,
+  toggleTrackLock,
+  toggleTrackHidden,
+  deleteTrack,
   splitItems,
   trimItem,
   trimItems,
@@ -391,6 +396,55 @@ describe('timeline commands', () => {
     if (!result.ok) return;
     const videoAfter = result.state.items[ids.first]!;
     expect(videoAfter.linkId).toBeUndefined();
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('toggles the disabled flag on an item', () => {
+    const { state, ids } = fixture();
+    const result = toggleItemDisabled(state, { itemId: ids.first });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items[ids.first]!.disabled).toBe(true);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('adds a new track above the reference track', () => {
+    const { state } = fixture();
+    const result = addTrack(state, { kind: 'video', aboveTrackId: state.tracks[0]!.id });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.tracks.length).toBe(state.tracks.length + 1);
+    expect(result.state.tracks[0]!.kind).toBe('video');
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('toggles the lock flag on a track', () => {
+    const { state } = fixture();
+    const result = toggleTrackLock(state, { trackId: state.tracks[0]!.id });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.tracks[0]!.locked).toBe(true);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('toggles the hidden flag on a track', () => {
+    const { state } = fixture();
+    const result = toggleTrackHidden(state, { trackId: state.tracks[0]!.id });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.tracks[0]!.hidden).toBe(true);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('deletes a track and its items', () => {
+    const { state, ids } = fixture();
+    const audioTrack = state.tracks[4]!;
+    const result = deleteTrack(state, { trackId: audioTrack.id });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.tracks.find((t) => t.id === audioTrack.id)).toBeUndefined();
+    expect(result.state.items[ids.third]).toBeUndefined();
+    expect(result.state.items[ids.first]).toBeDefined();
     expect(checkInvariantsMB(result.state)).toEqual([]);
   });
 
