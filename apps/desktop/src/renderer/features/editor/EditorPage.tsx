@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, LayoutPanelLeft, PanelRight, ScrollText } from 'lucide-react';
+import { ArrowLeft, LayoutPanelLeft, PanelRight, ScrollText, Upload } from 'lucide-react';
 import { Button, Chip, Dialog, IconButton, PanelHeader } from '@clipwright/design-system';
 import { api, describeError, isDesktop } from '../../api.js';
 import type { TimelineApi } from './use-timeline.js';
 import { useTimeline } from './use-timeline.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { projectDurationUs } from '@clipwright/timeline-engine';
 import { PreviewPane } from './PreviewPane.js';
 import { ItemInspector, MediaLibrary, type MediaAsset } from './Inspector.js';
+import { ExportDialog } from '../export/ExportDialog.js';
 
 export function EditorPage({
   projectId,
@@ -25,6 +27,7 @@ export function EditorPage({
   const [rightOpen, setRightOpen] = useState(true);
   const [timelineShare, setTimelineShare] = useState(0.42);
   const [resizing, setResizing] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
     if (!isDesktop()) {
@@ -83,6 +86,11 @@ export function EditorPage({
         event.preventDefault();
         setTimelineShare((value) => (value > 0.5 ? 0.42 : 0.66));
       }
+      // SPEC 14 §3: Export opens with Ctrl+E.
+      if (key === 'e' && !event.shiftKey) {
+        event.preventDefault();
+        setExportOpen(true);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -112,6 +120,13 @@ export function EditorPage({
         </div>
         <SaveBadge saveState={timeline.saveState} />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+          <IconButton
+            label="Export"
+            shortcut="Ctrl+E"
+            size={28}
+            icon={<Upload size={14} />}
+            onClick={() => setExportOpen(true)}
+          />
           <IconButton
             label="Toggle media panel"
             shortcut="Ctrl+B"
@@ -266,6 +281,19 @@ export function EditorPage({
           <TimelinePanel timeline={timeline} />
         </section>
       </div>
+
+      {/* SPEC 14 §3/§6 — export panel and queue */}
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        projectId={projectId}
+        compositionId={timeline.record?.id ?? compId ?? ''}
+        compositionName={record?.name ?? 'Clip'}
+        state={state}
+        fps={timeline.fps}
+        workAreaUs={state?.workArea ? [state.workArea.inUs, state.workArea.outUs] : null}
+        durationUs={state ? projectDurationUs(state) : 0}
+      />
     </div>
   );
 }

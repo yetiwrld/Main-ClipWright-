@@ -52,11 +52,14 @@ export function ExportPanel({
   onChange,
   onExport,
   onCancel,
+  showHeading = true,
 }: {
   state: ExportPanelState;
   onChange: (patch: Partial<ExportPanelState>) => void;
   onExport: () => void;
   onCancel: () => void;
+  /** Off when a dialog already provides the title (avoids duplicate headings). */
+  showHeading?: boolean;
 }) {
   const resolution = resolutionForPreset(state.preset, state.aspect);
   const estimatedSizeMb = estimateFileSize(state, resolution);
@@ -75,7 +78,7 @@ export function ExportPanel({
         border: '1px solid var(--line-default)',
       }}
     >
-      <h3 style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, margin: 0 }}>Export</h3>
+      {showHeading && <h3 style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, margin: 0 }}>Export</h3>}
 
       {/* Summary line */}
       <div
