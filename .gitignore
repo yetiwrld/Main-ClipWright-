@@ -58,3 +58,4 @@ Thumbs.db
 .tmp-portable/
 .tmp-smoke/
 .tmp-bin-integrity/
+.tmp-update-journal/

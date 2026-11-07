@@ -75,3 +75,25 @@ export type {
   UpdateErrorKind,
   UpdateEvent,
 } from './state.js';
+
+// Update journal, boot marking and recovery (SPEC 15 §7)
+export {
+  createJournal,
+  advanceJournal,
+  confirmBoot,
+  decideBootAction,
+  isJournalExpired,
+  backupFolderName,
+  previousInstallerPath,
+  recoveryMessage,
+  BOOT_CONFIRM_MS,
+  MAX_BOOT_FAILURES,
+  JOURNAL_RETENTION_DAYS,
+  UPDATES_DIR_NAME,
+} from './journal.js';
+export type {
+  JournalStatus,
+  UpdateJournal,
+  BootDecision,
+  RecoveryContext,
+} from './journal.js';
