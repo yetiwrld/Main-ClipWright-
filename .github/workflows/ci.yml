@@ -30,6 +30,9 @@ jobs:
       - name: Design token & No-fakes audit
         run: pnpm lint
 
+      - name: Repository references resolve
+        run: node scripts/check-repo.mjs
+
       - name: Typecheck all packages
         run: pnpm typecheck
 
