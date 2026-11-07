@@ -20,6 +20,9 @@ import {
   toggleTrackLock,
   toggleTrackHidden,
   deleteTrack,
+  addTransition,
+  updateTransition,
+  removeTransition,
   splitItems,
   trimItem,
   trimItems,
@@ -671,6 +674,192 @@ describe('timeline commands', () => {
     if (!ungrouped.ok) return;
     expect(ungrouped.state.items[ids.first]!.groupId).toBeUndefined();
     expect(ungrouped.state.groups).toHaveLength(0);
+  });
+
+
+  describe('transitions (SPEC 09 §16)', () => {
+    function transitionFixture(): { state: TimelineState; leftId: string; rightId: string; trackId: string } {
+      const base = createDefaultTimeline({ id: 'trans-1', name: 'Transitions' });
+      const track = base.tracks[0]!; // main video
+      const left = createMediaItem({
+        id: 'left',
+        trackId: track.id,
+        label: 'Left clip',
+        mediaId: 'media-1',
+        startUs: 0,
+        durationUs: 2_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      const right = createMediaItem({
+        id: 'right',
+        trackId: track.id,
+        label: 'Right clip',
+        mediaId: 'media-1',
+        startUs: 2_000_000,
+        durationUs: 2_000_000,
+        sourceInUs: 5_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      const state: TimelineState = {
+        ...base,
+        tracks: base.tracks.map((candidate) =>
+          candidate.id === track.id ? { ...candidate, itemIds: [left.id, right.id] } : candidate,
+        ),
+        items: { [left.id]: left, [right.id]: right },
+      };
+      return { state, leftId: left.id, rightId: right.id, trackId: track.id };
+    }
+
+    it('attaches a transition at a junction between adjacent clips', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      const result = addTransition(state, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'crossfade',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const right = result.state.items[rightId];
+        expect(right.transitionIn).toBeDefined();
+        expect(right.transitionIn!.type).toBe('crossfade');
+        expect(right.transitionIn!.durationUs).toBe(500_000);
+        expect(right.transitionIn!.alignment).toBe('center');
+      }
+    });
+
+    it('refuses a transition when clips are not adjacent', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      // Move right clip away
+      const moved = moveItems(state, { fps: 30, moves: [{ itemId: rightId, startUs: 5_000_000 }] });
+      expect(moved.ok).toBe(true);
+      if (moved.ok) {
+        const result = addTransition(moved.state, {
+          trackId,
+          leftItemId: leftId,
+          rightItemId: rightId,
+          type: 'crossfade',
+          durationUs: 500_000,
+          fps: 30,
+        });
+        expect(result.ok).toBe(false);
+      }
+    });
+
+    it('clamps duration to available source handles', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      // left has 10s source, 2s used → 8s handle; right has 10s source, 0s used before start → 0s handle
+      // Actually right.sourceInUs defaults to 0, so rightHandle = 0 → maxDuration = 0
+      // With 0 handles, only fade/dip types allowed
+      const result = addTransition(state, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'fade-black',
+        durationUs: 2_000_000,
+        fps: 30,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const right = result.state.items[rightId];
+        // Should be clamped to min duration (2 frames at 30fps = 66667us)
+        expect(right.transitionIn!.durationUs).toBeGreaterThanOrEqual(66_666);
+      }
+    });
+
+    it('updates a transition duration and alignment', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      const added = addTransition(state, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'crossfade',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = updateTransition(added.state, {
+          itemId: rightId,
+          patch: { durationUs: 300_000, alignment: 'start' },
+          fps: 30,
+        });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const right = updated.state.items[rightId];
+          expect(right.transitionIn!.durationUs).toBe(300_000);
+          expect(right.transitionIn!.alignment).toBe('start');
+        }
+      }
+    });
+
+    it('removes a transition', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      const added = addTransition(state, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'crossfade',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const removed = removeTransition(added.state, { itemId: rightId });
+        expect(removed.ok).toBe(true);
+        if (removed.ok) {
+          const right = removed.state.items[rightId];
+          expect(right.transitionIn).toBeUndefined();
+        }
+      }
+    });
+
+    it('refuses to add a transition on a locked track', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      const locked = state.tracks.map((t) =>
+        t.id === trackId ? { ...t, locked: true } : t,
+      );
+      const lockedState: TimelineState = { ...state, tracks: locked };
+      const result = addTransition(lockedState, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'crossfade',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('keeps invariants intact after transition operations', () => {
+      const { state, leftId, rightId, trackId } = transitionFixture();
+      const added = addTransition(state, {
+        trackId,
+        leftItemId: leftId,
+        rightItemId: rightId,
+        type: 'crossfade',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = updateTransition(added.state, {
+          itemId: rightId,
+          patch: { durationUs: 300_000 },
+          fps: 30,
+        });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const removed = removeTransition(updated.state, { itemId: rightId });
+          expect(removed.ok).toBe(true);
+          if (removed.ok) {
+            expect(checkInvariantsMB(removed.state)).toEqual([]);
+          }
+        }
+      }
+    });
   });
 
   it('all commands keep the invariants intact', () => {

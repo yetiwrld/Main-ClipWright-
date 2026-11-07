@@ -1408,3 +1408,173 @@ export function ungroupItems(
 
 /** Snap points for a gesture; re-exported so the UI needs one import. */
 export { snapPoints };
+
+/**
+ * Attach a transition at a junction between two adjacent items on the same
+ * video track (SPEC 09 §16). The transition is stored on the later item as
+ * `transitionIn {type, durationUs, alignment}`.
+ *
+ * Duration is clamped to [2 frames, min(leftHandle, rightHandle)] where
+ * handles are the available source media before/after the junction. If no
+ * handles exist (clips use full source), only fade/dip types are allowed.
+ * Transitions never change the total timeline length.
+ */
+export function addTransition(
+  state: TimelineState,
+  params: {
+    trackId: string;
+    leftItemId: string;
+    rightItemId: string;
+    type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom';
+    durationUs?: number;
+    alignment?: 'center' | 'start' | 'end';
+    fps: Fps;
+  },
+): CommandResult {
+  const left = state.items[params.leftItemId];
+  const right = state.items[params.rightItemId];
+  if (!left || !right) return fail('not_found', 'That item no longer exists.');
+  if (left.trackId !== right.trackId) return fail('invalid', 'Transitions need two clips on the same track.');
+  if (left.trackId !== params.trackId) return fail('invalid', 'That item is not on the given track.');
+
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+  if (track.kind !== 'video') return fail('invalid', 'Transitions only work on video tracks.');
+
+  const minDuration = frameDurationUs(params.fps) * 2;
+  const leftEnd = itemEndUs(left);
+  if (Math.abs(leftEnd - right.startUs) > frameDurationUs(params.fps)) {
+    return fail('invalid', 'Those clips are not adjacent.');
+  }
+
+  // Calculate available handles
+  const leftHandle = Math.max(0, Math.round((left.sourceDurationUs ?? 0) - (left.sourceInUs ?? 0) - left.durationUs));
+  const rightHandle = Math.max(0, right.sourceInUs ?? 0);
+  const maxDuration = Math.min(leftHandle, rightHandle);
+
+  const fadeTypes = ['fade-black', 'dip-color'];
+  const requestedType = params.type;
+  if (maxDuration < minDuration && !fadeTypes.includes(requestedType)) {
+    return fail('no_room', 'No source handles available for this transition type. Only fade/dip transitions work without handles.');
+  }
+
+  let duration = params.durationUs ?? Math.round(0.5 * 1_000_000);
+  duration = Math.max(minDuration, Math.min(duration, maxDuration > 0 ? maxDuration : minDuration));
+  duration = quantizeUs(duration, params.fps);
+
+  const alignment = params.alignment ?? 'center';
+  const transitionId = `trans-${Date.now()}`;
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const rightTarget = draft.items[params.rightItemId] as TimelineItem;
+    rightTarget.transitionIn = {
+      id: transitionId,
+      type: requestedType,
+      durationUs: duration,
+      alignment,
+      params: {},
+      easing: 'easeInOut',
+      crossfadeAudio: true,
+    };
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.rightItemId],
+    notes: ['Transition added.'],
+  };
+}
+
+/**
+ * Update a transition's properties (SPEC 09 §16): duration, alignment, or type.
+ * Duration is clamped to available handles; alignment is one of center/start/end.
+ */
+export function updateTransition(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    patch: Partial<Pick<NonNullable<TimelineItem['transitionIn']>, 'durationUs' | 'alignment' | 'type'>>;
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (!item.transitionIn) return fail('invalid', 'That item has no transition.');
+
+  const transition = item.transitionIn;
+  const minDuration = frameDurationUs(params.fps) * 2;
+
+  // Calculate available handles for clamping
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+
+  // Find the left item (the one before this item on the same track)
+  const sortedIds = [...track.itemIds].sort((a, b) => state.items[a]!.startUs - state.items[b]!.startUs);
+  const idx = sortedIds.indexOf(item.id);
+  if (idx <= 0) return fail('invalid', 'This item is the first on its track; no junction for a transition.');
+  const leftItem = state.items[sortedIds[idx - 1]!];
+  if (!leftItem) return fail('not_found', 'The left item no longer exists.');
+
+  const leftEnd = itemEndUs(leftItem);
+  if (Math.abs(leftEnd - item.startUs) > frameDurationUs(params.fps)) {
+    return fail('invalid', 'The left clip is no longer adjacent.');
+  }
+
+  const leftHandle = Math.max(0, Math.round((leftItem.sourceDurationUs ?? 0) - (leftItem.sourceInUs ?? 0) - leftItem.durationUs));
+  const rightHandle = Math.max(0, item.sourceInUs ?? 0);
+  const maxDuration = Math.min(leftHandle, rightHandle);
+
+  let newDuration = transition.durationUs;
+  if (params.patch.durationUs !== undefined) {
+    newDuration = Math.max(minDuration, Math.min(params.patch.durationUs, maxDuration > 0 ? maxDuration : minDuration));
+    newDuration = quantizeUs(newDuration, params.fps);
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.transitionIn) return;
+    target.transitionIn.durationUs = newDuration;
+    if (params.patch.alignment) target.transitionIn.alignment = params.patch.alignment;
+    if (params.patch.type) target.transitionIn.type = params.patch.type;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Transition updated.'],
+  };
+}
+
+/**
+ * Remove a transition from an item (SPEC 09 §16). The item keeps its position
+ * and properties; only the transitionIn is cleared.
+ */
+export function removeTransition(
+  state: TimelineState,
+  params: { itemId: string },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (!item.transitionIn) return fail('invalid', 'That item has no transition.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    delete target.transitionIn;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Transition removed.'],
+  };
+}

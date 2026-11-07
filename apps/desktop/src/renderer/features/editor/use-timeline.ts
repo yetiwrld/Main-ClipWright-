@@ -21,6 +21,9 @@ import {
   rollAt,
   detachAudio,
   unlink,
+  addTransition,
+  updateTransition,
+  removeTransition,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -83,6 +86,9 @@ export interface TimelineApi {
   detachAudio: (itemId: string) => boolean;
   unlink: (itemId: string) => boolean;
   toggleDisabled: (itemId: string) => boolean;
+  addTransition: (trackId: string, leftItemId: string, rightItemId: string, type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom', durationUs?: number, alignment?: 'center' | 'start' | 'end') => boolean;
+  updateTransition: (itemId: string, patch: { durationUs?: number; alignment?: 'center' | 'start' | 'end'; type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom' }) => boolean;
+  removeTransition: (itemId: string) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -376,6 +382,12 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       detachAudio: (itemId) => run('Detach audio', (s) => detachAudio(s, { videoItemId: itemId, fps })),
       unlink: (itemId) => run('Unlink', (s) => unlink(s, { itemId })),
       toggleDisabled: (itemId) => run('Toggle disabled', (s) => toggleItemDisabled(s, { itemId })),
+      addTransition: (trackId: string, leftItemId: string, rightItemId: string, type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom', durationUs?: number, alignment?: 'center' | 'start' | 'end') =>
+        run('Add transition', (s) => addTransition(s, { trackId, leftItemId, rightItemId, type, durationUs, alignment, fps })),
+      updateTransition: (itemId: string, patch: { durationUs?: number; alignment?: 'center' | 'start' | 'end'; type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom' }) =>
+        run('Update transition', (s) => updateTransition(s, { itemId, patch, fps })),
+      removeTransition: (itemId: string) =>
+        run('Remove transition', (s) => removeTransition(s, { itemId })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),

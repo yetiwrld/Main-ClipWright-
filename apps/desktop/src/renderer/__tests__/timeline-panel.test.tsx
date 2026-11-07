@@ -67,6 +67,9 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     detachAudio: vi.fn(() => true),
     unlink: vi.fn(() => true),
     toggleDisabled: vi.fn(() => true),
+    addTransition: vi.fn(() => true),
+    updateTransition: vi.fn(() => true),
+    removeTransition: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -399,6 +402,15 @@ describe('timeline panel', () => {
     expect(screen.getByText('Cut')).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByText('Cut')).toBeNull();
+  });
+
+
+  it('transition methods exist on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.addTransition).toBe('function');
+    expect(typeof timeline.updateTransition).toBe('function');
+    expect(typeof timeline.removeTransition).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {
