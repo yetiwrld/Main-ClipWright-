@@ -28,6 +28,7 @@ import {
   Settings,
   Volume2,
   VolumeX,
+  BarChart3,
 } from 'lucide-react';
 import {
   Button,
@@ -55,6 +56,7 @@ import {
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { usePlayback } from './use-playback.js';
+import { useMediaPeaks, drawWaveform, selectPeakResolution } from './use-media-assets.js';
 
 const HEADER_WIDTH = 184;
 const MIN_PX_PER_SECOND = 0.25;
@@ -79,6 +81,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [tool, setTool] = useState<'select' | 'razor'>('select');
   const [showKeyframes, setShowKeyframes] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [showWaveforms, setShowWaveforms] = useState(true);
   const [loopPlayback, setLoopPlayback] = useState(false);
   const [followPlayhead, setFollowPlayhead] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -731,6 +734,13 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           onClick={() => setShowMarkers((value) => !value)}
         />
         <IconButton
+          label="Show waveforms"
+          size={28}
+          active={showWaveforms}
+          icon={<BarChart3 size={14} />}
+          onClick={() => setShowWaveforms((value) => !value)}
+        />
+        <IconButton
           label="Split at playhead"
           shortcut="S"
           size={28}
@@ -1116,6 +1126,15 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                         ? item.captionSegment.text
                         : item.label}
                     </span>
+                    {showWaveforms && item.mediaId && (item.type === 'video' || item.type === 'audio') && (
+                      <WaveformCanvas
+                        mediaId={item.mediaId}
+                        width={width}
+                        height={20}
+                        color="var(--brand-muted)"
+                        pxPerSecond={pxPerSecond}
+                      />
+                    )}
                     <span
                       data-testid={`${item.id}-right-handle`}
                       onPointerDown={(event) => {
@@ -1532,6 +1551,56 @@ function PlayheadReadout({ durationUs, fps }: { durationUs: number; fps: 30 | 60
         if (!parsed) return false;
         playheadStore.set(Math.min(durationUs, parsed.us));
         return true;
+      }}
+    />
+  );
+}
+
+/**
+ * Canvas that draws the waveform for a media item on the timeline.
+ * Uses the 256 or 4096 resolution peaks depending on zoom level.
+ */
+function WaveformCanvas({
+  mediaId,
+  width,
+  height,
+  color,
+  pxPerSecond,
+}: {
+  mediaId: string;
+  width: number;
+  height: number;
+  color: string;
+  pxPerSecond: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const peaks = useMediaPeaks(mediaId);
+  const resolution = selectPeakResolution(pxPerSecond);
+  const data = resolution === '256' ? peaks?.peaks256 : peaks?.peaks4096;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !data) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Set the canvas resolution to match its display size for crisp rendering.
+    canvas.width = Math.max(1, Math.floor(width));
+    canvas.height = Math.max(1, Math.floor(height));
+    drawWaveform(ctx, data, width, height, color);
+  }, [data, width, height, color]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      data-testid={`${mediaId}-waveform`}
+      style={{
+        position: 'absolute',
+        left: 0,
+        bottom: 0,
+        width: '100%',
+        height,
+        pointerEvents: 'none',
+        opacity: 0.5,
       }}
     />
   );

@@ -836,6 +836,50 @@ describe('timeline panel', () => {
     expect(container.querySelector('[data-testid="shortcuts-panel"]')).toBeNull();
   });
 
+
+describe('Waveforms (SPEC 09 §19)', () => {
+  it('renders waveform canvas for video items with mediaId', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    // The fixture items have mediaId 'media-1' and type 'video'.
+    expect(container.querySelectorAll('[data-testid*="waveform"]').length).toBe(2);
+  });
+
+  it('hides waveform canvas when showWaveforms is toggled off', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    expect(container.querySelectorAll('[data-testid*="waveform"]').length).toBe(2);
+    // Toggle off via the toolbar button.
+    const waveformButton = screen.getByLabelText(/show waveforms/i);
+    fireEvent.click(waveformButton);
+    expect(container.querySelectorAll('[data-testid*="waveform"]').length).toBe(0);
+  });
+
+  it('does not render waveform for caption items', () => {
+    const state = fixture();
+    const captionItem = { ...state.items['item-a'], type: 'caption' as const };
+    const stateWithCaption = {
+      ...state,
+      items: { ...state.items, ['item-a']: captionItem },
+    };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithCaption)} />);
+    // Only item-b should have a waveform.
+    expect(container.querySelectorAll('[data-testid*="waveform"]').length).toBe(1);
+  });
+
+  it('does not render waveform for items without mediaId', () => {
+    const state = fixture();
+    const noMedia = { ...state.items['item-a'], mediaId: undefined };
+    const stateNoMedia = {
+      ...state,
+      items: { ...state.items, ['item-a']: noMedia },
+    };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateNoMedia)} />);
+    // Only item-b should have a waveform.
+    expect(container.querySelectorAll('[data-testid*="waveform"]').length).toBe(1);
+  });
+});
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

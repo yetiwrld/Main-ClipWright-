@@ -75,6 +75,10 @@ contextBridge.exposeInMainWorld('clipwright', {
   probeUrl: (url) => ipcRenderer.invoke('media:probeUrl', url),
   isSupportedFile: (filePath) => ipcRenderer.invoke('media:isSupported', filePath),
 
+  // ---- Media assets: peaks and thumbnails (SPEC 09 §19) ----
+  getPeaks: (mediaId) => ipcRenderer.invoke('media:getPeaks', mediaId),
+  getThumbnail: (mediaId, timeUs) => ipcRenderer.invoke('media:getThumbnail', mediaId, timeUs),
+
   // ---- Transcript export ----
   exportTranscript: (transcript, format, aspect, defaultName) =>
     ipcRenderer.invoke('transcript:export', transcript, format, aspect, defaultName),

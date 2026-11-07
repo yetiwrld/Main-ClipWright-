@@ -226,6 +226,9 @@ export async function ingestMedia(
     createdAt: new Date().toISOString(),
     info: toSchemaInfo(info),
     status: 'ok',
+    peaks256Path: join(derivedDir, 'peaks256.bin'),
+    peaks4096Path: join(derivedDir, 'peaks4096.bin'),
+    thumbPath: thumbPath || undefined,
   } as never);
 
   storage.updateProject(request.projectId, {

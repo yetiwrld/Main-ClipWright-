@@ -473,6 +473,9 @@ export const MediaRecordSchema = z
     createdAt: z.string(),
     info: MediaInfoSchema,
     status: z.enum(['ok', 'missing', 'changed']).default('ok'),
+    peaks256Path: z.string().optional(),
+    peaks4096Path: z.string().optional(),
+    thumbPath: z.string().optional(),
   })
   .passthrough();
 

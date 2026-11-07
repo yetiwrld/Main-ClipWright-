@@ -405,6 +405,51 @@ function registerIPC(): void {
     return media.isSupportedFile(filePath);
   });
 
+  // ---- Media assets: peaks and thumbnails (SPEC 09 §19) ----
+  ipcMain.handle('media:getPeaks', async (_event, mediaId: string) => {
+    const storage = requireStorage();
+    const media = storage.getMedia(mediaId);
+    if (!media) throw new Error('Media not found');
+    const { readFile } = await import('node:fs/promises');
+    const parse = (buf: Buffer | null) => {
+      if (!buf || buf.length === 0) return { min: [], max: [] };
+      const count = buf.length / 4;
+      const min: number[] = [];
+      const max: number[] = [];
+      for (let i = 0; i < count; i++) {
+        const val = buf.readFloatLE(i * 4);
+        // The peaks file stores RMS values; we draw symmetric around zero.
+        const abs = Math.abs(val);
+        min.push(-abs);
+        max.push(abs);
+      }
+      return { min, max };
+    };
+    try {
+      const [peaks256Raw, peaks4096Raw] = await Promise.all([
+        media.peaks256Path ? readFile(media.peaks256Path).catch(() => null) : null,
+        media.peaks4096Path ? readFile(media.peaks4096Path).catch(() => null) : null,
+      ]);
+      return { peaks256: parse(peaks256Raw), peaks4096: parse(peaks4096Raw) };
+    } catch {
+      return { peaks256: { min: [], max: [] }, peaks4096: { min: [], max: [] } };
+    }
+  });
+
+  ipcMain.handle('media:getThumbnail', async (_event, mediaId: string, timeUs: number) => {
+    const storage = requireStorage();
+    const media = storage.getMedia(mediaId);
+    if (!media) throw new Error('Media not found');
+    const { readFile } = await import('node:fs/promises');
+    if (!media.thumbPath) return null;
+    try {
+      const data = await readFile(media.thumbPath);
+      return { data: data.toString('base64'), mime: 'image/jpeg' };
+    } catch {
+      return null;
+    }
+  });
+
   // ---- Transcript export */
   ipcMain.handle(
     'transcript:export',
