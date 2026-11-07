@@ -101,7 +101,7 @@ Every command returns immer patches for undo/redo, validates before mutating, an
 | 21 | Multi-clip drag preserves offsets | ⚠ | Engine `moveItems` supports multi-move; no Playwright |
 | 22 | Drag from media library places items | ✓ | Renderer drag-drop test "drops a media asset onto the timeline canvas" |
 | 23 | Transitions attach, resize, re-align, clamp, survive trim | ✓ | Engine `addTransition`/`updateTransition`/`removeTransition` tests |
-| 24 | Keyframe diamonds drag/copy/delete | ✗ | Not yet implemented (Phase 5) |
+| 24 | Keyframe diamonds drag/copy/delete | ✓ | Renderer tests: right-click menu, Delete key, Ctrl+D duplicate, pointer drag |
 
 ### Persistence and Performance (§24–25, §27)
 
@@ -158,6 +158,7 @@ Escape closes the menu. Right-click on a clip selects it first.
 | TimelineApi wiring | ✓ | 5 methods |
 | Diamond markers rendering | ✓ | Renderer test |
 | Show keyframes toggle (K key) | ✓ | Renderer test |
+| Diamond drag/copy/delete interactions | ✓ | 3 renderer tests |
 
 ### Markers (SPEC 09 §18)
 
