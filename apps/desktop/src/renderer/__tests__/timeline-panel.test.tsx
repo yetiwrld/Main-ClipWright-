@@ -77,6 +77,9 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     updateKeyframe: vi.fn(() => true),
     moveKeyframe: vi.fn(() => true),
     duplicateKeyframe: vi.fn(() => true),
+    splitCaptionSegment: vi.fn(() => true),
+    mergeCaptionSegments: vi.fn(() => true),
+    trimCaptionSegment: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -503,6 +506,15 @@ describe('timeline panel', () => {
     expect(typeof timeline.updateKeyframe).toBe('function');
     expect(typeof timeline.moveKeyframe).toBe('function');
     expect(typeof timeline.duplicateKeyframe).toBe('function');
+  });
+
+
+  it('caption methods exist on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.splitCaptionSegment).toBe('function');
+    expect(typeof timeline.mergeCaptionSegments).toBe('function');
+    expect(typeof timeline.trimCaptionSegment).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

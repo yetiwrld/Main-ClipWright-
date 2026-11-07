@@ -31,6 +31,9 @@ import {
   updateKeyframe,
   moveKeyframe,
   duplicateKeyframe,
+  splitCaptionSegment,
+  mergeCaptionSegments,
+  trimCaptionSegment,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -103,6 +106,9 @@ export interface TimelineApi {
   updateKeyframe: (itemId: string, property: string, timeUs: number, patch: { value?: number | [number, number, number, number]; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset'; easing?: { preset: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeInCubic' | 'easeOutCubic' | 'easeInOutCubic' | 'easeInBack' | 'easeOutBack' | 'easeOutBounce' | 'easeOutElastic' } }) => boolean;
   moveKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
   duplicateKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
+  splitCaptionSegment: (itemId: string, timeUs: number) => boolean;
+  mergeCaptionSegments: (leftItemId: string, rightItemId: string) => boolean;
+  trimCaptionSegment: (itemId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -416,6 +422,12 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Move keyframe', (s) => moveKeyframe(s, { itemId, property, fromTimeUs, toTimeUs, fps })),
       duplicateKeyframe: (itemId, property, fromTimeUs, toTimeUs) =>
         run('Duplicate keyframe', (s) => duplicateKeyframe(s, { itemId, property, fromTimeUs, toTimeUs, fps })),
+      splitCaptionSegment: (itemId, timeUs) =>
+        run('Split caption', (s) => splitCaptionSegment(s, { itemId, timeUs, fps })),
+      mergeCaptionSegments: (leftItemId, rightItemId) =>
+        run('Merge captions', (s) => mergeCaptionSegments(s, { leftItemId, rightItemId, fps })),
+      trimCaptionSegment: (itemId, edge, timeUs) =>
+        run('Trim caption', (s) => trimCaptionSegment(s, { itemId, edge, timeUs, fps })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),

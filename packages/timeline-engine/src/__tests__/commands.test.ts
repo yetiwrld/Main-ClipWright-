@@ -30,6 +30,9 @@ import {
   updateKeyframe,
   moveKeyframe,
   duplicateKeyframe,
+  splitCaptionSegment,
+  mergeCaptionSegments,
+  trimCaptionSegment,
   splitItems,
   trimItem,
   trimItems,
@@ -1096,6 +1099,129 @@ describe('timeline commands', () => {
             expect(checkInvariantsMB(removed.state)).toEqual([]);
           }
         }
+      }
+    });
+  });
+
+
+  describe('captions (SPEC 09 §20)', () => {
+    function captionFixture(): { state: TimelineState; itemId: string } {
+      const base = createDefaultTimeline({ id: 'cap-1', name: 'Captions' });
+      const track = base.tracks[3]!; // captions track
+      const item = createMediaItem({
+        id: 'cap-item',
+        trackId: track.id,
+        label: 'Hello world',
+        mediaId: 'media-1',
+        type: 'video',
+        startUs: 0,
+        durationUs: 4_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      const capItem = { ...item, type: 'caption' as const };
+      const segment = {
+        id: 'seg-1',
+        wordRefs: [
+          { wordId: 'w1', startUs: 0, endUs: 1_000_000, textOverride: 'Hello' },
+          { wordId: 'w2', startUs: 1_000_000, endUs: 2_000_000, textOverride: 'world' },
+        ],
+        startUs: 0,
+        endUs: 4_000_000,
+        text: 'Hello world',
+        lines: ['Hello world'],
+      };
+      const itemWithSegment = { ...capItem, captionSegment: segment } as typeof item;
+      return {
+        state: {
+          ...base,
+          tracks: base.tracks.map((candidate) =>
+            candidate.id === track.id ? { ...candidate, itemIds: [itemWithSegment.id] } : candidate,
+          ),
+          items: { [itemWithSegment.id]: itemWithSegment },
+        },
+        itemId: itemWithSegment.id,
+      };
+    }
+
+    it('splits a caption segment at the nearest word boundary', () => {
+      const { state, itemId } = captionFixture();
+      const result = splitCaptionSegment(state, { itemId, timeUs: 1_500_000, fps: 30 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Two items should exist on the captions track
+        const captionTrack = result.state.tracks.find((t) => t.id === state.tracks[3]!.id);
+        expect(captionTrack?.itemIds).toHaveLength(2);
+        // Left item should have the first word
+        const left = result.state.items[itemId];
+        expect(left.captionSegment?.wordRefs).toHaveLength(1);
+        expect(left.captionSegment?.text).toBe('Hello');
+      }
+    });
+
+    it('merges two adjacent caption segments', () => {
+      const { state, itemId } = captionFixture();
+      // First split to create two segments
+      const split = splitCaptionSegment(state, { itemId, timeUs: 1_500_000, fps: 30 });
+      expect(split.ok).toBe(true);
+      if (split.ok) {
+        const captionTrack = split.state.tracks.find((t) => t.id === state.tracks[3]!.id);
+        const ids = captionTrack?.itemIds ?? [];
+        const rightId = ids.find((id) => id !== itemId)!;
+        const merge = mergeCaptionSegments(split.state, { leftItemId: itemId, rightItemId: rightId, fps: 30 });
+        expect(merge.ok).toBe(true);
+        if (merge.ok) {
+          // Back to one item
+          const capTrack = merge.state.tracks.find((t) => t.id === state.tracks[3]!.id);
+          expect(capTrack?.itemIds).toHaveLength(1);
+          const merged = merge.state.items[itemId];
+          expect(merged.captionSegment?.wordRefs).toHaveLength(2);
+          expect(merged.captionSegment?.text).toBe('Hello world');
+        }
+      }
+    });
+
+    it('trims a caption segment snapping to word boundaries', () => {
+      const { state, itemId } = captionFixture();
+      const result = trimCaptionSegment(state, { itemId, edge: 'end', timeUs: 1_500_000, fps: 30 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.state.items[itemId];
+        // Should snap to the word boundary at 1s or 2s
+        expect(item.captionSegment?.endUs).toBeGreaterThan(0);
+        expect(item.captionSegment?.endUs).toBeLessThan(4_000_000);
+      }
+    });
+
+    it('refuses to merge non-adjacent caption segments', () => {
+      const { state, itemId } = captionFixture();
+      const other = createMediaItem({
+        id: 'cap-far',
+        trackId: state.tracks[3]!.id,
+        label: 'Far away',
+        mediaId: 'media-1',
+        type: 'video',
+        startUs: 10_000_000,
+        durationUs: 2_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      const farItem = { ...other, type: 'caption' as const };
+      const farState: TimelineState = {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === state.tracks[3]!.id ? { ...t, itemIds: [itemId, other.id] } : t,
+        ),
+        items: { ...state.items, [other.id]: farItem },
+      };
+      const result = mergeCaptionSegments(farState, { leftItemId: itemId, rightItemId: other.id, fps: 30 });
+      expect(result.ok).toBe(false);
+    });
+
+    it('keeps invariants intact after caption operations', () => {
+      const { state, itemId } = captionFixture();
+      const split = splitCaptionSegment(state, { itemId, timeUs: 1_500_000, fps: 30 });
+      expect(split.ok).toBe(true);
+      if (split.ok) {
+        expect(checkInvariantsMB(split.state)).toEqual([]);
       }
     });
   });

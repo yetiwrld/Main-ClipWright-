@@ -1853,3 +1853,208 @@ export function duplicateKeyframe(
     notes: ['Keyframe duplicated.'],
   };
 }
+/**
+ * Find the nearest word boundary in a caption segment (SPEC 09 §20).
+ * Returns the timeUs of the word boundary closest to the target time,
+ * or the segment start/end if no boundary is closer.
+ */
+function nearestWordBoundary(
+  segment: { startUs: number; endUs: number; wordRefs: Array<{ startUs: number; endUs: number }> },
+  targetUs: number,
+): number {
+  if (segment.wordRefs.length === 0) return targetUs;
+  let best = segment.startUs;
+  let bestDist = Math.abs(segment.startUs - targetUs);
+  for (const word of segment.wordRefs) {
+    const dist = Math.abs(word.startUs - targetUs);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = word.startUs;
+    }
+  }
+  return best;
+}
+
+/**
+ * Split a caption segment at the nearest word boundary to the playhead
+ * (SPEC 09 §20). The right half gets a new id. Words outside the new
+ * range are removed from each half.
+ */
+export function splitCaptionSegment(
+  state: TimelineState,
+  params: { itemId: string; timeUs: number; fps: Fps },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (item.type !== 'caption') return fail('invalid', 'Only caption items can be split at word boundaries.');
+  if (!item.captionSegment) return fail('invalid', 'That caption item has no segment.');
+
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const segment = item.captionSegment;
+  const splitUs = nearestWordBoundary(segment, params.timeUs);
+  if (splitUs <= segment.startUs || splitUs >= segment.endUs) {
+    return fail('invalid', 'The playhead is outside the caption segment.');
+  }
+
+  const leftWords = segment.wordRefs.filter((w) => w.endUs <= splitUs);
+  const rightWords = segment.wordRefs.filter((w) => w.startUs >= splitUs);
+
+  const leftText = leftWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+  const rightText = rightWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+
+  const newId = `cap-${Date.now()}`;
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const rightItem = {
+      ...copyPlain(item),
+      id: newId,
+      startUs: splitUs,
+      durationUs: item.durationUs - (splitUs - item.startUs),
+      captionSegment: {
+        ...segment,
+        id: newId,
+        wordRefs: rightWords,
+        startUs: splitUs,
+        text: rightText,
+      },
+    } as TimelineItem;
+    draft.items[newId] = rightItem;
+    addToTrack(draft, item.trackId, newId);
+
+    const leftTarget = draft.items[params.itemId] as TimelineItem;
+    leftTarget.durationUs = splitUs - item.startUs;
+    if (leftTarget.captionSegment) {
+      leftTarget.captionSegment.wordRefs = leftWords;
+      leftTarget.captionSegment.text = leftText;
+      leftTarget.captionSegment.endUs = splitUs;
+    }
+    sortTrackItems(draft, item.trackId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId, newId],
+    notes: ['Caption split at word boundary.'],
+  };
+}
+
+/**
+ * Merge two adjacent caption segments on the same track (SPEC 09 §20,
+ * Ctrl+J). The right segment is removed and its words are appended to
+ * the left segment.
+ */
+export function mergeCaptionSegments(
+  state: TimelineState,
+  params: { leftItemId: string; rightItemId: string; fps: Fps },
+): CommandResult {
+  const left = state.items[params.leftItemId];
+  const right = state.items[params.rightItemId];
+  if (!left || !right) return fail('not_found', 'That item no longer exists.');
+  if (left.type !== 'caption' || right.type !== 'caption') return fail('invalid', 'Only caption items can be merged.');
+  if (!left.captionSegment || !right.captionSegment) return fail('invalid', 'That caption item has no segment.');
+  if (left.trackId !== right.trackId) return fail('invalid', 'Caption segments must be on the same track.');
+
+  const track = state.tracks.find((candidate) => candidate.id === left.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const leftEnd = itemEndUs(left);
+  if (Math.abs(leftEnd - right.startUs) > frameDurationUs(params.fps)) {
+    return fail('invalid', 'Those caption segments are not adjacent.');
+  }
+
+  const leftSeg = left.captionSegment;
+  const rightSeg = right.captionSegment;
+  if (!leftSeg || !rightSeg) return fail('invalid', 'That caption item has no segment.');
+  const mergedWords = [...leftSeg.wordRefs, ...rightSeg.wordRefs];
+  const mergedText = mergedWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+  const rightEndUs = rightSeg.endUs;
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const leftTarget = draft.items[params.leftItemId] as TimelineItem;
+    if (leftTarget.captionSegment) {
+      leftTarget.captionSegment.wordRefs = mergedWords;
+      leftTarget.captionSegment.text = mergedText;
+      leftTarget.captionSegment.endUs = rightEndUs;
+    }
+    leftTarget.durationUs = rightEndUs - leftTarget.startUs;
+    delete draft.items[params.rightItemId];
+    removeFromTrack(draft, left.trackId, params.rightItemId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.leftItemId],
+    notes: ['Caption segments merged.'],
+  };
+}
+
+/**
+ * Trim a caption segment, snapping to word boundaries (SPEC 09 §20).
+ * Words outside the new range are removed from this segment only.
+ */
+export function trimCaptionSegment(
+  state: TimelineState,
+  params: { itemId: string; edge: 'start' | 'end'; timeUs: number; fps: Fps },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (item.type !== 'caption') return fail('invalid', 'Only caption items can be trimmed at word boundaries.');
+  if (!item.captionSegment) return fail('invalid', 'That caption item has no segment.');
+
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const segment = item.captionSegment;
+  const minDuration = frameDurationUs(params.fps);
+
+  if (params.edge === 'start') {
+    const snapUs = nearestWordBoundary(segment, params.timeUs);
+    const newStart = Math.max(item.startUs, Math.min(snapUs, itemEndUs(item) - minDuration));
+    if (newStart === item.startUs) return fail('invalid', 'The trim did not change the start.');
+
+    const remainingWords = segment.wordRefs.filter((w) => w.endUs > newStart);
+    const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+      const target = draft.items[params.itemId] as TimelineItem;
+      target.startUs = newStart;
+      target.durationUs = itemEndUs(item) - newStart;
+      if (target.captionSegment) {
+        target.captionSegment.wordRefs = remainingWords;
+        target.captionSegment.startUs = newStart;
+        const remainingText = remainingWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+        target.captionSegment.text = remainingText;
+      }
+      sortTrackItems(draft, item.trackId);
+    });
+    return { ok: true, state: nextState, patches, inverse, affectedItemIds: [params.itemId], notes: ['Caption trimmed at word boundary.'] };
+  } else {
+    const snapUs = nearestWordBoundary(segment, params.timeUs);
+    const itemEnd = itemEndUs(item);
+    const newEnd = Math.min(itemEnd, Math.max(snapUs, item.startUs + minDuration));
+    if (newEnd === itemEnd) return fail('invalid', 'The trim did not change the end.');
+
+    const remainingWords = segment.wordRefs.filter((w) => w.startUs < newEnd);
+    const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+      const target = draft.items[params.itemId] as TimelineItem;
+      target.durationUs = newEnd - item.startUs;
+      if (target.captionSegment) {
+        target.captionSegment.wordRefs = remainingWords;
+        target.captionSegment.endUs = newEnd;
+        const remainingText = remainingWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+        target.captionSegment.text = remainingText;
+      }
+      sortTrackItems(draft, item.trackId);
+    });
+    return { ok: true, state: nextState, patches, inverse, affectedItemIds: [params.itemId], notes: ['Caption trimmed at word boundary.'] };
+  }
+}
