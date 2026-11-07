@@ -159,6 +159,9 @@ export const api = {
   },
 
   // ---- Consent and privacy ----
+  async consentPrompt(providerId: string, category: string) {
+    return requireBridge('Preparing the permission dialog').aiConsentPrompt(providerId, category);
+  },
   async grantConsent(providerId: string, category: string, scope: 'once' | 'always') {
     return requireBridge('Recording your choice').aiGrantConsent({ providerId, category, scope });
   },

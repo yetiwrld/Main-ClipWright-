@@ -110,6 +110,7 @@ contextBridge.exposeInMainWorld('clipwright', {
   aiConnectivity: (force) => ipcRenderer.invoke('ai:connectivity', force),
 
   // ---- Consent and privacy (SPEC 06 §8) ----
+  aiConsentPrompt: (providerId, category) => ipcRenderer.invoke('ai:consent:prompt', providerId, category),
   aiGrantConsent: (decision) => ipcRenderer.invoke('ai:consent:grant', decision),
   aiRevokeConsent: (providerId, category) => ipcRenderer.invoke('ai:consent:revoke', providerId, category),
   aiPrivacyOverview: () => ipcRenderer.invoke('ai:privacy:overview'),

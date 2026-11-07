@@ -502,6 +502,23 @@ function registerIPC(): void {
   ipcMain.handle('ai:connectivity', async (_event, force?: boolean) => requireConnectivity().check(force));
 
   // ---- Consent and privacy */
+  ipcMain.handle('ai:consent:prompt', async (_event, providerId: string, category) => {
+    const record = requireStorage().listProviders().find((provider) => provider.id === providerId);
+    if (!record) throw new Error('That provider no longer exists.');
+    let host = record.baseUrl;
+    try {
+      host = new URL(record.baseUrl).host;
+    } catch {
+      /* keep the raw address */
+    }
+    return requireConsents().buildPrompt({
+      providerId: record.id,
+      providerName: record.name,
+      locality: record.locality,
+      host,
+      category,
+    });
+  });
   ipcMain.handle('ai:consent:grant', async (_event, decision) => requireConsents().grant(decision));
   ipcMain.handle('ai:consent:revoke', async (_event, providerId: string, category) => {
     requireConsents().revoke(providerId, category);

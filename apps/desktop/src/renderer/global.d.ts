@@ -303,6 +303,17 @@ export interface DataSentEntryPayload {
   approxBytes: number;
 }
 
+export interface ConsentPromptPayload {
+  providerId: string;
+  providerName: string;
+  host: string;
+  category: string;
+  where: string;
+  message: string;
+  sent: string;
+  neverSent: string;
+}
+
 export interface PrivacyOverviewPayload {
   consents: ConsentRecordPayload[];
   dataSent: DataSentEntryPayload[];
@@ -527,6 +538,7 @@ export interface ClipwrightBridge {
   aiConnectivity(force?: boolean): Promise<ConnectivityPayload>;
 
   // Consent and privacy (SPEC 06 §8)
+  aiConsentPrompt(providerId: string, category: string): Promise<ConsentPromptPayload>;
   aiGrantConsent(decision: { providerId: string; category: string; scope: 'once' | 'always' }): Promise<ConsentRecordPayload>;
   aiRevokeConsent(providerId: string, category: string): Promise<boolean>;
   aiPrivacyOverview(): Promise<PrivacyOverviewPayload>;

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Route } from '../App.js';
 import { api, describeError, isDesktop } from '../api.js';
 import type { AppSettings, AppInfo } from '../global.js';
+import { AiProvidersSection } from '../sections/AiProvidersSection.js';
+import { PrivacySection } from '../sections/PrivacySection.js';
 
 interface Props {
   section: string;
@@ -12,7 +14,8 @@ const SECTIONS = [
   { id: 'general', label: 'General' },
   { id: 'models', label: 'Models' },
   { id: 'performance', label: 'Performance & proxies' },
-  { id: 'providers', label: 'AI Providers' },
+  { id: 'providers', label: 'AI providers' },
+  { id: 'privacy', label: 'Privacy' },
   { id: 'updates', label: 'Updates' },
   { id: 'storage', label: 'Storage' },
   { id: 'about', label: 'About' },
@@ -86,7 +89,12 @@ export function SettingsPage({ section, onNavigate }: Props) {
             {section === 'general' && <GeneralSection settings={settings} update={update} />}
             {section === 'models' && <ModelsSection />}
             {section === 'performance' && <PerformanceSection settings={settings} update={update} />}
-            {section === 'providers' && <ProvidersSection settings={settings} update={update} />}
+            {section === 'providers' && (
+              <AiProvidersSection settings={settings} onUpdateSettings={async (patch) => update(patch)} />
+            )}
+            {section === 'privacy' && (
+              <PrivacySection settings={settings} onUpdateSettings={async (patch) => update(patch)} />
+            )}
             {section === 'updates' && <UpdatesSection settings={settings} update={update} />}
             {section === 'storage' && <StorageSection settings={settings} />}
             {section === 'about' && <AboutSection />}
