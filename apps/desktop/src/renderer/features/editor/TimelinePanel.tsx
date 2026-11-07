@@ -64,6 +64,7 @@ type DragState =
   | { kind: 'move'; itemId: string; startUs: number; pointerStartUs: number }
   | { kind: 'trim'; itemId: string; edge: 'start' | 'end' }
   | { kind: 'roll'; leftItemId: string; rightItemId: string }
+  | { kind: 'work-area'; edge: 'in' | 'out' }
   | null;
 
 export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
@@ -1177,6 +1178,42 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
               }}
             />
           ))}
+          {state.workArea && (
+            <>
+              <div
+                data-testid="work-area-in-handle"
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setDrag({ kind: 'work-area', edge: 'in' });
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: usToX(state.workArea.inUs) - scrollX,
+                  width: 8,
+                  height: 28,
+                  cursor: 'ew-resize',
+                  pointerEvents: 'auto',
+                }}
+              />
+              <div
+                data-testid="work-area-out-handle"
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setDrag({ kind: 'work-area', edge: 'out' });
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: usToX(state.workArea.outUs) - scrollX,
+                  width: 8,
+                  height: 28,
+                  cursor: 'ew-resize',
+                  pointerEvents: 'auto',
+                }}
+              />
+            </>
+          )}
         </div>
       </div>
 

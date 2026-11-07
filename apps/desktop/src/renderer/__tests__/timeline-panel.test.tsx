@@ -731,6 +731,22 @@ describe('timeline panel', () => {
     expect(screen.getByRole('button', { name: /^Pause$/ })).toBeTruthy();
   });
 
+
+  it('renders work area drag handles when work area is set', () => {
+    const state = fixture();
+    const stateWithWorkArea = { ...state, workArea: { inUs: 1_000_000, outUs: 3_000_000 } };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithWorkArea)} />);
+    expect(container.querySelector('[data-testid="work-area-in-handle"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="work-area-out-handle"]')).toBeTruthy();
+  });
+
+  it('does not render work area handles when work area is cleared', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    expect(container.querySelector('[data-testid="work-area-in-handle"]')).toBeNull();
+    expect(container.querySelector('[data-testid="work-area-out-handle"]')).toBeNull();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
