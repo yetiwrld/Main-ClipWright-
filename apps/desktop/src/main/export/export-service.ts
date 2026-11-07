@@ -25,6 +25,7 @@ import {
 import type { ExportHistoryRecord } from '@clipwright/project-schema';
 import { ExportQueue, cleanupPartialFiles, type QueueSnapshot } from './export-queue.js';
 import { solidColourFrameSource, writeSubtitleSidecars, type FrameSource } from './export-runner.js';
+import { createDecodeFrameSource } from './decode-frame-source.js';
 
 /** Where the caller asked the file to go, and how to handle a name clash. */
 export type ClashPolicy = 'auto-number' | 'replace' | 'ask';
@@ -205,14 +206,24 @@ export class ExportService {
   }
 
   /**
-   * The fallback frame source.
+   * The default frame source.
    *
-   * Until the compositor drives the hidden render window, exports render the
-   * canvas background colour. This is a real frame producer: the encoded file
-   * contains exactly these bytes and is still validated as a whole. It is never
-   * used to *claim* a composition was rendered.
+   * With video on the timeline this decodes the real footage through ffmpeg
+   * (SPEC 14 §4.2) and composites it topmost-wins. With no video it renders the
+   * canvas background colour. Either way the bytes in the file are produced
+   * here and measured afterwards; the compositor's text/effects/transitions are
+   * still to come, which `docs/export.md` states plainly.
    */
   private defaultFrameSource(plan: ExportPlan): FrameSource {
+    const hasVideo = plan.items.some(
+      (item) => (item.type === 'video' || item.type === 'image') && item.mediaId,
+    );
+    if (hasVideo) {
+      return createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => this.storage.getMedia(mediaId)?.path,
+      });
+    }
     return solidColourFrameSource({ width: plan.width, height: plan.height, luma: 16, chroma: 128 });
   }
 

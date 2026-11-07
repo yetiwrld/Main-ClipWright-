@@ -223,9 +223,12 @@ Raw ffmpeg output is never shown in the interface. It stays in the job log.
 - **No frame blending.** Frame-rate conversion uses nearest-time selection.
 - **4K 60 fps on CPU is slower than real time.** It completes and validates, but
   a long clip can take a while.
-- **The compositor is not yet driving exports.** Frames currently come from a
-  solid-colour source; the render window and per-item decoder path described in
-  `specs/14` §4.1–4.2 are the next piece. Everything around it — the plan, the
-  encoder arguments, the queue, the measurements and the verdict — is real and
-  covered by tests that run the bundled ffmpeg. See `docs/verification.md` for
-  exactly what is and is not verified.
+- **Video is decoded and composited, but the full compositor is not yet in the
+  export path.** Each video/image item is decoded by its own ffmpeg process
+  (§4.2) at the export resolution and rate, and the canvas shows the topmost
+  visible item; where nothing is on the timeline you get the canvas colour. Still
+  to come: text and caption burn-in, effects, transitions, keyframed transforms
+  and blend modes from `renderFrame` (§4.1, §4.3, §4.4). Everything around it —
+  the plan, the encoder arguments, the queue, the measurements and the verdict —
+  is real and covered by tests that run the bundled ffmpeg on actual footage. See
+  `docs/verification.md` for exactly what is and is not verified.

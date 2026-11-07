@@ -7,6 +7,7 @@
  * history row tells the truth about the file on disk.
  */
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -250,6 +251,74 @@ describe('ExportService refusals', () => {
       expect(outcome.action).toBe('choose-folder');
     }
   });
+});
+
+describe.skipIf(!HAS_FFMPEG)('ExportService with real media', () => {
+  it('renders the actual source footage into the exported file', async () => {
+    // A real 1-second clip with a moving bar: no --createFrameSource override, so
+    // the service must choose the decode path itself.
+    mkdirSync(TMP, { recursive: true });
+    const mediaPath = join(TMP, 'source.mp4');
+    const rawPath = join(TMP, 'source.yuv');
+    const width = 320;
+    const height = 180;
+    const frameBytes = width * height + 2 * (width / 2) * (height / 2);
+    const frames: Buffer[] = [];
+    for (let index = 0; index < 30; index += 1) {
+      const frame = Buffer.alloc(frameBytes, 128);
+      frame.fill(120, 0, width * height);
+      const barX = (index * 8) % width;
+      for (let y = 0; y < height; y += 1) {
+        for (let x = barX; x < Math.min(width, barX + 40); x += 1) {
+          frame[y * width + x] = 220;
+        }
+      }
+      frames.push(frame);
+    }
+    writeFileSync(rawPath, Buffer.concat(frames));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', `${width}x${height}`,
+        '-framerate', '30', '-i', rawPath, '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast',
+        '-pix_fmt', 'yuv420p', '-y', mediaPath],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+
+    const storage = makeStorage({
+      getMedia: (mediaId) => (mediaId === 'media-real' ? { path: mediaPath } : undefined),
+    });
+    const service = new ExportService({ storage });
+    const outcome = await service.start({
+      jobId: `real-${Date.now().toString(36)}`,
+      name: 'Real footage',
+      settings: makeSettings({
+        items: [
+          {
+            id: 'item-real',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-real',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: false,
+          },
+        ],
+      }),
+      outputDir: join(TMP, 'real'),
+      fullDecode: true,
+    });
+    expect(outcome.ok).toBe(true);
+    await service.whenIdle();
+
+    const [record] = storage.history;
+    expect(record, 'the export should be recorded').toBeTruthy();
+    expect(record.status, JSON.stringify(record.validationReport, null, 2)).toBe('verified');
+  }, 180_000);
 });
 
 describe.skipIf(!HAS_FFMPEG)('ExportService output paths', () => {

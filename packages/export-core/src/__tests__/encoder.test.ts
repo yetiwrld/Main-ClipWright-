@@ -439,3 +439,27 @@ describe('cfrArgs / detectCapabilities', () => {
     expect(DEFAULT_CAPABILITIES.fpsMode).toBe(false);
   });
 });
+
+describe('sourceFilterChain fit mode', () => {
+  it('letterboxes into the canvas instead of stretching', () => {
+    const chain = sourceFilterChain({
+      targetFps: 30,
+      outputWidth: 1080,
+      outputHeight: 1920,
+      fit: 'fit',
+    });
+    expect(chain).toContain('scale=1080:1920:force_original_aspect_ratio=decrease');
+    expect(chain).toContain('pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black');
+    expect(chain).toContain('setsar=1');
+  });
+
+  it('keeps even canvas dimensions in fit mode', () => {
+    const chain = sourceFilterChain({ targetFps: 30, outputWidth: 1081, outputHeight: 1921, fit: 'fit' });
+    expect(chain).toContain('pad=1082:1922');
+  });
+
+  it('defaults to fill mode', () => {
+    const chain = sourceFilterChain({ targetFps: 30, outputWidth: 1080, outputHeight: 1920 });
+    expect(chain).not.toContain('pad=');
+  });
+});

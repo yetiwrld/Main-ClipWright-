@@ -283,10 +283,30 @@ export function sourceFilterChain(options: {
   outputHeight: number;
   /** Playback speed; 1 = normal. */
   speed?: number;
+  /**
+   * `fill` decodes at the item's needed size (up to the output size).
+   * `fit` letterboxes the whole frame into the output canvas, preserving the
+   * source aspect — what an export needs when the item fills the canvas but its
+   * own aspect differs (SPEC 14 §3.2: never stretch).
+   */
+  fit?: 'fill' | 'fit';
 }): string {
   const filters: string[] = [];
   if (options.speed && options.speed !== 1) filters.push(`setpts=${(1 / options.speed).toFixed(6)}*PTS`);
   filters.push(`fps=${options.targetFps}:round=near`);
+
+  if (options.fit === 'fit') {
+    // Fit inside the canvas, then pad the remainder with black. The pad
+    // expression keeps the frames centred, and both sides stay even.
+    const width = roundEvenLocal(options.outputWidth);
+    const height = roundEvenLocal(options.outputHeight);
+    filters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos`);
+    filters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`);
+    filters.push('setsar=1');
+    filters.push('format=yuv420p');
+    return filters.join(',');
+  }
+
   const width = Math.min(options.sourceWidth ?? options.outputWidth, options.outputWidth);
   const height = Math.min(options.sourceHeight ?? options.outputHeight, options.outputHeight);
   // Even dimensions only: yuv420p cannot represent odd sizes.
