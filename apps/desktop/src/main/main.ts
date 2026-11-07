@@ -21,6 +21,7 @@ import { ConnectivityService, type ProcessingMode } from '@clipwright/ai-core';
 import { ExportService, type StartExportRequest } from './export/export-service.js';
 import { UpdateService } from './updater/update-service.js';
 import { resolveTrustedKeys } from './updater/update-config.js';
+import { isSmokeTest, runSmokeTestAndExit } from './smoke-test.js';
 import { STARTUP_CHECK_DELAY_MS, autoCheckIntervalMs, shouldAutoCheck } from '@clipwright/update-core';
 
 const isDev = !app.isPackaged;
@@ -836,7 +837,19 @@ function registerIPC(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // SPEC 15 §8.2 step 6: `--smoke-test` proves a *packaged* copy works and then
+  // exits, so the release pipeline can refuse a broken installer.
+  if (isSmokeTest(process.argv)) {
+    const resourcesBin = app.isPackaged
+      ? join(process.resourcesPath, 'bin')
+      : resolve(join(process.cwd(), 'resources', 'bin'));
+    const rendererIndex = app.isPackaged
+      ? join(__dirname, '../renderer/index.html')
+      : resolve(join(process.cwd(), 'apps', 'desktop', 'dist', 'renderer', 'index.html'));
+    await runSmokeTestAndExit({ binDir: resourcesBin, rendererIndexPath: rendererIndex });
+  }
+
   const defaultWorkspace = resolve(app.getPath('documents'), 'Clipwright Studio');
   const userData = app.getPath('userData');
 

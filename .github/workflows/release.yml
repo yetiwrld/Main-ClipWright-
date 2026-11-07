@@ -1,19 +1,47 @@
 name: Release
 
+# SPEC 15 §8.2.
+#
+# A release is only published when every gate passes. The order matters:
+# build → package → sign → *verify the signature* → smoke test → publish →
+# re-download and verify what was actually published. Anything that fails before
+# the publish step leaves no release behind; anything that fails after it leaves
+# a draft, never a "latest".
+
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel for this build'
+        required: true
+        default: 'beta'
+        type: choice
+        options: [beta, stable]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release-windows:
+  release:
+    name: Build and publish
     runs-on: windows-latest
+    permissions:
+      contents: write # only this job may create releases
+    env:
+      # §8.2: no secret is ever echoed; logs are masked by Actions.
+      UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout (full history for release notes)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
@@ -23,26 +51,124 @@ jobs:
         with:
           node-version: '22.x'
 
-      - name: Enable Corepack & pnpm
+      - name: Enable Corepack
         run: corepack enable
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false
 
-      - name: Run lint, typecheck & test gates
-        run: |
-          pnpm lint
-          pnpm typecheck
-          pnpm test
+      # ---- Gate 1: the same checks CI runs. A failing test blocks the release.
+      - name: Lint (design tokens + no-fakes audit)
+        run: pnpm lint
 
-      - name: Build Windows installer & portable artefacts
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit and integration tests
+        run: pnpm test
+
+      # ---- Gate 2: binaries. Unverified binaries fail the release.
+      - name: Fetch and verify bundled binaries
+        run: node scripts/release/fetch-binaries.mjs
+
+      - name: Verify binary manifest is consistent
+        run: node scripts/release/verify-binaries.mjs
+
+      # ---- Build and package.
+      - name: Build and package installer and portable exe
         run: node scripts/release/build-release-artefacts.mjs
-        env:
-          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      # A packaging config that silently drops the main process produces an app
+      # that cannot start. Fail loudly instead of shipping it.
+      - name: Assert the package contains a launchable app
+        run: node scripts/release/assert-package.mjs
+
+      # ---- Sign the manifest, and prove the embedded key verifies it.
+      - name: Sign release manifest
+        shell: bash
+        env:
+          UPDATE_PUBLIC_KEY_B64: ${{ vars.UPDATE_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "${GITHUB_REF_NAME}" ] || [ "${GITHUB_REF_NAME}" = "${GITHUB_REF}" ]; then
+            VERSION="$(node -p "require('./apps/desktop/package.json').version")"
+          fi
+          CHANNEL="${{ github.event.inputs.channel || 'stable' }}"
+          # A prerelease tag is always published as beta, whatever was selected.
+          case "$VERSION" in *-*) CHANNEL="beta" ;; esac
+          node scripts/release/extract-notes.mjs --version "$VERSION" --out dist/release/notes.md
+          node scripts/release/make-manifest.mjs \
+            --dir dist/release \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --notes dist/release/notes.md \
+            --out dist/release
+
+      # ---- Gate 3: the installer the users will run must actually install and
+      # the installed app must start and exit cleanly (§8.2 step 6).
+      - name: Clean-install smoke test
+        run: node scripts/release/smoke-install.mjs
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@6f51ac03b9356d40dc5b39f27f0f9b0f4f7c4e33 # v4.6.1
+        with:
+          name: release-assets
+          path: |
+            dist/release/*.exe
+            dist/release/latest.yml
+            dist/release/*.blockmap
+            dist/release/SHA256SUMS.txt
+            dist/release/release-manifest.json
+            dist/release/release-manifest.json.sig
+            dist/release/THIRD-PARTY-NOTICES.txt
+            dist/release/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 14
+
+      # ---- Publish as a draft first, so step 8 can verify real download URLs
+      # before anything is marked "latest".
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          gh release create "${{ github.ref_name }}" dist/release/* --title "Clipwright Studio ${{ github.ref_name }}" --notes-file dist/release/RELEASE_NOTES.md
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE:-tag}" != "tag" ]; then TAG="v$(node -p "require('./apps/desktop/package.json').version")"; fi
+          IS_PRE=false
+          case "$TAG" in *-*) IS_PRE=true ;; esac
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then IS_PRE=true; fi
+
+          gh release create "$TAG" \
+            --draft \
+            --title "Clipwright Studio ${TAG#v}" \
+            --notes-file dist/release/RELEASE_NOTES.md \
+            $( [ "$IS_PRE" = "true" ] && echo "--prerelease" ) \
+            dist/release/*.exe \
+            dist/release/latest.yml \
+            dist/release/*.blockmap \
+            dist/release/SHA256SUMS.txt \
+            dist/release/release-manifest.json \
+            dist/release/release-manifest.json.sig
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "IS_PRE=$IS_PRE" >> "$GITHUB_ENV"
+
+      # ---- Step 8: verify what was actually published, from the public URLs.
+      - name: Verify the published assets
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_PUBLIC_KEY_B64: ${{ vars.UPDATE_PUBLIC_KEY_B64 }}
+        run: pnpm tsx scripts/release/verify-published.mjs
+
+      - name: Publish the release (or leave a draft on failure)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false
+          if [ "$IS_PRE" = "false" ]; then gh release edit "$TAG" --latest; fi
