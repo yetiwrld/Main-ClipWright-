@@ -13,6 +13,7 @@ import {
   shouldPrompt,
   shouldShowChip,
 } from '@clipwright/update-core';
+import type { UpdateState } from '@clipwright/update-core';
 import type { UpdateStatePayload } from '../../global.js';
 import { getBridge, isDesktop } from '../../api.js';
 
@@ -126,19 +127,21 @@ export function useUpdates(): UseUpdatesResult {
     void bridge?.openPath(url);
   }, [bridge, state]);
 
-  const effective = state ?? UNSUPPORTED;
+  // Safe without a cast: `global.d.ts` asserts UpdateStatePayload is identical to
+  // update-core's UpdateState, so this assignment is checked at compile time.
+  const effective: UpdateState = state ?? UNSUPPORTED;
 
   return useMemo<UseUpdatesResult>(() => {
     const statusLine = desktop
-      ? describeUpdateStatus(effective as never, now)
+      ? describeUpdateStatus(effective, now)
       : 'Updates are available in the desktop app.';
 
     return {
       state,
       statusLine,
       progressLine: formatDownloadProgress(effective.progress),
-      shouldPromptDialog: desktop && state !== null && shouldPrompt(effective as never, now),
-      showChip: desktop && state !== null && shouldShowChip(effective as never),
+      shouldPromptDialog: desktop && state !== null && shouldPrompt(effective, now),
+      showChip: desktop && state !== null && shouldShowChip(effective),
       checking: effective.status === 'checking',
       lastCheckedLabel:
         effective.lastCheckedAt === null

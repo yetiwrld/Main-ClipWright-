@@ -112,7 +112,38 @@ for (const doc of docFiles) {
 }
 
 /* ------------------------------------------------------------------ *
- * 4. File-name references in the package config must match package.json.
+ * 4. The renderer must not import main-process code.
+ *
+ * This is an Electron boundary, not a style preference: main-process modules
+ * import `electron`, `node:fs` and friends, so a renderer module that pulls one
+ * in either fails to bundle or bundles something that cannot work in a
+ * sandboxed renderer. Two modules had drifted across it — a privacy string and
+ * a string-search function — which is why this is checked rather than trusted.
+ * ------------------------------------------------------------------ */
+const rendererDir = join(ROOT, 'apps', 'desktop', 'src', 'renderer');
+function walk(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : walk(full);
+    return /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
+
+for (const file of walk(rendererDir)) {
+  const text = readFileSync(file, 'utf8');
+  for (const match of text.matchAll(/from\s+'([^']+)'/g)) {
+    const specifier = match[1];
+    if (/^(\.\.\/)+(main)\//.test(specifier) || specifier.includes('/src/main/')) {
+      fail(
+        `${relative(ROOT, file)} imports ${specifier}. The renderer must not depend on ` +
+          `main-process code; move the shared piece to a package or beside the renderer.`,
+      );
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';
@@ -134,5 +165,3 @@ if (problems.length > 0) {
 console.log(
   `check-repo: OK — ${workflowFiles.length} workflows, ${docFiles.length} docs, ${tracked.size} tracked files.`,
 );
-
-void relative;

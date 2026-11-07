@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Route } from '../App.js';
-import { fuzzySearch, type CommandPaletteItem } from '../../main/ipc.js';
+import { fuzzySearch, type CommandPaletteItem } from './command-palette-search.js';
 
 interface Props {
   onClose: () => void;

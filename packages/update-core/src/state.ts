@@ -447,3 +447,14 @@ export function releaseVersionOf(state: UpdateState): string | null {
 
 /** Re-exported so the main process can type its job without importing manifest. */
 export type { ReleaseManifest };
+
+/**
+ * SPEC 15 §3, §10 — the privacy line shown in Settings → Updates and again under
+ * Privacy.
+ *
+ * Lives here rather than beside the updater config so the renderer can show it
+ * without importing main-process code into its bundle. The wording is a promise
+ * from §10 (no telemetry), so it is covered by the test suite alongside the rest.
+ */
+export const UPDATE_PRIVACY_NOTE =
+  'Checking for updates contacts github.com. Nothing about you or your projects is sent.';

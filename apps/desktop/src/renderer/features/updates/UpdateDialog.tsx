@@ -78,7 +78,7 @@ export function UpdateDialog({
 
         {release.summary && <p className={TEXT}>{release.summary}</p>}
 
-        <details className="rounded-lg border border-[var(--colour-border-subtle)] p-3">
+        <details className="rounded-[var(--radius-md)] border border-[var(--line-subtle)] p-[var(--space-3)]">
           <summary className={`${TEXT} cursor-pointer select-none`}>Full release notes</summary>
           <div className={`${NOTES} mt-2`}>{renderNotes(release.full)}</div>
         </details>

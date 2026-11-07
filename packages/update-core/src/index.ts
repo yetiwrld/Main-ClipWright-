@@ -97,3 +97,6 @@ export type {
   BootDecision,
   RecoveryContext,
 } from './journal.js';
+
+// Privacy line shared by main and renderer (SPEC 15 §3, §10)
+export { UPDATE_PRIVACY_NOTE } from './state.js';

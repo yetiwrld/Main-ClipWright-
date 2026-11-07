@@ -745,6 +745,22 @@ export interface ToolIntegrityPayload {
   summary: string | null;
 }
 
+/**
+ * The payloads above are hand-copied across the IPC boundary, because the
+ * renderer bundle should not grow a runtime dependency on update-core just for
+ * types. These assertions make the copy compile-checked rather than trusted: if
+ * update-core's `UpdateState` gains or changes a field and this file is not
+ * updated, `tsc` fails here instead of the renderer silently reading `undefined`
+ * at runtime.
+ */
+type AssertSame<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+const _updateStateMatchesCore: AssertSame<UpdateStatePayload, import('@clipwright/update-core').UpdateState> = true;
+const _updateStatusMatchesCore: AssertSame<UpdateStatusPayload, import('@clipwright/update-core').UpdateStatus> = true;
+const _updateProgressMatchesCore: AssertSame<UpdateProgressPayload, import('@clipwright/update-core').UpdateProgress> = true;
+void _updateStateMatchesCore;
+void _updateStatusMatchesCore;
+void _updateProgressMatchesCore;
+
 export interface UpdateStatePayload {
   status: UpdateStatusPayload;
   currentVersion: string;

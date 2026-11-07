@@ -1,11 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import {
-  fuzzySearch,
-  parseShortcut,
-  createShortcutHandler,
-  DEFAULT_SHORTCUTS,
-  type CommandPaletteItem,
-} from '../ipc.js';
+// The palette search now lives beside the component; the shortcut helpers are
+// still main-process concerns (Spec 02 §2.6) and stay in main/ipc.ts.
+import { fuzzySearch, type CommandPaletteItem } from '../components/command-palette-search.js';
+import { parseShortcut, createShortcutHandler, DEFAULT_SHORTCUTS } from '../../main/ipc.js';
 
 function item(label: string, category = 'Test'): CommandPaletteItem {
   return { id: label.toLowerCase().replace(/\s+/g, '-'), label, category, action: () => {} };

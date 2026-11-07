@@ -4,35 +4,6 @@
  * Spec 02 §2.7 — First Run Setup
  */
 
-export interface CommandPaletteItem {
-  id: string;
-  label: string;
-  shortcut?: string;
-  category: string;
-  action: () => void;
-}
-
-export function fuzzySearch(query: string, items: CommandPaletteItem[]): CommandPaletteItem[] {
-  if (!query) return items;
-  const q = query.toLowerCase();
-  const scored = items.map((item) => {
-    const label = item.label.toLowerCase();
-    let score = 0;
-    let qi = 0;
-    for (let i = 0; i < label.length && qi < q.length; i++) {
-      if (label[i] === q[qi]) {
-        score++;
-        qi++;
-      }
-    }
-    return { item, score };
-  });
-  return scored
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((s) => s.item);
-}
-
 export interface ShortcutDef {
   key: string;
   ctrl?: boolean;

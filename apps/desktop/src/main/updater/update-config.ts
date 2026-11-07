@@ -84,9 +84,12 @@ export function isAllowedUpdateUrl(rawUrl: string): boolean {
   return (ALLOWED_UPDATE_HOSTS as readonly string[]).includes(url.hostname);
 }
 
-/** §3: the privacy line shown in Settings → Updates, also listed in Privacy. */
-export const UPDATE_PRIVACY_NOTE =
-  'Checking for updates contacts github.com. Nothing about you or your projects is sent.';
+/**
+ * §3: the privacy line shown in Settings → Updates, also listed in Privacy.
+ * Defined in update-core so the renderer can show the same string without
+ * importing main-process code; re-exported here for existing call sites.
+ */
+export { UPDATE_PRIVACY_NOTE } from '@clipwright/update-core';
 
 /**
  * User-Agent for update requests. §3: it may include the app version and OS and
