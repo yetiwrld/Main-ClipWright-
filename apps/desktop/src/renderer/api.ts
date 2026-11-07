@@ -58,10 +58,48 @@ export const api = {
     >;
   },
 
+  async getCompositions(projectId: string) {
+    return requireBridge('Listing clips').getCompositions(projectId) as Promise<
+      Array<{ id: string; name: string; version: number; updatedAt: string }>
+    >;
+  },
+
+  async saveComposition(projectId: string, comp: unknown) {
+    return requireBridge('Saving the clip').saveComposition(projectId, comp);
+  },
+
+  async appendJournal(projectId: string, entry: unknown) {
+    return requireBridge('Saving the clip').appendJournal(projectId, entry);
+  },
+
+  async checkpoint(projectId: string, compositions: unknown[], upToSeq?: number) {
+    return requireBridge('Saving the clip').checkpoint(projectId, compositions, upToSeq);
+  },
+
+  async checkRecovery(projectId: string) {
+    return requireBridge('Checking for unsaved edits').checkRecovery(projectId);
+  },
+
+  async replayRecovery(projectId: string) {
+    return requireBridge('Recovering unsaved edits').replayRecovery(projectId) as Promise<{
+      recoveredCompositions: unknown[];
+      appliedCount: number;
+      corruptCount: number;
+    }>;
+  },
+
   // ---- Media ----
   async listMedia() {
     return requireBridge('Listing media').listMedia() as Promise<
-      Array<{ id: string; path: string; kind: string; status: string; originalName: string }>
+      Array<{
+        id: string;
+        path: string;
+        kind: 'video' | 'audio' | 'image';
+        status: 'ok' | 'missing' | 'changed';
+        originalName: string;
+        sizeBytes: number;
+        info?: { durationUs?: number; video?: { width?: number; height?: number } };
+      }>
     >;
   },
   async probeMedia(filePath: string) {

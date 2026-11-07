@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Route } from '../App.js';
 import { StageProgressScreen, type SubStep } from '../components/StageProgressScreen.js';
 import { TranscriptEditor } from '../components/TranscriptEditor.js';
+import { EditorPage } from '../features/editor/EditorPage.js';
 import { MomentsPage } from './MomentsPage.js';
 import { api, describeError, isDesktop } from '../api.js';
 import type {
@@ -445,51 +446,12 @@ function EditorStage({
   compId?: string;
   onNavigate: (r: Route) => void;
 }) {
-  const [comp, setComp] = useState<{ id: string; name: string; version: number } | null>(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!isDesktop() || !compId) return;
-    let cancelled = false;
-    void api
-      .getComposition(projectId, compId)
-      .then((record) => {
-        if (cancelled) return;
-        if (!record) setError('That clip could not be found. It may have been deleted.');
-        else setComp({ id: record.id, name: record.name, version: record.version ?? 1 });
-      })
-      .catch((err) => !cancelled && setError(describeError(err)));
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, compId]);
-
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '32px 40px' }}>
-      <h1 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
-        {comp ? comp.name : 'Editor'}
-      </h1>
-      <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: '0 0 24px 0' }}>
-        {comp
-          ? `Clip version ${comp.version} · created from a moment. The multitrack timeline arrives with the editing milestone — the clip itself is already saved and editable.`
-          : compId
-            ? 'Loading this clip…'
-            : 'Create a clip from Moments to open it here.'}
-      </p>
-      {error && <div style={{ color: 'var(--danger)', fontSize: 'var(--fs-sm)', marginBottom: 16 }}>{error}</div>}
-      <div style={{
-        background: 'var(--surface-card)', borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--line-subtle)', padding: 32, textAlign: 'center',
-        color: 'var(--text-muted)', fontSize: 'var(--fs-sm)',
-      }}>
-        Timeline, preview and inspector panels arrive with the editing milestone.
-      </div>
-      <div style={{ marginTop: 16 }}>
-        <button onClick={() => onNavigate({ name: 'project', id: projectId, stage: 'moments' })} style={secondaryBtn}>
-          Back to moments
-        </button>
-      </div>
-    </div>
+    <EditorPage
+      projectId={projectId}
+      compId={compId}
+      onBack={() => onNavigate({ name: 'project', id: projectId, stage: 'moments' })}
+    />
   );
 }
 

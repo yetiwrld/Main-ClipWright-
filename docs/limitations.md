@@ -28,3 +28,16 @@ This document tracks architectural scope boundaries and honest limitations per `
 5. **"Speed ≈ N× real time"** appears only after a local transcription has actually been timed on this machine; until then the card says "speed unknown".
 6. **Online transcription uploads audio only:** the 16 kHz mono WAV is what leaves the computer, never the source video, and only after the consent dialog for that provider and category. The data-sent log records the byte count, never the audio.
 7. **Playwright smoke tests** still cannot run in this sandbox (no browser binaries), so UI flows are covered by typechecking, the design-system token audit and the unit/integration tests in `apps/desktop/src/main/__tests__`.
+
+---
+
+## 3. Phase 4 notes (editor core, in progress)
+
+1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes the audio device position the master clock whenever audio plays. This slice advances the playhead from `performance.now()` and lets the `<video>` element follow it, so a long playback can drift from the audio by a frame. Audio-mastered playback lands with the audio tools.
+2. **Preview uses the original media and seeks the `<video>` element.** Proxies are generated during import but the preview does not yet switch to them, so scrubbing a 4K source is slower than the "use proxies by default" requirement.
+3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
+4. **Marquee, razor, rolling edit, ripple-trim, group/ungroup, copy/paste and markers-in-ruler are not implemented yet.** Delete, ripple delete, duplicate, split, move, trim, snapping, zoom, scroll, timecode entry, mute toggles and markers are.
+5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
+6. **Inspector edits are limited to start, ±1 frame duration and a read-only volume readout.** Transform/opacity/crop editing, keyframes and the section set from SPEC 08 §7.2 arrive with Phase 5.
+7. **Left panel has only the Media tab.** Captions, Text/Graphics, Effects/Transitions, Audio and AI tabs are Phase 5; nothing pretends to be there.
+8. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.

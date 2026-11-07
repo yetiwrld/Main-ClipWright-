@@ -1,0 +1,616 @@
+// Commands: every edit is a pure function of (state, params) → new state or an
+// error (SPEC 09 §2.3). Each command records immer patches so the caller can push
+// one undo step per transaction (SPEC 09 §24).
+
+import { current, enablePatches, produceWithPatches, type Patch } from 'immer';
+
+// Undo relies on immer patches (SPEC 09 §24), so the plugin must be on before
+// any command runs — including when the engine is imported by a test.
+enablePatches();
+import type { CompositionPayload, TimelineItem } from '@clipwright/project-schema';
+import { frameDurationUs, quantizeUs, type Fps } from './time';
+import { itemEndUs, snapPoints, sortedItemsOfTrack } from './selectors';
+
+export type TimelineState = CompositionPayload;
+export type EditMode = 'normal' | 'insert' | 'overwrite';
+
+export interface CommandOk {
+  ok: true;
+  state: TimelineState;
+  patches: Patch[];
+  inverse: Patch[];
+  /** Items the command touched — the caller selects these after undo/redo. */
+  affectedItemIds: string[];
+  /** Human-readable notes worth surfacing (bumps, ripples, clamps). */
+  notes: string[];
+}
+
+export interface CommandError {
+  ok: false;
+  code:
+    | 'not_found'
+    | 'locked'
+    | 'overlap'
+    | 'too_short'
+    | 'invalid'
+    | 'source_bounds'
+    | 'no_room';
+  message: string;
+}
+
+export type CommandResult = CommandOk | CommandError;
+
+/** Deep copy of a plain item (safe for structuredClone-able data). */
+function copyPlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** Deep copy of a draft item: immer drafts are proxies and cannot be cloned. */
+function copyDraft<T>(value: T): T {
+  return JSON.parse(JSON.stringify(current(value))) as T;
+}
+
+function fail(code: CommandError['code'], message: string): CommandError {
+  return { ok: false, code, message };
+}
+
+function sortTrackItems(draft: TimelineState, trackId: string): void {
+  const track = draft.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return;
+  track.itemIds = [...track.itemIds].sort((a, b) => {
+    const left = draft.items[a];
+    const right = draft.items[b];
+    if (!left || !right) return 0;
+    return left.startUs - right.startUs;
+  });
+}
+
+function addToTrack(draft: TimelineState, trackId: string, itemId: string): void {
+  const track = draft.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return;
+  if (!track.itemIds.includes(itemId)) track.itemIds.push(itemId);
+  sortTrackItems(draft, trackId);
+}
+
+function removeFromTrack(draft: TimelineState, trackId: string, itemId: string): void {
+  const track = draft.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return;
+  track.itemIds = track.itemIds.filter((id) => id !== itemId);
+}
+
+function overlapsAny(
+  items: readonly { startUs: number; durationUs: number }[],
+  startUs: number,
+  durationUs: number,
+): boolean {
+  const endUs = startUs + durationUs;
+  return items.some((item) => startUs < itemEndUs(item) && endUs > item.startUs);
+}
+
+/** Nearest gap on a track that fits `durationUs`, preferring `desiredStartUs`. */
+function nearestFreeStart(
+  occupied: readonly { startUs: number; durationUs: number }[],
+  desiredStartUs: number,
+  durationUs: number,
+): number | null {
+  const sorted = [...occupied].sort((a, b) => a.startUs - b.startUs);
+  const candidates = new Set<number>([Math.max(0, desiredStartUs)]);
+  let cursor = 0;
+  for (const item of sorted) {
+    candidates.add(cursor);
+    cursor = Math.max(cursor, itemEndUs(item));
+  }
+  candidates.add(cursor);
+
+  const fitting = [...candidates]
+    .filter((start) => start >= 0 && !overlapsAny(sorted, start, durationUs))
+    .sort((a, b) => Math.abs(a - desiredStartUs) - Math.abs(b - desiredStartUs) || a - b);
+  return fitting[0] ?? null;
+}
+
+function canHold(item: TimelineItem, trackKind: string): boolean {
+  switch (item.type) {
+    case 'video':
+    case 'image':
+      return trackKind === 'video';
+    case 'audio':
+      return trackKind === 'audio';
+    case 'caption':
+      return trackKind === 'caption';
+    case 'text':
+      return trackKind === 'text';
+    default:
+      return true;
+  }
+}
+
+export interface MoveTarget {
+  itemId: string;
+  startUs: number;
+  trackId?: string;
+}
+
+/**
+ * Move one or more items as a single transaction (SPEC 09 §12 Move, §13.2).
+ * Normal mode: clamp into the nearest free gap, or bump to another compatible
+ * track; Insert shifts later items right; Overwrite trims or removes what it
+ * covers. Nothing is destroyed in Normal mode.
+ */
+export function moveItems(
+  state: TimelineState,
+  params: { moves: MoveTarget[]; fps: Fps; mode?: EditMode },
+): CommandResult {
+  const mode = params.mode ?? 'normal';
+  if (!params.moves.length) return fail('invalid', 'Nothing to move.');
+
+  const movingIds = new Set(params.moves.map((move) => move.itemId));
+  const notes: string[] = [];
+
+  // Validate everything before mutating so a refusal leaves the state untouched.
+  for (const move of params.moves) {
+    const item = state.items[move.itemId];
+    if (!item) return fail('not_found', 'That item no longer exists.');
+    const trackId = move.trackId ?? item.trackId;
+    const track = state.tracks.find((candidate) => candidate.id === trackId);
+    if (!track) return fail('not_found', 'That track no longer exists.');
+    if (track.locked) return fail('locked', `“${track.name}” is locked.`);
+    const original = state.tracks.find((candidate) => candidate.id === item.trackId);
+    if (original?.locked) return fail('locked', `“${original.name}” is locked.`);
+    if (trackId !== item.trackId && !canHold(item, track.kind)) {
+      return fail('invalid', `“${track.name}” cannot hold that clip.`);
+    }
+  }
+
+  const [next, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const move of params.moves) {
+      const item = draft.items[move.itemId] as TimelineItem;
+      const originalTrackId = item.trackId;
+      let trackId = move.trackId ?? originalTrackId;
+      const targetTrack = draft.tracks.find((candidate) => candidate.id === trackId);
+      if (!targetTrack) continue;
+      const durationUs = item.durationUs;
+      let startUs = quantizeUs(move.startUs, params.fps);
+
+      const others = () =>
+        sortedItemsOfTrack(draft as TimelineState, trackId).filter(
+          (candidate) => !movingIds.has(candidate.id),
+        );
+
+      if (mode === 'insert') {
+        if (overlapsAny(others(), startUs, durationUs)) {
+          splitAtPoint(draft, trackId, startUs, params.fps);
+        }
+        for (const other of sortedItemsOfTrack(draft as TimelineState, trackId)) {
+          if (movingIds.has(other.id)) continue;
+          if (other.startUs >= startUs) {
+            other.startUs = quantizeUs(other.startUs + durationUs, params.fps);
+          }
+        }
+      } else if (mode === 'overwrite') {
+        for (const other of sortedItemsOfTrack(draft as TimelineState, trackId)) {
+          if (movingIds.has(other.id)) continue;
+          const otherEnd = itemEndUs(other);
+          const coversStart = startUs <= other.startUs;
+          const coversEnd = startUs + durationUs >= otherEnd;
+          if (coversStart && coversEnd) {
+            removeFromTrack(draft, trackId, other.id);
+            delete draft.items[other.id];
+            notes.push(`Replaced “${other.label}”.`);
+            continue;
+          }
+          if (startUs > other.startUs && startUs < otherEnd) {
+            const trimmed = quantizeUs(startUs - other.startUs, params.fps);
+            if (trimmed < frameDurationUs(params.fps)) {
+              removeFromTrack(draft, trackId, other.id);
+              delete draft.items[other.id];
+            } else {
+              other.durationUs = trimmed;
+            }
+          } else if (startUs + durationUs > other.startUs && startUs + durationUs < otherEnd) {
+            const shift = quantizeUs(startUs + durationUs - other.startUs, params.fps);
+            other.startUs = quantizeUs(other.startUs + shift, params.fps);
+            other.durationUs = Math.max(
+              frameDurationUs(params.fps),
+              quantizeUs(otherEnd - other.startUs, params.fps),
+            );
+          }
+        }
+      } else if (overlapsAny(others(), startUs, durationUs)) {
+        // Normal mode never destroys anything by surprise (SPEC 09 §13.2).
+        const free = nearestFreeStart(others(), startUs, durationUs);
+        if (free === null) {
+          const fallback = draft.tracks.find(
+            (candidate) =>
+              !candidate.locked &&
+              candidate.role !== 'main' &&
+              candidate.id !== trackId &&
+              candidate.kind === targetTrack.kind &&
+              !overlapsAny(
+                sortedItemsOfTrack(draft as TimelineState, candidate.id).filter(
+                  (candidateItem) => !movingIds.has(candidateItem.id),
+                ),
+                startUs,
+                durationUs,
+              ),
+          );
+          if (fallback) {
+            trackId = fallback.id;
+            notes.push(`Moved to “${fallback.name}” — that space was occupied.`);
+          } else {
+            startUs = quantizeUs(item.startUs, params.fps);
+            notes.push('No free space — the clip stayed where it was.');
+          }
+        } else {
+          startUs = free;
+          notes.push('Placed in the nearest free gap.');
+        }
+      }
+
+      if (trackId !== originalTrackId) removeFromTrack(draft, originalTrackId, item.id);
+      item.trackId = trackId;
+      item.startUs = startUs;
+      addToTrack(draft, trackId, item.id);
+    }
+  });
+
+  return {
+    ok: true,
+    state: next,
+    patches,
+    inverse,
+    affectedItemIds: params.moves.map((move) => move.itemId),
+    notes,
+  };
+}
+
+/** Internal split used by Insert mode; shares the rules of the public split. */
+function splitAtPoint(draft: TimelineState, trackId: string, atUs: number, fps: Fps): void {
+  const target = sortedItemsOfTrack(draft as TimelineState, trackId).find(
+    (item) => atUs > item.startUs && atUs < itemEndUs(item),
+  );
+  if (!target) return;
+  const leftDuration = quantizeUs(atUs - target.startUs, fps);
+  const right: TimelineItem = {
+    ...copyDraft(target),
+    id: `${target.id}~${atUs.toString(36)}`,
+    startUs: quantizeUs(target.startUs + leftDuration, fps),
+    durationUs: Math.max(frameDurationUs(fps), target.durationUs - leftDuration),
+    sourceInUs: Math.max(0, quantizeUs(target.sourceInUs + leftDuration * (target.speed ?? 1), fps)),
+  };
+  target.durationUs = Math.max(frameDurationUs(fps), leftDuration);
+  draft.items[right.id] = right;
+  addToTrack(draft, trackId, right.id);
+}
+
+export interface TrimParams {
+  itemId: string;
+  edge: 'start' | 'end';
+  toUs: number;
+  fps: Fps;
+  ripple?: boolean;
+}
+
+function availableBefore(item: TimelineItem): number {
+  const speed = item.speed ?? 1;
+  return Math.max(0, Math.round(item.sourceInUs / speed));
+}
+
+function availableAfter(item: TimelineItem): number {
+  const speed = item.speed ?? 1;
+  if (!item.sourceDurationUs) return 24 * 3600 * 1_000_000;
+  const used = item.sourceInUs + Math.round(item.durationUs * speed);
+  return Math.max(0, Math.round((item.sourceDurationUs - used) / speed));
+}
+
+/** Trim one edge, clamped by the neighbouring clip and by the source media. */
+export function trimItem(state: TimelineState, params: TrimParams): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `“${track.name}” is locked.`);
+
+  const minDuration = frameDurationUs(params.fps);
+  const notes: string[] = [];
+
+  const others = sortedItemsOfTrack(state, item.trackId).filter(
+    (candidate) => candidate.id !== item.id,
+  );
+  const previous = [...others].reverse().find((candidate) => itemEndUs(candidate) <= item.startUs);
+  const following = others.find((candidate) => candidate.startUs >= itemEndUs(item));
+
+  let nextStart = item.startUs;
+  let nextDuration = item.durationUs;
+
+  if (params.edge === 'start') {
+    const requested = quantizeUs(params.toUs, params.fps);
+    const sourceLimit = item.startUs - availableBefore(item);
+    const previousEnd = previous ? itemEndUs(previous) : 0;
+    const minStart = Math.max(0, previousEnd, sourceLimit);
+    const maxStart = quantizeUs(itemEndUs(item) - minDuration, params.fps);
+    nextStart = Math.min(Math.max(requested, minStart), maxStart);
+    if (requested < minStart && previous && minStart === previousEnd) {
+      notes.push('Blocked by the previous clip.');
+    } else if (requested < minStart) {
+      notes.push('Blocked by the start of the source.');
+    }
+    nextDuration = Math.max(minDuration, quantizeUs(itemEndUs(item) - nextStart, params.fps));
+  } else {
+    const requestedEnd = quantizeUs(params.toUs, params.fps);
+    const sourceEnd = itemEndUs(item) + availableAfter(item);
+    const maxEnd = following ? Math.min(following.startUs, sourceEnd) : sourceEnd;
+    const minEnd = quantizeUs(item.startUs + minDuration, params.fps);
+    const endUs = Math.min(Math.max(requestedEnd, minEnd), quantizeUs(maxEnd, params.fps));
+    if (requestedEnd > maxEnd && following && maxEnd === following.startUs) {
+      notes.push('Blocked by the next clip.');
+    } else if (requestedEnd > maxEnd) {
+      notes.push('Blocked by the end of the source.');
+    }
+    nextDuration = Math.max(minDuration, quantizeUs(endUs - item.startUs, params.fps));
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (params.edge === 'start') {
+      const delta = nextStart - target.startUs;
+      target.sourceInUs = Math.max(
+        0,
+        quantizeUs(target.sourceInUs + delta * (target.speed ?? 1), params.fps),
+      );
+    }
+    target.startUs = nextStart;
+    target.durationUs = nextDuration;
+
+    if (params.ripple && params.edge === 'end') {
+      const delta = nextDuration - item.durationUs;
+      if (delta !== 0) {
+        for (const other of sortedItemsOfTrack(draft as TimelineState, item.trackId)) {
+          if (other.id === params.itemId) continue;
+          if (other.startUs >= itemEndUs(item)) {
+            other.startUs = Math.max(0, quantizeUs(other.startUs + delta, params.fps));
+          }
+        }
+      }
+    }
+    sortTrackItems(draft, item.trackId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes,
+  };
+}
+
+/** SPEC 09 §12 Split: both halves keep every property; the right half gets a new id. */
+export function splitItems(
+  state: TimelineState,
+  params: { itemIds?: string[]; atUs: number; fps: Fps },
+): CommandResult {
+  const atUs = quantizeUs(params.atUs, params.fps);
+  const minDuration = frameDurationUs(params.fps);
+
+  const targets = Object.values(state.items).filter((item) => {
+    if (params.itemIds && params.itemIds.length && !params.itemIds.includes(item.id)) return false;
+    const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+    if (!track || track.locked) return false;
+    return atUs > item.startUs + minDuration && atUs < itemEndUs(item) - minDuration;
+  });
+
+  if (!targets.length) return fail('too_short', 'Nothing under the playhead can be split.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const target of targets) {
+      const item = draft.items[target.id] as TimelineItem;
+      const leftDuration = quantizeUs(atUs - item.startUs, params.fps);
+      const right: TimelineItem = {
+        ...copyDraft(item),
+        id: `${item.id}~${atUs.toString(36)}`,
+        startUs: atUs,
+        durationUs: Math.max(minDuration, item.durationUs - leftDuration),
+        sourceInUs: Math.max(
+          0,
+          quantizeUs(item.sourceInUs + leftDuration * (item.speed ?? 1), params.fps),
+        ),
+      };
+      item.durationUs = Math.max(minDuration, leftDuration);
+      draft.items[right.id] = right;
+      addToTrack(draft, item.trackId, right.id);
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: targets.map((item) => item.id),
+    notes: [],
+  };
+}
+
+/**
+ * Delete (SPEC 09 §12). `ripple` closes the gap left by the removed duration on
+ * the affected tracks; `rippleAll` does the same on every unlocked track.
+ */
+export function deleteItems(
+  state: TimelineState,
+  params: { itemIds: string[]; fps: Fps; ripple?: boolean; rippleAll?: boolean },
+): CommandResult {
+  if (!params.itemIds.length) return fail('invalid', 'Nothing is selected.');
+
+  for (const id of params.itemIds) {
+    const item = state.items[id];
+    if (!item) continue;
+    const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+    if (track?.locked) return fail('locked', `“${track.name}” is locked.`);
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of params.itemIds) {
+      const item = draft.items[id];
+      if (!item) continue;
+      const trackId = item.trackId;
+      const startUs = item.startUs;
+      const durationUs = item.durationUs;
+      removeFromTrack(draft, trackId, id);
+      delete draft.items[id];
+
+      if (!params.ripple) continue;
+      const affected = new Set<string>([trackId]);
+      if (params.rippleAll) {
+        for (const track of draft.tracks) if (!track.locked) affected.add(track.id);
+      }
+      for (const affectedId of affected) {
+        const track = draft.tracks.find((candidate) => candidate.id === affectedId);
+        if (!track || track.locked) continue;
+        for (const other of sortedItemsOfTrack(draft as TimelineState, affectedId)) {
+          if (other.startUs >= startUs + durationUs) {
+            other.startUs = Math.max(0, quantizeUs(other.startUs - durationUs, params.fps));
+          }
+        }
+        sortTrackItems(draft, affectedId);
+      }
+    }
+  });
+
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: params.itemIds, notes: [] };
+}
+
+/** Duplicate: the copy lands immediately after the original on the same track. */
+export function duplicateItems(
+  state: TimelineState,
+  params: { itemIds: string[]; fps: Fps },
+): CommandResult {
+  if (!params.itemIds.length) return fail('invalid', 'Nothing is selected.');
+  const copies: string[] = [];
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of params.itemIds) {
+      const item = draft.items[id] as TimelineItem | undefined;
+      if (!item) continue;
+      const track = draft.tracks.find((candidate) => candidate.id === item.trackId);
+      if (!track || track.locked) continue;
+      const existing = sortedItemsOfTrack(draft as TimelineState, item.trackId).filter(
+        (candidate) => !params.itemIds.includes(candidate.id),
+      );
+      const startUs = quantizeUs(itemEndUs(item), params.fps);
+      if (overlapsAny(existing, startUs, item.durationUs)) continue;
+      const copyId = `${item.id}~copy${copies.length}`;
+      draft.items[copyId] = { ...copyDraft(item), id: copyId, startUs };
+      addToTrack(draft, item.trackId, copyId);
+      copies.push(copyId);
+    }
+  });
+
+  if (!copies.length) return fail('no_room', 'There is no free space right after the selection.');
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: copies, notes: [] };
+}
+
+/**
+ * Add a new item (a drop from the media library). Placement follows Normal mode:
+ * the requested time if it is free, otherwise the nearest free gap on that track,
+ * otherwise a compatible unlocked track, otherwise a refusal.
+ */
+export function addItem(
+  state: TimelineState,
+  params: { item: TimelineItem; fps: Fps; startUs?: number; trackId?: string },
+): CommandResult & { trackId?: string } {
+  const trackId = params.trackId ?? params.item.trackId;
+  const track = state.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `“${track.name}” is locked.`);
+  if (!canHold(params.item, track.kind)) {
+    return fail('invalid', `“${track.name}” cannot hold that clip.`);
+  }
+  if (state.items[params.item.id]) return fail('invalid', 'That item already exists.');
+  if (params.item.durationUs < frameDurationUs(params.fps)) {
+    return fail('too_short', 'A clip must be at least one frame long.');
+  }
+  if (params.item.sourceDurationUs !== undefined && params.item.mediaId) {
+    const needed = params.item.sourceInUs + params.item.durationUs * (params.item.speed ?? 1);
+    if (params.item.sourceInUs < 0 || needed > params.item.sourceDurationUs + 1) {
+      return fail('source_bounds', 'That clip is longer than its source media.');
+    }
+  }
+
+  const notes: string[] = [];
+  let startUs = quantizeUs(params.startUs ?? params.item.startUs, params.fps);
+  let placedTrackId = trackId;
+  const occupied = sortedItemsOfTrack(state, trackId);
+  if (overlapsAny(occupied, startUs, params.item.durationUs)) {
+    const free = nearestFreeStart(occupied, startUs, params.item.durationUs);
+    if (free === null) {
+      const fallback = state.tracks.find(
+        (candidate) =>
+          !candidate.locked &&
+          candidate.role !== 'main' &&
+          candidate.id !== trackId &&
+          candidate.kind === track.kind &&
+          !overlapsAny(
+            sortedItemsOfTrack(state, candidate.id),
+            startUs,
+            params.item.durationUs,
+          ),
+      );
+      if (!fallback) return fail('no_room', `There is no free space on “${track.name}”.`);
+      placedTrackId = fallback.id;
+      notes.push(`Placed on “${fallback.name}” — “${track.name}” was occupied.`);
+    } else {
+      startUs = free;
+      notes.push('Placed in the nearest free gap.');
+    }
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const item = { ...copyPlain(params.item), trackId: placedTrackId, startUs } as TimelineItem;
+    draft.items[item.id] = item;
+    addToTrack(draft, placedTrackId, item.id);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.item.id],
+    notes,
+    trackId: placedTrackId,
+  };
+}
+
+export function addMarker(
+  state: TimelineState,
+  params: { timeUs: number; fps: Fps; name?: string; color?: string },
+): CommandResult {
+  const timeUs = quantizeUs(params.timeUs, params.fps);
+  const id = `marker~${timeUs.toString(36)}~${state.markers.length}`;
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.markers.push({
+      id,
+      timeUs,
+      name: params.name ?? `Marker ${draft.markers.length + 1}`,
+      color: params.color ?? '#FFB000',
+    });
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+export function setTrackMuted(
+  state: TimelineState,
+  params: { trackId: string; muted: boolean },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (target) target.muted = params.muted;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/** Snap points for a gesture; re-exported so the UI needs one import. */
+export { snapPoints };
