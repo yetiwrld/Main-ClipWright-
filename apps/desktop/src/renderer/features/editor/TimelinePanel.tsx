@@ -511,6 +511,15 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault();
         const dir = event.key === 'ArrowLeft' ? -1 : 1;
+        if (event.ctrlKey || event.metaKey) {
+          // Ctrl+Left/Right jumps between markers (SPEC 09 §6.4)
+          const markerTimes = state?.markers.map((m) => m.timeUs).sort((a, b) => a - b) ?? [];
+          if (markerTimes.length === 0) return;
+          const idx = markerTimes.findIndex((t) => t >= current);
+          const targetIdx = dir < 0 ? Math.max(0, idx - 1) : Math.min(markerTimes.length - 1, idx + 1);
+          playheadStore.set(markerTimes[targetIdx] ?? 0);
+          return;
+        }
         if (event.altKey && selection.length) {
           const step = event.shiftKey ? 10 * frame : frame;
           timeline.move(
@@ -525,6 +534,36 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         const step = event.shiftKey ? 1_000_000 : frame;
         const next = Math.min(duration, Math.max(0, current + dir * step));
         playheadStore.set(quantizeUs(next, fps));
+        return;
+      }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        if (event.altKey) return; // Alt+Up/Down is track move
+        // Up/Down jumps between edit points (SPEC 09 §6.4)
+        const editPoints = new Set<number>([0]);
+        if (state) {
+          for (const item of Object.values(state.items)) {
+            editPoints.add(item.startUs);
+            editPoints.add(itemEndUs(item));
+          }
+          for (const marker of state.markers) editPoints.add(marker.timeUs);
+        }
+        const sorted = [...editPoints].sort((a, b) => a - b);
+        const dir = event.key === 'ArrowUp' ? -1 : 1;
+        let targetIdx: number;
+        if (dir > 0) {
+          // ArrowDown: jump to the nearest edit point strictly after the playhead
+          const idx = sorted.findIndex((t) => t > current);
+          targetIdx = idx === -1 ? sorted.length - 1 : idx;
+        } else {
+          // ArrowUp: jump to the nearest edit point strictly before the playhead
+          let idx = sorted.length - 1;
+          for (let i = sorted.length - 1; i >= 0; i--) {
+            if (sorted[i]! < current) { idx = i; break; }
+          }
+          targetIdx = idx;
+        }
+        event.preventDefault();
+        playheadStore.set(sorted[targetIdx] ?? 0);
         return;
       }
       if (event.key === 'Home') {

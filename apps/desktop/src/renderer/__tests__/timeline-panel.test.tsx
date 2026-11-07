@@ -674,6 +674,34 @@ describe('timeline panel', () => {
     expect(screen.getByText('Delete marker')).toBeTruthy();
   });
 
+
+  it('Ctrl+Left/Right jumps between markers', () => {
+    const state = fixture();
+    const marker1 = { id: 'mk-a', timeUs: 1_000_000, name: 'A', color: '#FFB000' };
+    const marker2 = { id: 'mk-b', timeUs: 3_000_000, name: 'B', color: '#FFB000' };
+    const stateWithMarkers = { ...state, markers: [marker1, marker2] };
+    render(<TimelinePanel timeline={fakeTimeline(stateWithMarkers)} />);
+    playheadStore.set(2_000_000);
+    // Ctrl+Right should jump to next marker at 3s
+    fireEvent.keyDown(window, { key: 'ArrowRight', ctrlKey: true });
+    expect(playheadStore.get()).toBe(3_000_000);
+    // Ctrl+Left should jump to previous marker at 1s
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ctrlKey: true });
+    expect(playheadStore.get()).toBe(1_000_000);
+  });
+
+  it('ArrowUp/Down jumps between edit points', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    playheadStore.set(1_500_000);
+    // ArrowDown should jump to next edit point (2s = item-b start)
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(playheadStore.get()).toBe(2_000_000);
+    // ArrowUp should jump to previous edit point
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    expect(playheadStore.get()).toBeLessThan(2_000_000);
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
