@@ -18,6 +18,7 @@ import {
   trimItem,
   trimItems,
   moveItemsToTrack,
+  rollAt,
   groupItems,
   pasteItems,
   ungroupItems,
@@ -60,6 +61,7 @@ export interface TimelineApi {
   redo: () => void;
   move: (moves: Array<{ itemId: string; startUs: number; trackId?: string }>, mode?: EditMode) => boolean;
   trim: (itemId: string, edge: 'start' | 'end', toUs: number, ripple?: boolean) => boolean;
+  roll: (leftItemId: string, rightItemId: string, atUs: number) => boolean;
   split: (atUs: number) => boolean;
   splitAt: (itemIds: string[], atUs: number) => boolean;
   /** Trim the selection's start/end edge to the playhead (SPEC 09 §12 Q/W). */
@@ -332,6 +334,8 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       redo,
       move: (moves, mode) => run(mode ? `Move (${mode})` : 'Move', (s) => moveItems(s, { moves, fps, mode })),
       trim: (itemId, edge, toUs, ripple) => run('Trim', (s) => trimItem(s, { itemId, edge, toUs, fps, ripple })),
+      roll: (leftItemId, rightItemId, atUs) =>
+        run('Rolling edit', (s) => rollAt(s, { leftItemId, rightItemId, atUs, fps })),
       split: (atUs) => run('Split', (s) => splitItems(s, { itemIds: selection, atUs, fps })),
       splitAt: (itemIds, atUs) => run('Split', (s) => splitItems(s, { itemIds, atUs, fps })),
       trimToPlayhead: (edge, atUs, ripple) =>

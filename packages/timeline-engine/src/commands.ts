@@ -751,6 +751,70 @@ export function trimItems(
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: params.itemIds, notes };
 }
 
+/**
+ * Rolling edit (SPEC 09 §13.3): Ctrl+drag at a junction between two adjacent
+ * clips moves the cut point. The left clip's end and the right clip's start
+ * change by the same amount, the total span is unchanged, and the move is
+ * limited by the available source on both sides.
+ */
+export function rollAt(
+  state: TimelineState,
+  params: { leftItemId: string; rightItemId: string; atUs: number; fps: Fps },
+): CommandResult {
+  const left = state.items[params.leftItemId];
+  const right = state.items[params.rightItemId];
+  if (!left || !right) return fail('not_found', 'That item no longer exists.');
+  if (left.trackId !== right.trackId) {
+    return fail('invalid', 'Rolling edit needs two clips on the same track.');
+  }
+  const track = state.tracks.find((candidate) => candidate.id === left.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `“${track.name}” is locked.`);
+
+  const minDuration = frameDurationUs(params.fps);
+  const leftEnd = itemEndUs(left);
+  const rightEnd = itemEndUs(right);
+  if (Math.abs(leftEnd - right.startUs) > minDuration) {
+    return fail('invalid', 'Those clips are not adjacent.');
+  }
+
+  // The junction can travel within both clips' source limits.
+  const speed = left.speed ?? 1;
+  const sourceLimit =
+    left.startUs +
+    Math.round(
+      ((left.sourceDurationUs ?? 24 * 3600 * 1_000_000) - left.sourceInUs) / speed,
+    );
+  const minJunction = Math.max(left.startUs + minDuration, 0);
+  const maxJunction = Math.min(sourceLimit, rightEnd - minDuration);
+  const junction = Math.min(
+    Math.max(quantizeUs(params.atUs, params.fps), minJunction),
+    quantizeUs(maxJunction, params.fps),
+  );
+
+  const notes: string[] = [];
+  if (params.atUs < minJunction) notes.push('Blocked by the start of the left clip.');
+  if (params.atUs > maxJunction) notes.push('Blocked by the end of the right clip.');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const leftTarget = draft.items[params.leftItemId] as TimelineItem;
+    const rightTarget = draft.items[params.rightItemId] as TimelineItem;
+    leftTarget.durationUs = Math.max(minDuration, quantizeUs(junction - leftTarget.startUs, params.fps));
+    rightTarget.startUs = junction;
+    rightTarget.durationUs = Math.max(minDuration, quantizeUs(rightEnd - junction, params.fps));
+    sortTrackItems(draft, left.trackId);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.leftItemId, params.rightItemId],
+    notes,
+  };
+}
+
 /** Toggle the magnetic main track (SPEC 09 §9.4.2). Only the main track accepts it. */
 export function setTrackMagnetic(
   state: TimelineState,

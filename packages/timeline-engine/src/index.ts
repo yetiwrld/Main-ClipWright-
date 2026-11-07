@@ -48,6 +48,7 @@ export {
   addMarker,
   setTrackMuted,
   setTrackMagnetic,
+  rollAt,
   type CommandOk,
   type CommandError,
   type CommandResult,

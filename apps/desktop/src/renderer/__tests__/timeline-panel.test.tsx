@@ -26,12 +26,21 @@ function fixture(): TimelineState {
     durationUs: 2_000_000,
     sourceDurationUs: 10_000_000,
   });
+  const second = createMediaItem({
+    id: 'item-b',
+    trackId: track.id,
+    label: 'Second line',
+    mediaId: 'media-1',
+    startUs: 2_000_000,
+    durationUs: 2_000_000,
+    sourceDurationUs: 10_000_000,
+  });
   return {
     ...base,
     tracks: base.tracks.map((candidate) =>
-      candidate.id === track.id ? { ...candidate, itemIds: [first.id] } : candidate,
+      candidate.id === track.id ? { ...candidate, itemIds: [first.id, second.id] } : candidate,
     ),
-    items: { [first.id]: first },
+    items: { [first.id]: first, [second.id]: second },
   };
 }
 
@@ -54,6 +63,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     redo: vi.fn(),
     move: vi.fn(() => true),
     trim: vi.fn(() => true),
+    roll: vi.fn(() => true),
     split: vi.fn(() => true),
     splitAt: vi.fn(() => true),
     trimToPlayhead: vi.fn(() => true),
@@ -152,8 +162,8 @@ describe('timeline panel', () => {
     const input = screen.getByRole('textbox', { name: 'Current timecode' });
     fireEvent.change(input, { target: { value: '10:00' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    // The clip is 2 s long, so 10 minutes clamps to the project duration.
-    expect(playheadStore.get()).toBe(2_000_000);
+    // Two clips span 0–4 s, so 10 minutes clamps to the project duration.
+    expect(playheadStore.get()).toBe(4_000_000);
   });
 
   it('routes Delete with ripple and the ripple-all-tracks toggle', () => {
@@ -256,6 +266,29 @@ describe('timeline panel', () => {
 
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(timeline.moveSelectionToTrack).toHaveBeenCalledWith('down');
+  });
+
+  it('starts a rolling edit with Ctrl+drag at a junction', async () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { getByTestId } = render(<TimelinePanel timeline={timeline} />);
+
+    // Ctrl+pointerdown on the right edge of “Opening line” (which ends exactly
+    // where “B” starts) should start a roll, not a trim.
+    const handle = getByTestId('item-a-right-handle');
+    await act(async () => {
+      handle.dispatchEvent(
+        new MouseEvent('pointerdown', { button: 0, ctrlKey: true, clientX: 300, clientY: 150, bubbles: true }),
+      );
+    });
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 320, clientY: 150, bubbles: true }));
+    });
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+
+    expect(timeline.roll).toHaveBeenCalledTimes(1);
   });
 
   it('toggles magnetic on the main track header', () => {

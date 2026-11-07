@@ -12,6 +12,7 @@ import {
   moveItemsToTrack,
   setTrackMuted,
   setTrackMagnetic,
+  rollAt,
   splitItems,
   trimItem,
   trimItems,
@@ -329,6 +330,42 @@ describe('timeline commands', () => {
     if (!result.ok) return;
     expect(result.state.items[ids.second]!.startUs).toBe(2_000_000);
     expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('rolls a junction between two adjacent clips', () => {
+    const { state, ids } = fixture();
+    const result = rollAt(state, { leftItemId: ids.first, rightItemId: ids.second, atUs: 3_000_000, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const first = result.state.items[ids.first]!;
+    const second = result.state.items[ids.second]!;
+    // The cut point moved from 2 s to 3 s: the left clip grew, the right clip
+    // started later but kept its end, so the total span is unchanged.
+    expect(first.startUs + first.durationUs).toBe(3_000_000);
+    expect(second.startUs).toBe(3_000_000);
+    expect(second.startUs + second.durationUs).toBe(4_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('rolling edit is clamped by the source limits of both clips', () => {
+    const { state, ids } = fixture();
+    const result = rollAt(state, { leftItemId: ids.first, rightItemId: ids.second, atUs: 9_000_000, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // “A” only has 10 s of source and starts at 0, so the junction cannot pass
+    // its source end; it also cannot pass the right clip's end.
+    const first = result.state.items[ids.first]!;
+    const second = result.state.items[ids.second]!;
+    expect(first.startUs + first.durationUs).toBeLessThanOrEqual(second.startUs + second.durationUs);
+    expect(second.durationUs).toBeGreaterThanOrEqual(33_333);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('refuses a rolling edit across non-adjacent clips', () => {
+    const { state, ids } = fixture();
+    const result = rollAt(state, { leftItemId: ids.first, rightItemId: ids.third, atUs: 1_000_000, fps: 30 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('invalid');
   });
 
   it('refuses magnetic on a non-main track', () => {

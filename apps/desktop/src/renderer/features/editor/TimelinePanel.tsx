@@ -27,6 +27,7 @@ import {
 } from '@clipwright/design-system';
 import {
   contentDurationUs,
+  frameDurationUs,
   formatTimecode,
   itemEndUs,
   parseTimecode,
@@ -49,6 +50,7 @@ type DragState =
   | { kind: 'scrub' }
   | { kind: 'move'; itemId: string; startUs: number; pointerStartUs: number }
   | { kind: 'trim'; itemId: string; edge: 'start' | 'end' }
+  | { kind: 'roll'; leftItemId: string; rightItemId: string }
   | null;
 
 export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
@@ -76,6 +78,12 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     us: number;
   } | null>(null);
   const [snapGuide, setSnapGuide] = useState<number | null>(null);
+  // Rolling edit preview: the junction position under the pointer.
+  const [rollPreview, setRollPreview] = useState<{
+    leftItemId: string;
+    rightItemId: string;
+    us: number;
+  } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLCanvasElement>(null);
@@ -246,6 +254,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     setDrag(null);
     setDragPreview(null);
     setTrimPreview(null);
+    setRollPreview(null);
     setSnapGuide(null);
   }, []);
 
@@ -320,6 +329,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (drag.kind === 'trim') {
         setTrimPreview({ itemId: drag.itemId, edge: drag.edge, us: snapped.us });
       }
+      if (drag.kind === 'roll') {
+        setRollPreview({ leftItemId: drag.leftItemId, rightItemId: drag.rightItemId, us: snapped.us });
+      }
     };
 
     const onUp = (event: PointerEvent) => {
@@ -328,6 +340,9 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       }
       if (drag.kind === 'trim' && trimPreview) {
         timeline.trim(drag.itemId, drag.edge, trimPreview.us, event.shiftKey);
+      }
+      if (drag.kind === 'roll' && rollPreview) {
+        timeline.roll(rollPreview.leftItemId, rollPreview.rightItemId, rollPreview.us);
       }
       endDrag();
     };
@@ -338,7 +353,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [applySnap, drag, dragPreview, editMode, endDrag, timeAtPointer, timeline, trimPreview]);
+  }, [applySnap, drag, dragPreview, editMode, endDrag, rollPreview, timeAtPointer, timeline, trimPreview]);
 
   /** Drag on empty timeline area selects every clip the rectangle touches. */
   const beginMarquee = (event: React.PointerEvent) => {
@@ -847,11 +862,25 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                       {item.label}
                     </span>
                     <span
+                      data-testid={`${item.id}-right-handle`}
                       onPointerDown={(event) => {
                         event.stopPropagation();
+                        // Ctrl+drag at a junction starts a rolling edit (SPEC 09 §13.3).
+                        if ((event.ctrlKey || event.metaKey) || (event.nativeEvent as MouseEvent)?.ctrlKey || (event.nativeEvent as MouseEvent)?.metaKey) {
+                          const index = track.itemIds.indexOf(itemId);
+                          const nextId = track.itemIds[index + 1];
+                          const next = nextId ? state.items[nextId] : undefined;
+                          if (
+                            next &&
+                            Math.abs(next.startUs - itemEndUs(item)) <= frameDurationUs(fps)
+                          ) {
+                            setDrag({ kind: 'roll', leftItemId: item.id, rightItemId: next.id });
+                            return;
+                          }
+                        }
                         setDrag({ kind: 'trim', itemId: item.id, edge: 'end' });
                       }}
-                      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }}
+                      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize' }}
                     />
                   </div>
                 );
@@ -875,6 +904,20 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
             </div>
           ))}
 
+          {rollPreview && (
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: usToX(rollPreview.us) - scrollX,
+                top: 0,
+                bottom: 0,
+                width: 2,
+                background: 'var(--brand)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           {snapGuide !== null && (
             <div
               style={{
