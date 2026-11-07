@@ -47,3 +47,4 @@ Thumbs.db
 .tmp-export-it/
 .tmp-runner-it/
 .tmp-export-runner/
+.tmp-export-queue/

@@ -59,6 +59,11 @@ export {
   filterJobsByStatus,
   calculateEta,
   calculateSpeed,
+  formatJobSummary,
+  formatEta,
+  isCancellable,
+  ACTIVE_EXPORT_STATUSES,
+  FINISHED_EXPORT_STATUSES,
 } from './job-queue.js';
 export type {
   ExportJob,

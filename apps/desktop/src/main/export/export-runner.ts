@@ -111,6 +111,9 @@ export interface ExportJobResult {
 
 export type ProgressSink = (progress: ExportProgress) => void;
 
+/** Re-exported so callers of this module do not need the runner directly. */
+export { CancelledError } from './ffmpeg-runner.js';
+
 /** Stage weights so the bar moves honestly (SPEC 14 §6). */
 const STAGE_WEIGHTS = {
   prepare: 2,
