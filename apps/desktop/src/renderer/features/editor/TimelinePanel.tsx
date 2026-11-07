@@ -769,6 +769,15 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           ]}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+          <span
+            data-testid="save-state"
+            style={{
+              fontSize: 'var(--fs-xs)',
+              color: timeline.saveState === 'saved' ? 'var(--text-muted)' : timeline.saveState === 'dirty' ? 'var(--brand-amber)' : 'var(--error)',
+            }}
+          >
+            {timeline.saveState === 'saved' ? 'Saved' : timeline.saveState === 'dirty' ? 'Unsaved' : timeline.saveState === 'saving' ? 'Saving…' : 'Save error'}
+          </span>
           <IconButton label={playback.isPlaying ? 'Pause' : 'Play'} shortcut='Space' size={28} icon={playback.isPlaying ? <Pause size={14} /> : <Play size={14} />} onClick={playback.toggle} />
           <IconButton label={loopPlayback ? 'Loop playback: on' : 'Loop playback: off'} size={28} active={loopPlayback} icon={<Repeat size={14} />} onClick={() => setLoopPlayback((value) => !value)} />
           <IconButton label={followPlayhead ? 'Follow playhead: on' : 'Follow playhead: off'} size={28} active={followPlayhead} icon={<Lock size={14} />} onClick={() => setFollowPlayhead((value) => !value)} />

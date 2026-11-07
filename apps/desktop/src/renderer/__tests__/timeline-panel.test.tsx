@@ -775,6 +775,19 @@ describe('timeline panel', () => {
     expect(screen.getByRole('button', { name: /^Follow playhead: off$/ })).toBeTruthy();
   });
 
+
+  it('shows save state in the toolbar', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { saveState: 'dirty' });
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const indicator = container.querySelector('[data-testid="save-state"]');
+    expect(indicator?.textContent).toBe('Unsaved');
+
+    const timeline2 = fakeTimeline(state, { saveState: 'saved' });
+    const { container: container2 } = render(<TimelinePanel timeline={timeline2} />);
+    expect(container2.querySelector('[data-testid="save-state"]')?.textContent).toBe('Saved');
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
