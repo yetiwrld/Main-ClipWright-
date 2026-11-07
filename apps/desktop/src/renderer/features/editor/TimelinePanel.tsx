@@ -530,6 +530,22 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (event.key === 'End') {
         event.preventDefault();
         playheadStore.set(duration);
+        return;
+      }
+      if (meta && event.key === '0') {
+        event.preventDefault();
+        fitProject();
+        return;
+      }
+      if (meta && (event.key === '=' || event.key === '+')) {
+        event.preventDefault();
+        zoomBy(1.25);
+        return;
+      }
+      if (meta && event.key === '-') {
+        event.preventDefault();
+        zoomBy(1 / 1.25);
+        return;
       }
     };
     window.addEventListener('keydown', onKeyDown);

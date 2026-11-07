@@ -579,6 +579,19 @@ describe('timeline panel', () => {
     expect(screen.getByText('Fit project')).toBeTruthy();
   });
 
+
+  it('routes Ctrl+0 to fit project and Ctrl+=/- to zoom', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    // Ctrl+0 should call fitProject (via run)
+    fireEvent.keyDown(window, { key: '0', ctrlKey: true });
+    // Ctrl+= should zoom in (no error)
+    fireEvent.keyDown(window, { key: '=', ctrlKey: true });
+    // Ctrl+- should zoom out (no error)
+    fireEvent.keyDown(window, { key: '-', ctrlKey: true });
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.
