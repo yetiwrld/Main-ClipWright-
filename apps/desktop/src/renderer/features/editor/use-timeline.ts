@@ -13,6 +13,7 @@ import {
   duplicateItems,
   moveItems,
   setTrackMuted,
+  setTrackMagnetic,
   splitItems,
   trimItem,
   trimItems,
@@ -69,6 +70,7 @@ export interface TimelineApi {
   duplicate: () => boolean;
   addMarkerAt: (atUs: number) => boolean;
   toggleMute: (trackId: string) => boolean;
+  toggleMagnetic: (trackId: string) => boolean;
   placeMedia: (input: {
     mediaId: string;
     label: string;
@@ -346,6 +348,13 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       addMarkerAt: (atUs) => run('Add marker', (s) => addMarker(s, { timeUs: atUs, fps })),
       toggleMute: (trackId) =>
         run('Mute track', (s) => setTrackMuted(s, { trackId, muted: !s.tracks.find((t) => t.id === trackId)?.muted })),
+      toggleMagnetic: (trackId) =>
+        run('Toggle magnetic', (s) =>
+          setTrackMagnetic(s, {
+            trackId,
+            magnetic: !s.tracks.find((t) => t.id === trackId)?.magnetic,
+          }),
+        ),
       placeMedia: (input) => {
         return run('Add clip', (s) => {
           const mainTrack = s.tracks.find((track) => track.role === 'main');

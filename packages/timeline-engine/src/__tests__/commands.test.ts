@@ -11,10 +11,12 @@ import {
   moveItems,
   moveItemsToTrack,
   setTrackMuted,
+  setTrackMagnetic,
   splitItems,
   trimItem,
   trimItems,
 } from '../commands';
+import type { TimelineState } from '../commands';
 import { checkInvariantsMB } from './helpers';
 
 describe('timeline commands', () => {
@@ -47,7 +49,7 @@ describe('timeline commands', () => {
 
   it('clamps a colliding move to the nearest free gap instead of overwriting', () => {
     const { state, ids } = fixture();
-    const result = moveItems(state, {
+    const result = moveItems(demagnetized(state), {
       fps: 30,
       moves: [{ itemId: ids.second, startUs: 700_000 }],
     });
@@ -73,8 +75,8 @@ describe('timeline commands', () => {
 
   it('never lets Normal mode create an overlap', () => {
     const { state, ids } = fixture();
-    const before = state.items[ids.first]!;
-    const result = moveItems(state, {
+    const before = demagnetized(state).items[ids.first]!;
+    const result = moveItems(demagnetized(state), {
       fps: 30,
       moves: [{ itemId: ids.first, startUs: before.startUs + 500_000 }],
     });
@@ -261,6 +263,81 @@ describe('timeline commands', () => {
     expect(checkInvariantsMB(result.state)).toEqual([]);
   });
 
+  it('magnetic main track closes the gap when a clip is deleted', () => {
+    const { state, ids } = fixture();
+    const result = deleteItems(state, { itemIds: [ids.first], fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // “A” occupied 0–2 s; with magnetic on, “B” slides left to 0.
+    expect(result.state.items[ids.second]!.startUs).toBe(0);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('magnetic main track closes the gap when a clip is trimmed shorter', () => {
+    const { state, ids } = fixture();
+    const result = trimItem(state, { itemId: ids.first, edge: 'end', toUs: 1_000_000, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items[ids.second]!.startUs).toBe(1_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('magnetic main track closes the gap when a clip moves away', () => {
+    const { state, ids, trackId } = fixture();
+    const result = moveItems(state, {
+      fps: 30,
+      moves: [{ itemId: ids.first, startUs: 0, trackId: state.tracks[1]!.id }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // “A” left the main track; “B” slides left to 0.
+    expect(result.state.items[ids.second]!.startUs).toBe(0);
+    expect(result.state.items[ids.first]!.trackId).not.toBe(trackId);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('magnetic main track inserts a dropped clip and pushes later clips right', () => {
+    const { state, ids } = fixture();
+    const incoming = createMediaItem({
+      id: 'item-in',
+      trackId: state.tracks[0]!.id,
+      label: 'In',
+      mediaId: 'media-1',
+      startUs: 1_000_000,
+      durationUs: 1_000_000,
+      sourceDurationUs: 10_000_000,
+    });
+    const result = addItem(state, { item: incoming, fps: 30, startUs: 1_000_000 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Dropped at 1 s: “A” (0–2 s) is split, “B” slides right by the insert.
+    const split = Object.values(result.state.items).find((item) =>
+      item.id.startsWith('item-a~'),
+    );
+    expect(split).toBeDefined();
+    expect(result.state.items[ids.second]!.startUs).toBe(3_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('magnetic off leaves the main track gaps alone', () => {
+    const { state, ids } = fixture();
+    const demagnetized = setTrackMagnetic(state, { trackId: state.tracks[0]!.id, magnetic: false });
+    expect(demagnetized.ok).toBe(true);
+    if (!demagnetized.ok) return;
+    const result = deleteItems(demagnetized.state, { itemIds: [ids.first], fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items[ids.second]!.startUs).toBe(2_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('refuses magnetic on a non-main track', () => {
+    const { state } = fixture();
+    const result = setTrackMagnetic(state, { trackId: state.tracks[1]!.id, magnetic: true });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('invalid');
+  });
+
   it('moves selection to the track above and below without overlap', () => {
     const { state, ids } = fixture();
     const up = moveItemsToTrack(state, { itemIds: [ids.first], direction: 'up', fps: 30 });
@@ -302,8 +379,8 @@ describe('timeline commands', () => {
 
   it('deletes without ripple, leaving the gap', () => {
     const { state, ids } = fixture();
-    const second = state.items[ids.second]!;
-    const result = deleteItems(state, { itemIds: [ids.first], fps: 30 });
+    const second = demagnetized(state).items[ids.second]!;
+    const result = deleteItems(demagnetized(state), { itemIds: [ids.first], fps: 30 });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.items[ids.second]!.startUs).toBe(second.startUs);
@@ -372,7 +449,7 @@ describe('timeline commands', () => {
   it('adds a dropped clip into the nearest free gap and reports the track', () => {
     const { state, ids, trackId } = fixture();
     const dropped = state.items[ids.third]!;
-    const result = addItem(state, {
+    const result = addItem(demagnetized(state), {
       fps: 30,
       trackId,
       item: { ...dropped, id: 'dropped-1', trackId, type: 'video', durationUs: 1_000_000 },
@@ -388,7 +465,7 @@ describe('timeline commands', () => {
 
   it('places a long drop after the existing clips rather than on top of them', () => {
     const { state, ids, trackId } = fixture();
-    const result = addItem(state, {
+    const result = addItem(demagnetized(state), {
       fps: 30,
       trackId,
       item: {
@@ -481,6 +558,12 @@ describe('timeline commands', () => {
     }
   });
 });
+
+function demagnetized(state: TimelineState): TimelineState {
+  const result = setTrackMagnetic(state, { trackId: state.tracks[0]!.id, magnetic: false });
+  if (!result.ok) throw new Error('demagnetize failed');
+  return result.state;
+}
 
 function fixture() {
   const base = createDefaultTimeline({ id: 'c1', name: 'Clip' });

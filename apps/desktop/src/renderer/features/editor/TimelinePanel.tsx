@@ -686,6 +686,15 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                 {track.name}
               </span>
               {track.locked && <Lock size={11} color="var(--text-muted)" />}
+              {track.role === 'main' && (
+                <IconButton
+                  label={track.magnetic ? `Magnetic ${track.name}: on` : `Magnetic ${track.name}: off`}
+                  size={28}
+                  active={track.magnetic === true}
+                  icon={<Magnet size={12} />}
+                  onClick={() => timeline.toggleMagnetic(track.id)}
+                />
+              )}
               {(track.kind === 'audio' || track.kind === 'video') && (
                 <IconButton
                   label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}

@@ -176,7 +176,13 @@ export function moveItems(
           (candidate) => !movingIds.has(candidate.id),
         );
 
-      if (mode === 'insert') {
+      // SPEC 09 §13.2: on a magnetic main track, Normal behaves as Insert.
+      const effectiveMode: EditMode =
+        mode === 'normal' && targetTrack.role === 'main' && targetTrack.magnetic
+          ? 'insert'
+          : mode;
+
+      if (effectiveMode === 'insert') {
         if (overlapsAny(others(), startUs, durationUs)) {
           splitAtPoint(draft, trackId, startUs, params.fps);
         }
@@ -186,7 +192,7 @@ export function moveItems(
             other.startUs = quantizeUs(other.startUs + durationUs, params.fps);
           }
         }
-      } else if (mode === 'overwrite') {
+      } else if (effectiveMode === 'overwrite') {
         for (const other of sortedItemsOfTrack(draft as TimelineState, trackId)) {
           if (movingIds.has(other.id)) continue;
           const otherEnd = itemEndUs(other);
@@ -250,6 +256,29 @@ export function moveItems(
       item.trackId = trackId;
       item.startUs = startUs;
       addToTrack(draft, trackId, item.id);
+    }
+
+    // Magnetic main track: moving a main-track clip away closes the gap it
+    // left (SPEC 09 §9.4.2). Clips still on the main track act as anchors.
+    const mainTrack = draft.tracks.find((track) => track.role === 'main');
+    if (mainTrack?.magnetic) {
+      const movedFromMain = params.moves
+        .map((move) => {
+          const original = state.items[move.itemId];
+          return original && state.tracks.find((track) => track.id === original.trackId)?.role === 'main'
+            ? { itemId: move.itemId, oldStartUs: original.startUs }
+            : null;
+        })
+        .filter((value): value is { itemId: string; oldStartUs: number } => value !== null);
+      if (movedFromMain.length) {
+        const skipIds = new Set(
+          movedFromMain
+            .filter((move) => draft.items[move.itemId]?.trackId === mainTrack.id)
+            .map((move) => move.itemId),
+        );
+        const minStart = Math.min(...movedFromMain.map((move) => move.oldStartUs));
+        closeMainGaps(draft, params.fps, minStart, skipIds);
+      }
     }
   });
 
@@ -460,6 +489,16 @@ export function trimItem(state: TimelineState, params: TrimParams): CommandResul
     } else {
       sortTrackItems(draft, item.trackId);
     }
+
+    // Magnetic main track: shortening the end edge closes the gap after it.
+    if (
+      !params.ripple &&
+      params.edge === 'end' &&
+      nextDuration < item.durationUs &&
+      track.role === 'main'
+    ) {
+      closeMainGaps(draft, params.fps, finalStart + nextDuration);
+    }
   });
 
   return {
@@ -470,6 +509,36 @@ export function trimItem(state: TimelineState, params: TrimParams): CommandResul
     affectedItemIds: [params.itemId],
     notes,
   };
+}
+
+/**
+ * Magnetic main track (SPEC 09 §9.4.2): clips on the main track are always
+ * packed end to end. Shifts every item at/after `fromUs` left to close the
+ * gap, skipping `skipIds` (moved clips act as anchors). Locked items never
+ * move — the cursor jumps past them and later items pack against their end.
+ */
+function closeMainGaps(
+  draft: TimelineState,
+  fps: Fps,
+  fromUs: number,
+  skipIds: Set<string> = new Set(),
+): void {
+  const main = draft.tracks.find((track) => track.role === 'main');
+  if (!main || main.magnetic === false) return;
+  let cursor = Math.max(0, quantizeUs(fromUs, fps));
+  for (const item of sortedItemsOfTrack(draft, main.id)) {
+    if (skipIds.has(item.id)) {
+      cursor = Math.max(cursor, itemEndUs(item));
+      continue;
+    }
+    if (item.startUs >= cursor) {
+      if (item.startUs > cursor) item.startUs = cursor;
+      cursor = itemEndUs(item);
+    } else {
+      cursor = Math.max(cursor, itemEndUs(item));
+    }
+  }
+  sortTrackItems(draft, main.id);
 }
 
 /** Tracks of items sharing this item's linkId (SPEC 09 §9.6). */
@@ -664,9 +733,37 @@ export function trimItems(
     } else {
       for (const itemId of params.itemIds) sortTrackItems(draft, state.items[itemId]!.trackId);
     }
+
+    // Magnetic main track: shortened end edges close the gaps after them.
+    if (!params.ripple && params.edge === 'end') {
+      const onMain = selected.filter(
+        (item) => state.tracks.find((track) => track.id === item.trackId)?.role === 'main',
+      );
+      if (onMain.length) {
+        const maxEnd = Math.max(
+          ...onMain.map((item) => geometry.get(item.id)!.nextStart + geometry.get(item.id)!.nextDuration),
+        );
+        closeMainGaps(draft, params.fps, maxEnd);
+      }
+    }
   });
 
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: params.itemIds, notes };
+}
+
+/** Toggle the magnetic main track (SPEC 09 §9.4.2). Only the main track accepts it. */
+export function setTrackMagnetic(
+  state: TimelineState,
+  params: { trackId: string; magnetic: boolean },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.role !== 'main') return fail('invalid', 'Only the main track can be magnetic.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (target) target.magnetic = params.magnetic;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }
 
 /** SPEC 09 §12 Split: both halves keep every property; the right half gets a new id. */
@@ -733,6 +830,11 @@ export function deleteItems(
     if (track?.locked) return fail('locked', `“${track.name}” is locked.`);
   }
 
+  const removedOnMain = params.itemIds.some((id) => {
+    const item = state.items[id];
+    return item && state.tracks.find((track) => track.id === item.trackId)?.role === 'main';
+  });
+
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
     for (const id of params.itemIds) {
       const item = draft.items[id];
@@ -758,6 +860,14 @@ export function deleteItems(
         }
         sortTrackItems(draft, affectedId);
       }
+    }
+
+    // Magnetic main track: a non-ripple delete still closes the gap (SPEC 09 §9.4.2).
+    if (!params.ripple && removedOnMain) {
+      const minStart = Math.min(
+        ...params.itemIds.map((id) => state.items[id]?.startUs ?? 0),
+      );
+      closeMainGaps(draft, params.fps, minStart);
     }
   });
 
@@ -825,7 +935,33 @@ export function addItem(
   let startUs = quantizeUs(params.startUs ?? params.item.startUs, params.fps);
   let placedTrackId = trackId;
   const occupied = sortedItemsOfTrack(state, trackId);
+  const magneticMain = track.role === 'main' && track.magnetic === true;
   if (overlapsAny(occupied, startUs, params.item.durationUs)) {
+    if (magneticMain) {
+      // SPEC 09 §13.2: dropping on a magnetic main track inserts and ripples.
+      const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+        if (overlapsAny(sortedItemsOfTrack(draft as TimelineState, trackId), startUs, params.item.durationUs)) {
+          splitAtPoint(draft, trackId, startUs, params.fps);
+        }
+        for (const other of sortedItemsOfTrack(draft as TimelineState, trackId)) {
+          if (other.startUs >= startUs) {
+            other.startUs = quantizeUs(other.startUs + params.item.durationUs, params.fps);
+          }
+        }
+        const item = { ...copyPlain(params.item), trackId, startUs } as TimelineItem;
+        draft.items[item.id] = item;
+        addToTrack(draft, trackId, item.id);
+      });
+      return {
+        ok: true,
+        state: nextState,
+        patches,
+        inverse,
+        affectedItemIds: [params.item.id],
+        notes: ['Inserted on the main track.'],
+        trackId,
+      };
+    }
     const free = nearestFreeStart(occupied, startUs, params.item.durationUs);
     if (free === null) {
       const fallback = state.tracks.find(

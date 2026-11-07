@@ -47,6 +47,7 @@ export {
   ungroupItems,
   addMarker,
   setTrackMuted,
+  setTrackMagnetic,
   type CommandOk,
   type CommandError,
   type CommandResult,

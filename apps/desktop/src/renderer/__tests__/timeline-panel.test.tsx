@@ -62,6 +62,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     duplicate: vi.fn(() => true),
     addMarkerAt: vi.fn(() => true),
     toggleMute: vi.fn(() => true),
+    toggleMagnetic: vi.fn(() => true),
     placeMedia: vi.fn(() => true),
     dismissNotes: vi.fn(),
     copy: vi.fn(() => 0),
@@ -255,6 +256,16 @@ describe('timeline panel', () => {
 
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(timeline.moveSelectionToTrack).toHaveBeenCalledWith('down');
+  });
+
+  it('toggles magnetic on the main track header', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { getByRole } = render(<TimelinePanel timeline={timeline} />);
+
+    const toggle = getByRole('button', { name: /^Magnetic Main video: on$/ });
+    fireEvent.click(toggle);
+    expect(timeline.toggleMagnetic).toHaveBeenCalledWith(state.tracks[0]!.id);
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {
