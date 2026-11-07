@@ -747,6 +747,16 @@ describe('timeline panel', () => {
     expect(container.querySelector('[data-testid="work-area-out-handle"]')).toBeNull();
   });
 
+
+  it('toggles loop playback', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    const loopButton = screen.getByRole('button', { name: /^Loop playback: off$/ });
+    expect(loopButton).toBeTruthy();
+    fireEvent.click(loopButton);
+    expect(screen.getByRole('button', { name: /^Loop playback: on$/ })).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

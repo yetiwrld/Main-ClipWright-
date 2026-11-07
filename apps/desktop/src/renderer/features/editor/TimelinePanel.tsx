@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Diamond,
+  Repeat,
   Pause,
   Play,
   Copy,
@@ -78,6 +79,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [tool, setTool] = useState<'select' | 'razor'>('select');
   const [showKeyframes, setShowKeyframes] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [loopPlayback, setLoopPlayback] = useState(false);
   const [marquee, setMarquee] = useState<{
     x1: number;
     y1: number;
@@ -113,7 +115,8 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   pxPerSecondRef.current = pxPerSecond;
 
   const durationUs = state ? projectDurationUs(state) : 1_000_000;
-  const playback = usePlayback(durationUs, fps, state?.workArea);
+  const workArea = state?.workArea;
+  const playback = usePlayback(durationUs, fps, loopPlayback ? workArea : undefined);
   const pxPerUs = pxPerSecond / 1_000_000;
 
   const usToX = useCallback((us: number) => us * pxPerSecondRef.current / 1_000_000, []);
@@ -755,6 +758,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
           <IconButton label={playback.isPlaying ? 'Pause' : 'Play'} shortcut='Space' size={28} icon={playback.isPlaying ? <Pause size={14} /> : <Play size={14} />} onClick={playback.toggle} />
+          <IconButton label={loopPlayback ? 'Loop playback: on' : 'Loop playback: off'} size={28} active={loopPlayback} icon={<Repeat size={14} />} onClick={() => setLoopPlayback((value) => !value)} />
           <PlayheadReadout durationUs={durationUs} fps={fps} />
           <IconButton label="Zoom out" size={28} icon={<Minus size={14} />} onClick={() => zoomBy(1 / 1.25)} />
           <div style={{ width: 96 }}>
