@@ -152,3 +152,27 @@ export function drawWaveform(
 export function selectPeakResolution(pxPerSecond: number): '256' | '4096' {
   return pxPerSecond < 50 ? '256' : '4096';
 }
+
+/**
+ * Draws a thumbnail image onto a canvas context, tiled across the given
+ * width. Each tile is drawn at the source time of the tile's centre.
+ * The thumbnail data URL is repeated across the clip width as a
+ * filmstrip; when per-time thumbnails are generated, the hook can be
+ * extended to fetch them on demand.
+ */
+export function drawThumbnailFilmstrip(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+): void {
+  if (!img.complete || img.naturalWidth === 0) return;
+  const tileWidth = height * (16 / 9);
+  const tileHeight = height;
+  let x = 0;
+  while (x < width) {
+    const drawWidth = Math.min(tileWidth, width - x);
+    ctx.drawImage(img, x, 0, drawWidth, tileHeight);
+    x += tileWidth;
+  }
+}

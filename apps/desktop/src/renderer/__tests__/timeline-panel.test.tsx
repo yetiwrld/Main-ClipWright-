@@ -880,6 +880,40 @@ describe('Waveforms (SPEC 09 §19)', () => {
   });
 });
 
+
+describe('Thumbnails (SPEC 09 §19)', () => {
+  it('renders thumbnail filmstrip for video items with mediaId', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    // The fixture items have mediaId 'media-1' and type 'video'.
+    expect(container.querySelectorAll('[data-testid*="thumbstrip"]').length).toBe(2);
+  });
+
+  it('does not render thumbnail filmstrip for audio items', () => {
+    const state = fixture();
+    const audioItem = { ...state.items['item-a'], type: 'audio' as const };
+    const stateWithAudio = {
+      ...state,
+      items: { ...state.items, ['item-a']: audioItem },
+    };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithAudio)} />);
+    // Only item-b (video) should have a thumbnail filmstrip.
+    expect(container.querySelectorAll('[data-testid*="thumbstrip"]').length).toBe(1);
+  });
+
+  it('does not render thumbnail filmstrip for caption items', () => {
+    const state = fixture();
+    const captionItem = { ...state.items['item-a'], type: 'caption' as const };
+    const stateWithCaption = {
+      ...state,
+      items: { ...state.items, ['item-a']: captionItem },
+    };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithCaption)} />);
+    // Only item-b should have a thumbnail filmstrip.
+    expect(container.querySelectorAll('[data-testid*="thumbstrip"]').length).toBe(1);
+  });
+});
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

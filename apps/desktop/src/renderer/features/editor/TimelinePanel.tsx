@@ -56,7 +56,7 @@ import {
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { usePlayback } from './use-playback.js';
-import { useMediaPeaks, drawWaveform, selectPeakResolution } from './use-media-assets.js';
+import { useMediaPeaks, useMediaThumbnail, drawWaveform, drawThumbnailFilmstrip, selectPeakResolution } from './use-media-assets.js';
 
 const HEADER_WIDTH = 184;
 const MIN_PX_PER_SECOND = 0.25;
@@ -1135,6 +1135,15 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                         pxPerSecond={pxPerSecond}
                       />
                     )}
+                    {item.mediaId && item.type === 'video' && (
+                      <ThumbnailFilmstrip
+                        mediaId={item.mediaId}
+                        width={width}
+                        height={Math.min(28, track.heightPx - 28)}
+                        sourceInUs={item.sourceInUs}
+                        sourceDurationUs={item.sourceDurationUs ?? item.durationUs}
+                      />
+                    )}
                     <span
                       data-testid={`${item.id}-right-handle`}
                       onPointerDown={(event) => {
@@ -1601,6 +1610,61 @@ function WaveformCanvas({
         height,
         pointerEvents: 'none',
         opacity: 0.5,
+      }}
+    />
+  );
+}
+
+/**
+ * Canvas that draws a thumbnail filmstrip for a video item on the timeline.
+ * Tiles the poster thumbnail across the clip width, with each tile representing
+ * a portion of the source media.
+ */
+function ThumbnailFilmstrip({
+  mediaId,
+  width,
+  height,
+  sourceInUs,
+  sourceDurationUs,
+}: {
+  mediaId: string;
+  width: number;
+  height: number;
+  sourceInUs: number;
+  sourceDurationUs: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const thumbUrl = useMediaThumbnail(mediaId, sourceInUs);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !thumbUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      imgRef.current = img;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      canvas.width = Math.max(1, Math.floor(width));
+      canvas.height = Math.max(1, Math.floor(height));
+      drawThumbnailFilmstrip(ctx, img, width, height);
+    };
+    img.src = thumbUrl;
+  }, [thumbUrl, width, height]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      data-testid={`${mediaId}-thumbstrip`}
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 4,
+        width: '100%',
+        height,
+        pointerEvents: 'none',
+        opacity: 0.4,
+        borderRadius: 'var(--radius-sm)',
       }}
     />
   );
