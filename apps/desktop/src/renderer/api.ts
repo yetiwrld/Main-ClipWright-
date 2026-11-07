@@ -337,6 +337,20 @@ export const api = {
     return getBridge()?.onUpdateState(callback) ?? (() => undefined);
   },
 
+  // ---- yt-dlp updater (SPEC 15 §9) ----
+  async getYtDlpStatus() {
+    return requireBridge('Reading the yt-dlp version').getYtDlpStatus();
+  },
+  async checkYtDlpUpdate() {
+    return requireBridge('Checking the yt-dlp version').checkYtDlpUpdate();
+  },
+  async updateYtDlp(input: Parameters<ClipwrightBridge['updateYtDlp']>[0]) {
+    return requireBridge('Updating yt-dlp').updateYtDlp(input);
+  },
+  async restoreBundledYtDlp() {
+    return requireBridge('Restoring the bundled yt-dlp').restoreBundledYtDlp();
+  },
+
   // ---- Update recovery (SPEC 15 §7) ----
   async getRecoveryState() {
     return requireBridge('Reading update recovery state').getRecoveryState();

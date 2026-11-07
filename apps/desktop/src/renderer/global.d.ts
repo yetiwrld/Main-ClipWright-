@@ -608,6 +608,16 @@ export interface ClipwrightBridge {
   // Bundled tool integrity (SPEC 15 §6.1)
   getToolIntegrity(): Promise<ToolIntegrityPayload | null>;
 
+  // yt-dlp updater (SPEC 15 §9)
+  getYtDlpStatus(): Promise<YtDlpStatePayload | null>;
+  checkYtDlpUpdate(): Promise<YtDlpCheckPayload>;
+  updateYtDlp(input: { downloadUrl: string; expectedSha256: string; version: string }): Promise<{
+    ok: boolean;
+    error?: string;
+    state: YtDlpStatePayload;
+  }>;
+  restoreBundledYtDlp(): Promise<{ ok: boolean; reason?: string; state: YtDlpStatePayload }>;
+
   // Export (SPEC 14)
   startExport(request: ExportStartRequestPayload): Promise<ExportStartResultPayload>;
   cancelExport(jobId: string): Promise<boolean>;
@@ -737,6 +747,25 @@ export interface RecoveryStatePayload {
   toVersion: string;
 }
 
+/** yt-dlp status for Settings → Updates (SPEC 15 §9). */
+export interface YtDlpStatePayload {
+  version: string | null;
+  source: 'bundled' | 'user' | null;
+  path: string | null;
+  available: { version: string; downloadUrl: string } | null;
+  lastCheckedAt: number | null;
+  message: string;
+  error: string | null;
+}
+
+/** The result of a yt-dlp check, mirroring update-core's YtDlpUpdateCheck. */
+export type YtDlpCheckPayload =
+  | { kind: 'current'; version: string }
+  | { kind: 'available'; version: string; assetName: string; downloadUrl: string; expectedSha256: string }
+  | { kind: 'not-due'; nextCheckAt: number }
+  | { kind: 'blocked'; reason: string }
+  | { kind: 'error'; message: string };
+
 /** Bundled-tool verification summary (SPEC 15 §6.1). */
 export interface ToolIntegrityPayload {
   manifestPresent: boolean;
@@ -757,9 +786,11 @@ type AssertSame<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fal
 const _updateStateMatchesCore: AssertSame<UpdateStatePayload, import('@clipwright/update-core').UpdateState> = true;
 const _updateStatusMatchesCore: AssertSame<UpdateStatusPayload, import('@clipwright/update-core').UpdateStatus> = true;
 const _updateProgressMatchesCore: AssertSame<UpdateProgressPayload, import('@clipwright/update-core').UpdateProgress> = true;
+const _ytDlpCheckMatchesCore: AssertSame<YtDlpCheckPayload, import('@clipwright/update-core').YtDlpUpdateCheck> = true;
 void _updateStateMatchesCore;
 void _updateStatusMatchesCore;
 void _updateProgressMatchesCore;
+void _ytDlpCheckMatchesCore;
 
 export interface UpdateStatePayload {
   status: UpdateStatusPayload;

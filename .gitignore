@@ -59,6 +59,7 @@ Thumbs.db
 .tmp-smoke/
 .tmp-bin-integrity/
 .tmp-update-journal/
+.tmp-ytdlp/
 
 # Written by `pnpm test:unit` so scripts/check-repo.mjs can compare the
 # numbers in docs/verification.md against a real run. Never committed.

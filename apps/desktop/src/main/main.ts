@@ -24,6 +24,7 @@ import { resolveTrustedKeys } from './updater/update-config.js';
 import { isSmokeTest, runSmokeTestAndExit } from './smoke-test.js';
 import { summariseIntegrity, verifyBundledTools } from './bin-integrity.js';
 import { UpdateJournalStore, scheduleBootConfirmation } from './updater/update-journal-store.js';
+import { YtDlpService } from './updater/ytdlp-service.js';
 import {
   BOOT_CONFIRM_MS,
   backupFolderName,
@@ -179,6 +180,9 @@ let recoveryContext: RecoveryView | null = null;
 
 /** SPEC 15 §7 — the update journal for this app run. */
 let journalStore: UpdateJournalStore | null = null;
+
+/** SPEC 15 §9 — the yt-dlp updater, separate from app updates. */
+let ytDlpService: YtDlpService | null = null;
 
 /** Last bundled-tool verification result (SPEC 15 §6.1); null while checking. */
 let binIntegrityReport: Awaited<ReturnType<typeof verifyBundledTools>> | null = null;
@@ -804,6 +808,30 @@ function registerIPC(): void {
     return err === '' ? true : err;
   });
 
+  // ---- yt-dlp updater (SPEC 15 §9) ----
+  ipcMain.handle('ytdlp:status', async () => ytDlpService?.describe() ?? null);
+
+  ipcMain.handle('ytdlp:check', async () => {
+    if (!ytDlpService) return { kind: 'error', message: 'The yt-dlp updater is not available.' };
+    const settings = storageService?.getSettings();
+    return ytDlpService.check({
+      manual: true,
+      autoCheckEnabled: settings?.ytDlpAutoUpdate ?? true,
+    });
+  });
+
+  ipcMain.handle(
+    'ytdlp:update',
+    async (_event, input: { downloadUrl: string; expectedSha256: string; version: string }) => {
+      if (!ytDlpService) return { ok: false, error: 'The yt-dlp updater is not available.' };
+      return ytDlpService.update(input);
+    },
+  );
+
+  ipcMain.handle('ytdlp:restore-bundled', async () =>
+    ytDlpService?.restoreBundled() ?? { ok: false, reason: 'The yt-dlp updater is not available.' },
+  );
+
   // ---- Update recovery (SPEC 15 §7.3–§7.5) ----
   ipcMain.handle('updates:recovery', async () => recoveryContext);
 
@@ -1008,10 +1036,15 @@ app.whenReady().then(async () => {
   // SPEC 15 §6.1: verify the bundled binaries before anything spawns them. A
   // replaced ffmpeg is code execution with paths inside the user's workspace, so
   // a mismatch disables that tool rather than running it.
+  const binDir = app.isPackaged
+    ? join(process.resourcesPath, 'bin')
+    : resolve(process.cwd(), 'resources', 'bin');
+
+  // SPEC 15 §9: yt-dlp has its own updater, its own cadence and its own storage.
+  // It writes to user data, never to binDir, which is read-only in a real install.
+  ytDlpService = new YtDlpService({ userDataDir: userData, bundledDir: binDir });
+
   {
-    const binDir = app.isPackaged
-      ? join(process.resourcesPath, 'bin')
-      : resolve(process.cwd(), 'resources', 'bin');
     void verifyBundledTools({ binDir }).then((report) => {
       binIntegrityReport = report;
       const summary = summariseIntegrity(report);

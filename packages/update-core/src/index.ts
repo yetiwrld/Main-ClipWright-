@@ -100,3 +100,24 @@ export type {
 
 // Privacy line shared by main and renderer (SPEC 15 §3, §10)
 export { UPDATE_PRIVACY_NOTE } from './state.js';
+
+// The yt-dlp updater, separate from app updates (SPEC 15 §9)
+export {
+  YTDLP_CHECK_INTERVAL_MS,
+  YTDLP_USER_DIR,
+  parseYtDlpVersion,
+  compareYtDlpVersions,
+  chooseYtDlpBinary,
+  findChecksum,
+  evaluateYtDlpUpdate,
+  planYtDlpInstall,
+  shouldRestoreBundled,
+  describeYtDlpStatus,
+} from './ytdlp.js';
+export type {
+  YtDlpSource,
+  YtDlpVersion,
+  YtDlpUpdateCheck,
+  YtDlpCheckInput,
+  YtDlpInstallPlan,
+} from './ytdlp.js';

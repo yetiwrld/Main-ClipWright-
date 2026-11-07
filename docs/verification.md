@@ -16,22 +16,22 @@ pnpm test:unit
 ```
 
 ```
-Test Files  44 passed (44)
-     Tests  993 passed (993)
+Test Files  46 passed (46)
+     Tests  1048 passed (1048)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 222 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/main` | 237 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 170 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
-| `packages/update-core` | 135 | Version rules, manifest verification, signatures, update state machine, journal and recovery text |
+| `packages/update-core` | 175 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 92 | Commands, invariants, undo/redo |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **993** | 44 files |
+| **Total** | **1048** | 46 files |
 
 ### Tests that run real processes
 
@@ -135,6 +135,13 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | The recovery text warns that a migration also rolls back databases | `journal.test.ts` on `recoveryMessage` (§7.5) |
 | The update dialog cannot install before backups are taken | `update-service.test.ts` — a failing `prepareInstall` aborts the install |
 | The chip and dialog are actually mounted | `update-notice.test.tsx`; the snapshot is reachable from `App` |
+| yt-dlp updates are checked weekly, not on every launch | `ytdlp.test.ts`, clock injected (§9) |
+| A manual yt-dlp check ignores the weekly schedule | `ytdlp-service.test.ts` asserts the network is called |
+| A yt-dlp download whose digest is wrong cannot displace a working binary | `ytdlp-service.test.ts` reads the old file back byte-for-byte |
+| An unverified or older user copy never shadows the bundled one | `ytdlp.test.ts` on `chooseYtDlpBinary` |
+| A refused yt-dlp download never asks for a backup | `ytdlp.test.ts` — `keepBackup` is false on failure |
+| yt-dlp is installed into user data, never the install directory | `ytdlp-service.test.ts` asserts the bundled file is unchanged (§9) |
+| "Restore bundled version" refuses to remove the only working binary | `ytdlp-service.test.ts` |
 
 ### NOT verified
 
@@ -147,6 +154,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | `resources/bin/checksums.json` does not exist | The runtime verifier is tested with fixtures; the real file cannot be produced here because the binaries cannot be downloaded (see §5) |
 | The Recovery window has not been seen in a running app | Rendered under jsdom with every state; the main-process wiring around it is unit-tested but has never run inside Electron |
 | The 60-second boot confirmation has not timed out in a real launch | The state machine and the timer are tested with a fake clock; nothing here has waited 60 seconds for real |
+| yt-dlp has never been downloaded from GitHub here | The service is tested against a fake network holding real SHA-256 digests; no real release asset was fetched or executed |
+| The yt-dlp version reported in Settings has not been read from a real binary | `readVersion` runs `yt-dlp --version`; in tests it is injected, because the bundled files here are Linux symlinks |
 
 ---
 

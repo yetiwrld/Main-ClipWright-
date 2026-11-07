@@ -169,6 +169,12 @@ contextBridge.exposeInMainWorld('clipwright', {
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
 
   // ---- Export (SPEC 14) ----
+  // ---- yt-dlp updater (SPEC 15 §9) ----
+  getYtDlpStatus: () => ipcRenderer.invoke('ytdlp:status'),
+  checkYtDlpUpdate: () => ipcRenderer.invoke('ytdlp:check'),
+  updateYtDlp: (input) => ipcRenderer.invoke('ytdlp:update', input),
+  restoreBundledYtDlp: () => ipcRenderer.invoke('ytdlp:restore-bundled'),
+
   // ---- Update recovery (SPEC 15 §7.3–§7.5) ----
   getRecoveryState: () => ipcRenderer.invoke('updates:recovery'),
   restorePreviousVersion: () => ipcRenderer.invoke('updates:restore-previous'),

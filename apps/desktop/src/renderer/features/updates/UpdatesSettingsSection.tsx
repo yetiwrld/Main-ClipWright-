@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Chip, Select, Toggle } from '@clipwright/design-system';
 import { UPDATE_PRIVACY_NOTE } from '@clipwright/update-core';
+import { YtDlpSection } from './YtDlpSection.js';
 import { getBridge } from '../../api.js';
 import { useUpdates } from './use-updates.js';
 
@@ -137,6 +138,12 @@ export function UpdatesSettingsSection({ onShowDialog }: UpdatesSettingsSectionP
           disabled={!loaded}
           ariaLabel="Use the beta channel"
         />
+      </div>
+
+      {/* SPEC 15 §9: yt-dlp is updated separately from the app. */}
+      <div className="mt-[var(--space-4)] border-t border-[var(--line-subtle)] pt-[var(--space-4)]">
+        <h3 className={HEADING}>yt-dlp</h3>
+        <YtDlpSection />
       </div>
 
       <p className={MUTED}>{UPDATE_PRIVACY_NOTE}</p>
