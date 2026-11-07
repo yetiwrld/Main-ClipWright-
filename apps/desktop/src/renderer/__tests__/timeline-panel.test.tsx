@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   createDefaultTimeline,
@@ -56,6 +56,8 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     trim: vi.fn(() => true),
     split: vi.fn(() => true),
     splitAt: vi.fn(() => true),
+    trimToPlayhead: vi.fn(() => true),
+    moveSelectionToTrack: vi.fn(() => true),
     remove: vi.fn(() => true),
     duplicate: vi.fn(() => true),
     addMarkerAt: vi.fn(() => true),
@@ -76,6 +78,10 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
 }
 
 describe('timeline panel', () => {
+  beforeEach(() => {
+    playheadStore.set(0);
+    vi.clearAllMocks();
+  });
   it('renders every default track and the clips on them', () => {
     const state = fixture();
     render(<TimelinePanel timeline={fakeTimeline(state)} />);
@@ -205,6 +211,34 @@ describe('timeline panel', () => {
     });
 
     expect(timeline.select).toHaveBeenCalledWith(['item-a'], false);
+  });
+
+  it('routes Q/W trim-to-playhead keys with shift for ripple', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+
+    fireEvent.keyDown(window, { key: 'q' });
+    expect(timeline.trimToPlayhead).toHaveBeenCalledWith('start', 0, false);
+
+    playheadStore.set(1_000_000);
+    fireEvent.keyDown(window, { key: 'W' });
+    expect(timeline.trimToPlayhead).toHaveBeenCalledWith('end', 1_000_000, false);
+
+    fireEvent.keyDown(window, { key: 'w', shiftKey: true });
+    expect(timeline.trimToPlayhead).toHaveBeenLastCalledWith('end', 1_000_000, true);
+  });
+
+  it('routes Alt+Up/Down to track moves', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+
+    fireEvent.keyDown(window, { key: 'ArrowUp', altKey: true });
+    expect(timeline.moveSelectionToTrack).toHaveBeenCalledWith('up');
+
+    fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(timeline.moveSelectionToTrack).toHaveBeenCalledWith('down');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

@@ -37,6 +37,8 @@ export {
   addItem,
   moveItems,
   trimItem,
+  trimItems,
+  moveItemsToTrack,
   splitItems,
   deleteItems,
   duplicateItems,

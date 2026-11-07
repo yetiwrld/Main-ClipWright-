@@ -15,6 +15,8 @@ import {
   setTrackMuted,
   splitItems,
   trimItem,
+  trimItems,
+  moveItemsToTrack,
   groupItems,
   pasteItems,
   ungroupItems,
@@ -59,6 +61,10 @@ export interface TimelineApi {
   trim: (itemId: string, edge: 'start' | 'end', toUs: number, ripple?: boolean) => boolean;
   split: (atUs: number) => boolean;
   splitAt: (itemIds: string[], atUs: number) => boolean;
+  /** Trim the selection's start/end edge to the playhead (SPEC 09 §12 Q/W). */
+  trimToPlayhead: (edge: 'start' | 'end', atUs: number, ripple: boolean) => boolean;
+  /** Move the selection to the adjacent track (SPEC 09 §12 Alt+Up/Down). */
+  moveSelectionToTrack: (direction: 'up' | 'down') => boolean;
   remove: (ripple?: boolean) => boolean;
   duplicate: () => boolean;
   addMarkerAt: (atUs: number) => boolean;
@@ -326,6 +332,12 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       trim: (itemId, edge, toUs, ripple) => run('Trim', (s) => trimItem(s, { itemId, edge, toUs, fps, ripple })),
       split: (atUs) => run('Split', (s) => splitItems(s, { itemIds: selection, atUs, fps })),
       splitAt: (itemIds, atUs) => run('Split', (s) => splitItems(s, { itemIds, atUs, fps })),
+      trimToPlayhead: (edge, atUs, ripple) =>
+        run(`Trim ${edge} to playhead`, (s) =>
+          trimItems(s, { itemIds: selection, edge, toUs: atUs, fps, ripple }),
+        ),
+      moveSelectionToTrack: (direction) =>
+        run('Move track', (s) => moveItemsToTrack(s, { itemIds: selection, direction, fps })),
       remove: (ripple) => run(ripple ? 'Ripple delete' : 'Delete', (s) => deleteItems(s, { itemIds: selection, fps, ripple })),
       duplicate: () => run('Duplicate', (s) => duplicateItems(s, { itemIds: selection, fps })),
       addMarkerAt: (atUs) => run('Add marker', (s) => addMarker(s, { timeUs: atUs, fps })),

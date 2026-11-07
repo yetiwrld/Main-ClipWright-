@@ -394,6 +394,21 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         timeline.remove(event.shiftKey);
         return;
       }
+      if (event.key === 'q' || event.key === 'Q') {
+        event.preventDefault();
+        timeline.trimToPlayhead('start', current, event.shiftKey);
+        return;
+      }
+      if (event.key === 'w' || event.key === 'W') {
+        event.preventDefault();
+        timeline.trimToPlayhead('end', current, event.shiftKey);
+        return;
+      }
+      if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        timeline.moveSelectionToTrack(event.key === 'ArrowUp' ? 'up' : 'down');
+        return;
+      }
       if (meta && event.key.toLowerCase() === 'c') {
         event.preventDefault();
         timeline.copy();

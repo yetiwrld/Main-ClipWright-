@@ -9,9 +9,11 @@ import {
   deleteItems,
   duplicateItems,
   moveItems,
+  moveItemsToTrack,
   setTrackMuted,
   splitItems,
   trimItem,
+  trimItems,
 } from '../commands';
 import { checkInvariantsMB } from './helpers';
 
@@ -142,6 +144,136 @@ describe('timeline commands', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.items[ids.first]!.durationUs).toBeGreaterThanOrEqual(33_333);
+  });
+
+  it('ripple trim extends the clip and pushes later clips right', () => {
+    const { state, ids } = fixture();
+    const result = trimItem(state, {
+      itemId: ids.first,
+      edge: 'end',
+      toUs: 3_000_000,
+      fps: 30,
+      ripple: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const first = result.state.items[ids.first]!;
+    const second = result.state.items[ids.second]!;
+    expect(first.startUs + first.durationUs).toBe(3_000_000);
+    expect(second.startUs).toBe(3_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('ripple trim shortens the clip and pulls later clips left', () => {
+    const { state, ids } = fixture();
+    const result = trimItem(state, {
+      itemId: ids.first,
+      edge: 'end',
+      toUs: 1_000_000,
+      fps: 30,
+      ripple: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const second = result.state.items[ids.second]!;
+    expect(second.startUs).toBe(1_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('ripple trim start edge moves the clip and its followers together', () => {
+    const { state, ids } = fixture();
+    const result = trimItem(state, {
+      itemId: ids.first,
+      edge: 'start',
+      toUs: 1_000_000,
+      fps: 30,
+      ripple: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const first = result.state.items[ids.first]!;
+    const second = result.state.items[ids.second]!;
+    expect(first.startUs).toBe(1_000_000);
+    expect(second.startUs).toBe(3_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('refuses a ripple that would push an item on a locked track', () => {
+    const { state, ids } = fixture();
+    // Put a later clip on the locked original-audio track.
+    const base = createMediaItem({
+      id: 'item-d',
+      trackId: state.tracks[4]!.id,
+      label: 'D',
+      mediaId: 'media-2',
+      type: 'audio',
+      startUs: 3_000_000,
+      durationUs: 1_000_000,
+      sourceDurationUs: 10_000_000,
+    });
+    const later = { ...base, linkId: 'L1' };
+    const linked = {
+      ...state,
+      items: {
+        ...state.items,
+        [ids.first]: { ...state.items[ids.first]!, linkId: 'L1' },
+        [later.id]: later,
+      },
+    };
+    const locked = {
+      ...linked,
+      items: { ...linked.items, [later.id]: later },
+      tracks: state.tracks.map((track) =>
+        track.id === later.trackId
+          ? { ...track, itemIds: [later.id], locked: true }
+          : track,
+      ),
+    };
+    const result = trimItem(locked, {
+      itemId: ids.first,
+      edge: 'end',
+      toUs: 4_000_000,
+      fps: 30,
+      ripple: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('locked');
+  });
+
+  it('trims every selected clip to the playhead as one step', () => {
+    const { state, ids } = fixture();
+    const result = trimItems(state, { itemIds: [ids.first, ids.third], edge: 'end', toUs: 2_000_000, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items[ids.first]!.startUs + result.state.items[ids.first]!.durationUs).toBe(2_000_000);
+    expect(result.state.items[ids.third]!.startUs + result.state.items[ids.third]!.durationUs).toBe(2_000_000);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('never lets a multi-select trim overlap adjacent selected clips', () => {
+    const { state, ids } = fixture();
+    const result = trimItems(state, { itemIds: [ids.first, ids.second], edge: 'end', toUs: 3_000_000, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const first = result.state.items[ids.first]!;
+    const second = result.state.items[ids.second]!;
+    expect(first.startUs + first.durationUs).toBeLessThanOrEqual(second.startUs);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('moves selection to the track above and below without overlap', () => {
+    const { state, ids } = fixture();
+    const up = moveItemsToTrack(state, { itemIds: [ids.first], direction: 'up', fps: 30 });
+    expect(up.ok).toBe(true);
+    if (!up.ok) return;
+    expect(up.state.items[ids.first]!.trackId).not.toBe(state.items[ids.first]!.trackId);
+    expect(checkInvariantsMB(up.state)).toEqual([]);
+
+    const back = moveItemsToTrack(up.state, { itemIds: [ids.first], direction: 'down', fps: 30 });
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.state.items[ids.first]!.trackId).toBe(state.items[ids.first]!.trackId);
+    expect(checkInvariantsMB(back.state)).toEqual([]);
   });
 
   it('splits under the playhead keeping both halves inside the source', () => {
