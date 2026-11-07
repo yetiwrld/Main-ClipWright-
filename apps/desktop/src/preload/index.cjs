@@ -167,4 +167,11 @@ contextBridge.exposeInMainWorld('clipwright', {
   // ---- App info ----
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
+
+  // ---- Export (SPEC 14) ----
+  startExport: (jobId, settings) => ipcRenderer.invoke('export:start', jobId, settings),
+  cancelExport: (jobId) => ipcRenderer.invoke('export:cancel', jobId),
+  listExportHistory: () => ipcRenderer.invoke('export:history'),
+  getExportJob: (jobId) => ipcRenderer.invoke('export:job', jobId),
+  exportSubtitles: (settings) => ipcRenderer.invoke('export:subtitles', settings),
 });

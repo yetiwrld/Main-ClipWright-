@@ -669,6 +669,43 @@ function registerIPC(): void {
     const err = await shell.openPath(targetPath);
     return err === '' ? true : err;
   });
+
+  // ---- Export (SPEC 14) ----
+  ipcMain.handle('export:start', async (_event, jobId: string, settings: unknown) => {
+    const { buildExportPlan } = await import('@clipwright/export-core');
+    const storage = requireStorage();
+    // Build the export plan from settings.
+    const plan = buildExportPlan(settings as never);
+    // TODO: Start the actual render pipeline (hidden window + ffmpeg).
+    // For now, return the plan so the renderer can display it.
+    return { jobId, plan };
+  });
+
+  ipcMain.handle('export:cancel', async (_event, jobId: string) => {
+    // TODO: Kill the encoder, decoders, mixer and hidden window.
+    return true;
+  });
+
+  ipcMain.handle('export:history', async () => {
+    // TODO: Read from workspace.db export_history table.
+    return [];
+  });
+
+  ipcMain.handle('export:job', async (_event, jobId: string) => {
+    // TODO: Read job status from the job queue.
+    return null;
+  });
+
+  ipcMain.handle('export:subtitles', async (_event, settings: unknown) => {
+    const { generateSubtitles, extractCuesFromItems } = await import('@clipwright/export-core');
+    const { buildExportPlan } = await import('@clipwright/export-core');
+    const plan = buildExportPlan(settings as never);
+    const cues = extractCuesFromItems(plan.items as never);
+    return {
+      srt: plan.subtitleFormats.includes('srt') ? generateSubtitles(cues, 'srt') : null,
+      vtt: plan.subtitleFormats.includes('vtt') ? generateSubtitles(cues, 'vtt') : null,
+    };
+  });
 }
 
 app.whenReady().then(() => {
