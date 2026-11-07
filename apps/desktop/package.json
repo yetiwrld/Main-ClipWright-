@@ -23,6 +23,7 @@
     "@clipwright/media-core": "workspace:*",
     "@clipwright/project-schema": "workspace:*",
     "@clipwright/timeline-engine": "workspace:*",
+    "@clipwright/update-core": "workspace:*",
     "better-sqlite3": "^11.8.0",
     "electron-updater": "^6.3.9",
     "immer": "^10.1.1",

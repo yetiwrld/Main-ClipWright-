@@ -143,6 +143,9 @@ importers:
       '@clipwright/timeline-engine':
         specifier: workspace:*
         version: link:../../packages/timeline-engine
+      '@clipwright/update-core':
+        specifier: workspace:*
+        version: link:../../packages/update-core
       better-sqlite3:
         specifier: ^11.8.0
         version: 11.10.0
@@ -275,6 +278,12 @@ importers:
       immer:
         specifier: ^10.1.1
         version: 10.2.0
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
+  packages/update-core:
+    dependencies:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
