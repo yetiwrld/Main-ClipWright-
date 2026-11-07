@@ -1,0 +1,84 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: check [docs/troubleshooting.md](../blob/main/docs/troubleshooting.md).
+        Some things that look like bugs are by design, and are documented there
+        (for example, an update refused as "couldn't be verified", or an
+        unsigned-build SmartScreen warning).
+
+        **Do not report security problems here** — see [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → About, or the installer file name.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2 (22631)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Importing media or a URL
+        - Transcription
+        - Moments / clip detection
+        - Editing on the timeline
+        - Preview
+        - Export
+        - Updates
+        - Install / uninstall
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import a 5-minute MP4
+        2. Transcribe with Small
+        3. Export at 1080p
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        From `%APPDATA%\Clipwright Studio\logs`. Relevant lines only — please
+        do not paste your whole log if it is long.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked docs/troubleshooting.md
+          required: true
+        - label: This is not a security issue (those go to SECURITY.md)
+          required: true

@@ -1,0 +1,35 @@
+Copyright (c) 2026 Clipwright Studio. All rights reserved.
+
+This software and its source code are proprietary and confidential.
+
+No permission is granted to use, copy, modify, merge, publish, distribute,
+sublicense, or sell copies of this software, in whole or in part, except with
+the prior written permission of the copyright holder.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+THIRD-PARTY COMPONENTS
+
+This application bundles and links third-party open-source software under its
+own licences, which are unaffected by the notice above. The full list, with
+licence texts and source offers, is in docs/licences.md and in the shipped
+THIRD-PARTY-NOTICES.txt.
+
+Notably, the bundled FFmpeg binaries are GPL-licensed builds (including
+libx264, libvpx, libopus and native AAC). They are distributed as separate
+executables that the application invokes as child processes, never linked into
+the application's own code. Corresponding source is available at
+https://ffmpeg.org/download.html and https://git.videolan.org/?p=ffmpeg.git.
+
+--------------------------------------------------------------------------------
+
+The licence above is a placeholder. Per docs/decisions.md §5, the repository
+owner has not yet selected a distribution licence for Clipwright Studio itself;
+until they do, all rights are reserved.

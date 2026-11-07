@@ -41,3 +41,52 @@ This document tracks architectural scope boundaries and honest limitations per `
 6. **Inspector edits are limited to start, ±1 frame duration and a read-only volume readout.** Transform/opacity/crop editing, keyframes and the section set from SPEC 08 §7.2 arrive with Phase 5.
 7. **Left panel has only the Media tab.** Captions, Text/Graphics, Effects/Transitions, Audio and AI tabs are Phase 5; nothing pretends to be there.
 8. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.
+
+---
+
+## 4. Phase 6–7 notes (export, updates, packaging)
+
+### Export
+
+1. **The compositor is not in the export path.** Each video/image item is
+   decoded by its own ffmpeg process and the topmost visible item is written;
+   where nothing is on the timeline you get the canvas colour. Text, effects,
+   transitions, keyframed transforms and blend modes are **not rendered** —
+   `renderFrame` exists and is tested separately, but it is not yet the frame
+   producer. The export dialog says so before you press Export.
+2. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+3. **No resumable export.** A failed or interrupted export restarts from the
+   beginning (SPEC 14 §9 is not implemented).
+4. **Hardware encoding is validated, not assumed — and not proven here.** The
+   app tests a candidate encoder with a real short encode before using it, and
+   falls back to software when it fails. But no machine with NVENC, QSV or AMF
+   was available while this was written, so the *validation logic* is tested and
+   the actual GPU output is not.
+5. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+   normalisation are; the equaliser, reverb and other audio-rack effects are not
+   yet in the mix.
+6. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+   it is just slow.
+
+### Updates
+
+7. **The embedded update public key is a placeholder.** Until
+   `docs/release.md` §1.1 is done, the build **refuses every update**. That is
+   the intended behaviour for an unverifiable release, not a bug — but it means
+   update delivery is not functional until a key exists.
+8. **No real GitHub release has been exercised end to end.** The verification
+   paths are tested against a fake network with real cryptography.
+9. **`electron-updater` itself is faked in tests.** The service is injected;
+   only a packaged build exercises the real library.
+
+### Packaging
+
+10. **No Windows installer has been built in this environment.** This is a Linux
+    sandbox; electron-builder's NSIS target needs Windows. The configuration,
+    the scripts and the assertions are written and tested up to the point where
+    Windows is required.
+11. **`resources/bin` contains Linux symlinks with no pinned hashes.**
+    `verify-binaries.mjs` refuses to package them. Real Windows binaries and
+    reviewed digests are required before a shippable artefact exists.
+12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
+    Everything that mentions the installer says so.

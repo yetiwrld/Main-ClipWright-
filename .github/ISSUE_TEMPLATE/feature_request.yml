@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest something the app should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the task, not the solution — that makes it easier to find the right answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 1.0.0
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        Two things to know before asking for a feature:
+
+        - The app is **offline-first** and has **no telemetry**. A request that
+          needs either is unlikely to be accepted.
+        - The app never claims a capability it does not have. If you are asking
+          for a feature to be *claimed* rather than *built*, please say why.

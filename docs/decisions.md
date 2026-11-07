@@ -45,3 +45,42 @@ On first run of Phase 1, `ClipWright Icon.png` (1254×1254 RGBA PNG) was sampled
 ## 5. Application Licence (Spec 15 §6.2)
 
 - Per Spec 15 §6.2, `LICENSE` defaults to `"All rights reserved — see README"` until the repository owner selects a distribution licence. Third-party open-source component notices are listed separately in `docs/licences.md` and `THIRD-PARTY-NOTICES.txt`.
+
+---
+
+## 6. Update authenticity without code signing (Spec 15 §5)
+
+**Decision:** ship an unsigned installer, and make updates safe with a **signed release manifest** rather than Authenticode.
+
+**Reasoning:** Authenticode needs a paid certificate that is renewed annually, and without it Windows only tells the user "unknown publisher" — it says nothing about whether a specific *update* came from us. An Ed25519 signature over a manifest we control proves authorship of every release regardless of whether the installer is signed, and it costs nothing to keep.
+
+**Consequences:**
+- The private key exists only as a GitHub Actions secret. Losing it means the current user base cannot be updated by the updater and must install manually (recorded in `docs/release.md` §5).
+- A build whose embedded public key is missing or a placeholder refuses **every** update. This is deliberate: refusing is recoverable, installing something unverified is not.
+- The signature is checked before the manifest's hashes are used, so a forged manifest cannot steer a download.
+- Two keys are supported (`current` and `next`) so a key can be rotated without stranding users who have not updated yet.
+
+---
+
+## 7. Two Vite builds for the desktop app (Spec 15 §6)
+
+**Decision:** build the renderer with `vite.config.ts` and the main process plus preload with a separate `vite.main.config.ts`, producing CommonJS under `dist/main`.
+
+**Reasoning:** the two run in different worlds. The renderer targets a browser (React, relative asset URLs so `file://` works); the main process targets Node, imports `electron`, and must leave native modules (`better-sqlite3`, `onnxruntime-node`) external so their `.node` binaries load from outside the asar. One config cannot honestly serve both.
+
+**Consequences:**
+- `package.json` `main` points at `dist/main/index.cjs`, and a renderer-only build leaves the app unable to start. `scripts/release/assert-package.mjs` and a CI step both check for that file specifically.
+- Chunk names are deterministic, so the launch path does not change between builds.
+
+---
+
+## 8. Audio mixed in TypeScript, not in an ffmpeg filter graph (Spec 14 §5)
+
+**Decision:** compute the mix in `packages/export-core/src/audio-mix.ts` and write a float32 WAV, rather than building an `amix`/`afade`/`sidechaingate` filter graph.
+
+**Reasoning:** a filter graph of that size cannot be unit-tested — the numbers only exist inside ffmpeg. Doing the arithmetic ourselves means gain, fades, panning, ducking and the limiter are all covered by tests that assert exact samples, and the loudness normalisation is measured with ebur128 on the file we actually produce rather than trusting a filter's nominal behaviour.
+
+**Consequences:**
+- The limiter must stay O(n). The first implementation scanned a lookahead window per sample and was quadratic; a 10-minute clip made that obvious, and it is now a monotonic deque with a test that times it.
+- Large mixes are held in memory at 48 kHz stereo float (about 23 MB per minute). Acceptable for the target clip lengths, and stated in `docs/export.md`.
+- Audio-rack effects are not applied yet; when they are, they belong in this same pure module so they can be tested the same way.

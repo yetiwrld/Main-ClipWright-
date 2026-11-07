@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/yetiwrld/Main-ClipWright-/blob/main/docs/troubleshooting.md
+    about: SmartScreen, GPU problems, missing tools, slow exports, update failures.
+  - name: Report a security vulnerability
+    url: https://github.com/yetiwrld/Main-ClipWright-/security/advisories/new
+    about: Please do not open a public issue for a security problem.

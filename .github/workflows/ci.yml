@@ -36,5 +36,22 @@ jobs:
       - name: Run unit & integration tests
         run: pnpm test
 
+      # SPEC 15 §6.2: the shipped notices must match what is actually installed,
+      # and no dependency may have an unrecognised licence.
+      - name: Third-party notices are current
+        run: node scripts/release/make-notices.mjs --check
+
       - name: Build desktop application
         run: pnpm build
+
+      # A build that drops the main process produces an installer for an app that
+      # cannot start. Catch it here rather than in the release job.
+      - name: Package contents are launchable
+        run: |
+          node -e "const p=require('./apps/desktop/package.json');const fs=require('fs');const m=p.main;if(!fs.existsSync('apps/desktop/'+m)){console.error('Missing main entry: '+m);process.exit(1)}console.log('main entry present: '+m)"
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1f49c2b8b1c1e1b0b7d # v2.3.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
