@@ -6,7 +6,10 @@ node_modules/
 dist/
 build/
 out/
-release/
+# An unanchored `release/` also matched `scripts/release/`, silently excluding
+# every release script from the repository. Anchor it to build outputs only.
+/release/
+apps/*/release/
 *.exe
 *.AppImage
 *.deb
