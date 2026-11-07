@@ -1,0 +1,24 @@
+{
+  "$comment": "SPEC 06 §7.4 — vision/detection models used by auto-reframe (SPEC 13). `bundled: true` means the file ships inside the installer and therefore needs no download and no checksum lookup; optional models download like the Whisper ones.",
+  "version": 1,
+  "models": [
+    {
+      "id": "face-detection-lite",
+      "label": "Face detection (lite)",
+      "fileName": "face-detection-lite.onnx",
+      "bytes": 2320000,
+      "bundled": true,
+      "purpose": "face_detection",
+      "notes": "Ships with Clipwright. Finds faces for auto-reframe; no download needed."
+    },
+    {
+      "id": "subject-segmentation",
+      "label": "Subject segmentation",
+      "fileName": "subject-segmentation.onnx",
+      "bytes": 44500000,
+      "bundled": false,
+      "purpose": "subject_segmentation",
+      "notes": "Optional. Keeps a person centred when they move around the frame."
+    }
+  ]
+}

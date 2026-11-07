@@ -1,0 +1,83 @@
+{
+  "$comment": "SPEC 06 §7.2 / SPEC 05 §4.1 — the downloadable speech-model catalogue. Sizes are the published whisper.cpp GGML sizes; RAM guidance is the memory the model needs to run comfortably on CPU. Nothing here claims a benchmark result: `testedForMoments` stays null until docs/verification.md exists.",
+  "version": 1,
+  "models": [
+    {
+      "id": "tiny",
+      "label": "Tiny",
+      "fileName": "ggml-tiny.bin",
+      "bytes": 77704715,
+      "ramGb": 1,
+      "accuracy": "fastest",
+      "multilingual": false,
+      "languages": "English only",
+      "notes": "Quick drafts and rough timing. Not recommended for captions you will publish."
+    },
+    {
+      "id": "tiny.en",
+      "label": "Tiny (English)",
+      "fileName": "ggml-tiny.en.bin",
+      "bytes": 77704715,
+      "ramGb": 1,
+      "accuracy": "fastest",
+      "multilingual": false,
+      "languages": "English only",
+      "notes": "Slightly more accurate than Tiny for English."
+    },
+    {
+      "id": "base",
+      "label": "Base",
+      "fileName": "ggml-base.bin",
+      "bytes": 147951465,
+      "ramGb": 1,
+      "accuracy": "fast",
+      "multilingual": true,
+      "languages": "Multilingual",
+      "notes": "Small and quick; good for searching footage."
+    },
+    {
+      "id": "small",
+      "label": "Small",
+      "fileName": "ggml-small.bin",
+      "bytes": 487601967,
+      "ramGb": 2,
+      "accuracy": "balanced",
+      "multilingual": true,
+      "languages": "Multilingual",
+      "notes": "The balance most people want for captions."
+    },
+    {
+      "id": "medium",
+      "label": "Medium",
+      "fileName": "ggml-medium.bin",
+      "bytes": 1533765607,
+      "ramGb": 5,
+      "accuracy": "accurate",
+      "multilingual": true,
+      "languages": "Multilingual",
+      "notes": "Noticeably slower; better with accents and noise."
+    },
+    {
+      "id": "large-v3-turbo",
+      "label": "Large v3 Turbo",
+      "fileName": "ggml-large-v3-turbo.bin",
+      "bytes": 1624555275,
+      "ramGb": 6,
+      "accuracy": "accurate",
+      "multilingual": true,
+      "languages": "Multilingual",
+      "notes": "Large-model accuracy at a much lower cost than Large v3."
+    },
+    {
+      "id": "large-v3",
+      "label": "Large v3",
+      "fileName": "ggml-large-v3.bin",
+      "bytes": 3095033483,
+      "ramGb": 10,
+      "accuracy": "most_accurate",
+      "multilingual": true,
+      "languages": "Multilingual",
+      "notes": "Best accuracy, slowest on CPU. Only worth it for difficult audio."
+    }
+  ]
+}

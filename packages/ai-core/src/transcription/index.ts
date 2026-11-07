@@ -7,7 +7,12 @@ import { createReadStream, createWriteStream, existsSync, openSync, readSync, cl
 import { mkdir, readFile, unlink, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { probeMedia } from '@clipwright/media-core';
-import { createHash } from 'node:crypto';
+import {
+  WHISPER_CATALOG,
+  accuracyLabel,
+  downloadFile,
+  whisperChecksums,
+} from '../models/index.js';
 
 export interface Word {
   id: string;
@@ -863,51 +868,37 @@ function formatVttTimecode(us: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
 }
 
-/** Models Clipwright can install, with their approximate download sizes. */
-export const WHISPER_MODELS: Array<{ name: string; bytes: number; label: string; speed: string }> = [
-  { name: 'tiny', bytes: 78_000_000, label: 'tiny', speed: 'Fastest, lowest accuracy' },
-  { name: 'base', bytes: 148_000_000, label: 'base', speed: 'Fast' },
-  { name: 'small', bytes: 488_000_000, label: 'small', speed: 'Recommended balance' },
-  { name: 'medium', bytes: 1_530_000_000, label: 'medium', speed: 'High accuracy, slower' },
-  { name: 'large-v3-turbo', bytes: 1_620_000_000, label: 'large-v3-turbo', speed: 'High accuracy' },
-  { name: 'large-v3', bytes: 3_100_000_000, label: 'large-v3', speed: 'Best accuracy, slowest' },
-];
+/**
+ * Speech models, derived from the catalogue data file.
+ *
+ * `name` and `fileName` come from `/assets/whisper-models.json`, so adding or
+ * correcting a model never means editing logic. Sizes are the published ones,
+ * used for the pre-download space check and for spotting a truncated file.
+ */
+export const WHISPER_MODELS: Array<{
+  name: string;
+  bytes: number;
+  label: string;
+  speed: string;
+  fileName: string;
+}> = WHISPER_CATALOG.map((model) => ({
+  name: model.id,
+  bytes: model.bytes,
+  label: model.label,
+  speed: `${accuracyLabel(model.accuracy)} · needs about ${model.ramGb} GB RAM`,
+  fileName: model.fileName,
+}));
 
 const MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
 
-/**
- * SHA-256 digests for published model files.
- *
- * Entries are added only once a digest has been verified against a local
- * download — Clipwright never ships unverified hashes. When a model has no
- * pinned digest here, the download still completes but the file is recorded as
- * unverified rather than silently trusted.
- */
-export function getWhisperModelChecksums(): Record<string, string> {
-  return {};
-}
-
-export async function verifyModelChecksum(modelPath: string, expectedChecksum: string): Promise<boolean> {
-  const actual = await sha256OfFile(modelPath);
-  return actual.toLowerCase() === expectedChecksum.toLowerCase();
-}
-
-async function sha256OfFile(filePath: string): Promise<string> {
-  const hash = createHash('sha256');
-  const stream = createReadStream(filePath);
-  await new Promise<void>((resolvePromise, reject) => {
-    stream.on('data', (d) => hash.update(d as Buffer));
-    stream.on('end', () => resolvePromise());
-    stream.on('error', reject);
-  });
-  return hash.digest('hex');
+function modelFileName(modelName: string): string {
+  const known = WHISPER_MODELS.find((m) => m.name === modelName);
+  return known?.fileName ?? `ggml-${modelName}.bin`;
 }
 
 /**
- * Downloads a whisper.cpp GGML model into `outputDir` and returns its path.
- *
- * Writes to a `.part` file first, so an interrupted download never leaves a
- * truncated model behind. Progress is reported in 0–100 steps.
+ * Downloads a speech model with range-resume and digest verification
+ * (`06 §7.2`). Thin wrapper kept for callers that only want a path back.
  */
 export async function downloadWhisperModel(
   modelName: string,
@@ -918,54 +909,43 @@ export async function downloadWhisperModel(
   const known = WHISPER_MODELS.find((m) => m.name === modelName);
   if (!known) throw new Error(`Unknown model "${modelName}".`);
 
-  await mkdir(outputDir, { recursive: true });
-  const modelPath = join(outputDir, `ggml-${modelName}.bin`);
-  const partPath = `${modelPath}.part`;
-
-  if (existsSync(modelPath) && statSync(modelPath).size === known.bytes) {
-    onProgress?.(100);
-    return modelPath;
-  }
-
-  const response = await fetch(`${MODEL_BASE_URL}/ggml-${modelName}.bin`, { signal });
-  if (!response.ok || !response.body) {
-    throw new Error(`Could not download ${modelName} (HTTP ${response.status}). Check your connection and try again.`);
-  }
-
-  const total = Number(response.headers.get('content-length')) || known.bytes;
-  const out = createWriteStream(partPath);
-  let received = 0;
-
-  try {
-    for await (const part of response.body as unknown as AsyncIterable<Uint8Array>) {
-      if (signal?.aborted) throw new Error('Download cancelled');
-      const buffer = Buffer.from(part);
-      received += buffer.length;
-      if (!out.write(buffer)) {
-        await new Promise<void>((r) => out.once('drain', () => r()));
-      }
-      onProgress?.(Math.min(99, Math.round((received / total) * 100)));
+  const outcome = await downloadFile(
+    {
+      id: known.name,
+      url: `${MODEL_BASE_URL}/${known.fileName}`,
+      destDir: outputDir,
+      fileName: known.fileName,
+      expectedBytes: known.bytes,
+      expectedSha256: whisperChecksums()[known.name],
+      signal,
+    },
+    (event) => {
+      if (event.percent !== null) onProgress?.(event.percent);
     }
-    await new Promise<void>((resolvePromise, reject) => {
-      out.end((err?: Error | null) => (err ? reject(err) : resolvePromise()));
-    });
+  );
 
-    await rename(partPath, modelPath);
-    onProgress?.(100);
-    return modelPath;
-  } catch (err) {
-    out.destroy();
-    await unlink(partPath).catch(() => undefined);
-    throw err;
-  }
+  onProgress?.(100);
+  return outcome.filePath;
 }
 
 /** Lists models already installed in a models directory. */
-export function listInstalledModels(modelsDir: string): Array<{ name: string; path: string; bytes: number }> {
+export function listInstalledModels(
+  modelsDir: string
+): Array<{ name: string; path: string; bytes: number; verified: boolean | null }> {
   if (!existsSync(modelsDir)) return [];
+  const checksums = whisperChecksums();
   return WHISPER_MODELS.flatMap((m) => {
-    const file = join(modelsDir, `ggml-${m.name}.bin`);
+    const file = join(modelsDir, m.fileName);
     if (!existsSync(file)) return [];
-    return [{ name: m.name, path: file, bytes: statSync(file).size }];
+    const bytes = statSync(file).size;
+    return [
+      {
+        name: m.name,
+        path: file,
+        bytes,
+        // Correct size is not proof; without a pinned digest it stays "unknown".
+        verified: bytes === m.bytes && checksums[m.name] ? null : false,
+      },
+    ];
   });
 }
