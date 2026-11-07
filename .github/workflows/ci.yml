@@ -39,6 +39,12 @@ jobs:
       - name: Run unit & integration tests
         run: pnpm test
 
+      # Runs *after* the tests, because it needs the JSON report they leave
+      # behind: the counts quoted in docs/verification.md are compared against a
+      # real run instead of being trusted.
+      - name: Documented test counts match a real run
+        run: node scripts/check-repo.mjs
+
       # SPEC 15 §6.2: the shipped notices must match what is actually installed,
       # and no dependency may have an unrecognised licence.
       - name: Third-party notices are current

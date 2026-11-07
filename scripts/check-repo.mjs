@@ -143,7 +143,41 @@ for (const file of walk(rendererDir)) {
 }
 
 /* ------------------------------------------------------------------ *
- * 5. File-name references in the package config must match package.json.
+ * 5. Documentation that quotes test counts must quote the real ones.
+ *
+ * docs/verification.md is the document a sceptical reader checks the project
+ * against. It quoted "39 files / 909 tests" for four committed revisions while
+ * the suite grew to 44 and 993 — not a lie anyone told, just a number nobody
+ * re-ran. Rather than let that drift again, the figures are compared here.
+ *
+ * Skipped when vitest has not run: this check must stay fast enough to sit in
+ * `pnpm lint`, and the count comes from the JSON report rather than a fresh run.
+ * ------------------------------------------------------------------ */
+const REPORT = join(ROOT, '.vitest-report.json');
+if (existsSync(REPORT)) {
+  try {
+    const report = JSON.parse(readFileSync(REPORT, 'utf8'));
+    const tests = report.numTotalTests;
+    // `numTotalTestSuites` counts describe-blocks, not files; the per-file
+    // results array is what the "Test Files" line reports.
+    const files = report.testResults?.length;
+    const doc = readFileSync(join(ROOT, 'docs', 'verification.md'), 'utf8');
+    const claimedTests = /Tests\s+(\d+) passed/.exec(doc)?.[1];
+    const claimedFiles = /Test Files\s+(\d+) passed/.exec(doc)?.[1];
+
+    if (claimedTests && Number(claimedTests) !== tests) {
+      fail(`docs/verification.md claims ${claimedTests} tests; the report has ${tests}.`);
+    }
+    if (claimedFiles && Number(claimedFiles) !== files) {
+      fail(`docs/verification.md claims ${claimedFiles} test files; the report has ${files}.`);
+    }
+  } catch {
+    // An unreadable report is not a repository problem.
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';

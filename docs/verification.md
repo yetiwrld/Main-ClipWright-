@@ -16,22 +16,22 @@ pnpm test:unit
 ```
 
 ```
-Test Files  39 passed (39)
-     Tests  909 passed (909)
+Test Files  44 passed (44)
+     Tests  993 passed (993)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 198 | Export service, queue, ffmpeg orchestration, audio mixing, updates, releases, packaging |
-| `apps/desktop/src/renderer` | 137 | Export dialog, queue panel, update dialog (jsdom) |
+| `apps/desktop/src/main` | 222 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/renderer` | 170 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
-| `packages/update-core` | 108 | Version rules, manifest verification, signatures, update state machine |
+| `packages/update-core` | 135 | Version rules, manifest verification, signatures, update state machine, journal and recovery text |
 | `packages/timeline-engine` | 92 | Commands, invariants, undo/redo |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **909** | 39 files |
+| **Total** | **993** | 44 files |
 
 ### Tests that run real processes
 
@@ -106,7 +106,9 @@ removed. `docs/export.md` lists the same limits.
 
 ## 4. Updates (SPEC 15)
 
-Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
+Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
+`update-journal-store.test.ts` (21), `bin-integrity.test.ts` (11),
+`recovery-dialog.test.tsx` (10) and `update-notice.test.tsx` (11):
 
 | Behaviour | Evidence |
 |---|---|
@@ -120,6 +122,19 @@ Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
 | A build with no embedded key refuses every update | Test — fails closed |
 | The CI script's signature verifies with the app's code | `release-roundtrip.test.ts`, real keys |
 | The CI script refuses when the secret and embedded key disagree | `release-roundtrip.test.ts` |
+| A binary that changed on disk is **disabled**, not run | `bin-integrity.test.ts` asserts the expected and actual digests and that the tool is not enabled (§6.1) |
+| A missing or corrupt `checksums.json` reads as unverified, never as fine | `bin-integrity.test.ts` |
+| A cancelled install does not send the user to Recovery | `journal.test.ts` — §11, the user is still on the old version |
+| One workspace failure does not trigger recovery; the second does | `journal.test.ts`, `update-journal-store.test.ts` (§7.3) |
+| A crash state survives to the next launch | `update-journal-store.test.ts` reads it back with a fresh store |
+| A corrupt journal is moved aside rather than blocking every launch | `update-journal-store.test.ts` |
+| The journal is written atomically | Test asserts the temp-file write and rename |
+| Backups copy only the small files, and a failed copy is reported not fatal | `update-journal-store.test.ts` (§7.1) |
+| A truncated installer is not cached as a rollback path | `update-journal-store.test.ts` — under 1 MB is refused |
+| Cleanup keeps the newest backup until the next success | `update-journal-store.test.ts` (§7.6) |
+| The recovery text warns that a migration also rolls back databases | `journal.test.ts` on `recoveryMessage` (§7.5) |
+| The update dialog cannot install before backups are taken | `update-service.test.ts` — a failing `prepareInstall` aborts the install |
+| The chip and dialog are actually mounted | `update-notice.test.tsx`; the snapshot is reachable from `App` |
 
 ### NOT verified
 
@@ -129,6 +144,9 @@ Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
 | `electron-updater` driving an actual download | `electron-updater` is injected and faked in tests; the real library is exercised only in a packaged build |
 | Installing an update and relaunching | Needs Windows and a published release |
 | The embedded key is a placeholder | Updates are **refused** by design until a real key is embedded |
+| `resources/bin/checksums.json` does not exist | The runtime verifier is tested with fixtures; the real file cannot be produced here because the binaries cannot be downloaded (see §5) |
+| The Recovery window has not been seen in a running app | Rendered under jsdom with every state; the main-process wiring around it is unit-tested but has never run inside Electron |
+| The 60-second boot confirmation has not timed out in a real launch | The state machine and the timer are tested with a fake clock; nothing here has waited 60 seconds for real |
 
 ---
 
@@ -138,6 +156,11 @@ Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
 |---|---|
 | `electron-builder.yml` parses, 12 top-level keys, no duplicates | Checked |
 | `assets/icon.ico` has 16/24/32/48/64/128/256 px frames | Verified by parsing the ICO header |
+| Every script a workflow runs is tracked by git | `scripts/check-repo.mjs`, in `pnpm lint` — written after nine release scripts turned out to be outside the repository |
+| Ignore rules cannot swallow source | Same check: an unanchored `release/` pattern is rejected by name |
+| Every relative documentation link resolves | Same check, 17 documents |
+| The renderer imports no main-process code | Same check, added after two modules had drifted across the boundary |
+| The signed manifest verifies with only the embedded key | Rehearsed end to end outside CI with a fresh key pair over real files: signature, per-file digests, `SHA256SUMS.txt`, `latest.yml` cross-check, and a single flipped byte rejected |
 | Main process builds to `dist/main/index.cjs` | Yes; 561 KB across 12 files, loads under stubbed Electron |
 | Renderer uses relative URLs (`file://` safe) | `index.html` references `./assets/...` |
 | `assert-package.mjs` catches a package with no installer | Yes — exits 1 on this checkout, naming the missing artefacts |
