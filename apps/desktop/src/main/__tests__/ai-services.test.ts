@@ -311,6 +311,33 @@ describe('ConsentService', () => {
   });
 });
 
+describe('ModelService', () => {
+  it('reports the real disk state and deletes only what exists', async () => {
+    const modelService = new ModelService(storage, providers, storage.logger);
+    const folder = path.join(storage.getWorkspaceDir(), 'Models', 'whisper');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'ggml-tiny.bin'), Buffer.alloc(100));
+
+    const snapshot = modelService.snapshot();
+    const tiny = snapshot.whisper.find((card) => card.id === 'tiny');
+    expect(tiny?.status).toBe('corrupt'); // 100 bytes is not the published size
+
+    const result = await modelService.deleteAllDownloaded();
+    expect(result.models).toContain('tiny');
+    expect(fs.existsSync(path.join(folder, 'ggml-tiny.bin'))).toBe(false);
+    expect(storage.getSettings().defaultWhisperModel).toBe('auto');
+  });
+
+  it('never claims Ollama is running when nothing answers', async () => {
+    storage.updateSettings({ ollamaBaseUrl: 'http://127.0.0.1:1' });
+    const modelService = new ModelService(storage, providers, storage.logger);
+    const overview = await modelService.ollama();
+    expect(overview.status.state).not.toBe('running');
+    expect(overview.models).toHaveLength(0);
+    expect(overview.suggestions.length).toBeGreaterThan(0);
+  });
+});
+
 describe('MomentsService', () => {
   function projectWithTranscript() {
     const project = storage.createProject({ name: 'Test project', sourceMediaIds: ['media_1'] });

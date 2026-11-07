@@ -554,6 +554,7 @@ export interface ClipwrightBridge {
   aiCancelModelDownload(modelId: string): Promise<boolean>;
   aiDeleteModel(modelId: string): Promise<boolean>;
   aiVerifyModel(modelId: string): Promise<{ ok: boolean; message: string }>;
+  aiDeleteAllModels(): Promise<{ models: string[]; bytesFreed: number }>;
   aiSetDefaultModel(modelId: string): Promise<AppSettings>;
   aiOpenModelsFolder(): Promise<string>;
   aiRecordModelSpeed(modelId: string, throughputFactor: number): Promise<boolean>;

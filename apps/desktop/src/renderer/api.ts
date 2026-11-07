@@ -208,6 +208,9 @@ export const api = {
   async verifyModel(modelId: string) {
     return requireBridge('Verifying that model').aiVerifyModel(modelId);
   },
+  async deleteAllModels() {
+    return requireBridge('Deleting the downloaded models').aiDeleteAllModels();
+  },
   async setDefaultModel(modelId: string) {
     return requireBridge('Setting the default model').aiSetDefaultModel(modelId);
   },

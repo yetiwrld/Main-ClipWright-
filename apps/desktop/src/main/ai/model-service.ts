@@ -136,6 +136,13 @@ export class ModelService {
     return this.manager.verifyWhisperModel(modelId);
   }
 
+  async deleteAllDownloaded(): Promise<{ models: string[]; bytesFreed: number }> {
+    const result = await this.manager.deleteAllDownloaded();
+    this.logger.info('All downloaded models deleted', { count: result.models.length, bytesFreed: result.bytesFreed });
+    if (result.models.length > 0) this.storage.updateSettings({ defaultWhisperModel: 'auto' });
+    return result;
+  }
+
   isDownloading(modelId: string): boolean {
     return this.manager.isActive(modelId);
   }

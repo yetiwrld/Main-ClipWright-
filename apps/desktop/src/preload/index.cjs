@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('clipwright', {
   aiCancelModelDownload: (modelId) => ipcRenderer.invoke('ai:models:cancel', modelId),
   aiDeleteModel: (modelId) => ipcRenderer.invoke('ai:models:delete', modelId),
   aiVerifyModel: (modelId) => ipcRenderer.invoke('ai:models:verify', modelId),
+  aiDeleteAllModels: () => ipcRenderer.invoke('ai:models:deleteAll'),
   aiSetDefaultModel: (modelId) => ipcRenderer.invoke('ai:models:setDefault', modelId),
   aiOpenModelsFolder: () => ipcRenderer.invoke('ai:models:openFolder'),
   aiRecordModelSpeed: (modelId, throughputFactor) => ipcRenderer.invoke('ai:models:recordSpeed', modelId, throughputFactor),

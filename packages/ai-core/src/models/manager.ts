@@ -205,6 +205,33 @@ export class ModelManager {
     await removeModelFile(this.options.onnxDir, model.fileName);
   }
 
+  /**
+   * SPEC 06 §7.5 — "Delete all downloaded models".
+   *
+   * Only files that are actually present are touched, and bundled models are
+   * never removed because they ship with the installer.
+   */
+  async deleteAllDownloaded(): Promise<{ models: string[]; bytesFreed: number }> {
+    const removed: string[] = [];
+    let bytesFreed = 0;
+
+    for (const card of this.whisperModelCards()) {
+      if (card.status === 'installed' || card.status === 'paused' || card.status === 'corrupt') {
+        bytesFreed += card.installedBytes;
+        await this.deleteWhisperModel(card.id);
+        removed.push(card.id);
+      }
+    }
+    for (const card of this.onnxModelCards()) {
+      if (!card.bundled && (card.status === 'installed' || card.status === 'paused' || card.status === 'corrupt')) {
+        bytesFreed += card.installedBytes;
+        await this.deleteOnnxModel(card.id);
+        removed.push(card.id);
+      }
+    }
+    return { models: removed, bytesFreed };
+  }
+
   /** Re-hashes an installed model against the pinned digest (the "Verify" action). */
   async verifyWhisperModel(modelId: string): Promise<{ ok: boolean; message: string }> {
     const model = findWhisperModel(modelId);

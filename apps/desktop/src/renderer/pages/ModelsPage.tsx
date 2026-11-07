@@ -37,6 +37,7 @@ export function ModelsPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; label: string; kind: 'whisper' | 'ollama' } | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   const load = useCallback(async () => {
     if (!isDesktop()) {
@@ -300,8 +301,70 @@ export function ModelsPage() {
               </Button>
             </div>
           </Card>
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-primary)' }}>Delete all downloaded models</div>
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                  Bundled models stay. You will be asked to confirm, and the list is shown before anything is removed.
+                </div>
+              </div>
+              <Button size={28} variant="danger" onClick={() => setConfirmDeleteAll(true)}>
+                Delete all…
+              </Button>
+            </div>
+          </Card>
         </div>
       )}
+
+      <Dialog
+        open={confirmDeleteAll}
+        title="Delete every downloaded model?"
+        onClose={() => setConfirmDeleteAll(false)}
+        footer={
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+            <Button variant="ghost" onClick={() => setConfirmDeleteAll(false)}>
+              Keep them
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() =>
+                void api
+                  .deleteAllModels()
+                  .then((result) => {
+                    setConfirmDeleteAll(false);
+                    pushToast({
+                      message: result.models.length
+                        ? `Removed ${result.models.length} model${result.models.length === 1 ? '' : 's'} (${formatBytes(result.bytesFreed)} freed).`
+                        : 'There was nothing to remove.',
+                      tone: result.models.length ? 'success' : 'neutral',
+                    });
+                    return load();
+                  })
+                  .catch((err) => pushToast({ message: describeError(err), tone: 'error' }))
+              }
+            >
+              Delete them
+            </Button>
+          </div>
+        }
+      >
+        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)' }}>
+          These files will be removed from this computer:
+        </p>
+        <ul style={{ margin: '8px 0 0 0', paddingLeft: 18, fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)' }}>
+          {snapshot?.whisper
+            .filter((card) => card.status === 'installed' || card.status === 'paused' || card.status === 'corrupt')
+            .map((card) => (
+              <li key={card.id}>
+                {card.label} · {formatBytes(card.installedBytes || card.expectedBytes)}
+              </li>
+            ))}
+        </ul>
+        <p style={{ margin: '8px 0 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+          Transcription stops working until you download a model again. Your projects and transcripts are untouched.
+        </p>
+      </Dialog>
 
       <Dialog
         open={Boolean(confirmDelete)}
