@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   createDefaultTimeline,
   createMediaItem,
@@ -55,12 +55,19 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     move: vi.fn(() => true),
     trim: vi.fn(() => true),
     split: vi.fn(() => true),
+    splitAt: vi.fn(() => true),
     remove: vi.fn(() => true),
     duplicate: vi.fn(() => true),
     addMarkerAt: vi.fn(() => true),
     toggleMute: vi.fn(() => true),
     placeMedia: vi.fn(() => true),
     dismissNotes: vi.fn(),
+    copy: vi.fn(() => 0),
+    cut: vi.fn(() => true),
+    paste: vi.fn(() => true),
+    group: vi.fn(() => true),
+    ungroup: vi.fn(() => true),
+    clipboardSize: 0,
     recovery: null,
     recover: vi.fn(async () => undefined),
     dismissRecovery: vi.fn(),
@@ -140,6 +147,64 @@ describe('timeline panel', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     // The clip is 2 s long, so 10 minutes clamps to the project duration.
     expect(playheadStore.get()).toBe(2_000_000);
+  });
+
+  it('routes the clipboard and grouping shortcuts', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'], clipboardSize: 1 });
+    render(<TimelinePanel timeline={timeline} />);
+
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true });
+    expect(timeline.copy).toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'x', ctrlKey: true });
+    expect(timeline.cut).toHaveBeenCalled();
+
+    playheadStore.set(500_000);
+    fireEvent.keyDown(window, { key: 'v', ctrlKey: true });
+    expect(timeline.paste).toHaveBeenCalledWith(500_000);
+
+    fireEvent.keyDown(window, { key: 'g', ctrlKey: true });
+    expect(timeline.group).toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'g', ctrlKey: true, shiftKey: true });
+    expect(timeline.ungroup).toHaveBeenCalled();
+  });
+
+  it('splits the clicked clip when the razor tool is active', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Razor tool' }));
+    screen
+      .getByRole('button', { name: 'Opening line clip' })
+      .dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 200, clientY: 10, bubbles: true }));
+
+    expect(timeline.splitAt).toHaveBeenCalledTimes(1);
+    const [ids, atUs] = (timeline.splitAt as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(ids).toEqual(['item-a']);
+    expect(typeof atUs).toBe('number');
+  });
+
+  it('selects clips with a marquee dragged over empty area', async () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { getByTestId } = render(<TimelinePanel timeline={timeline} />);
+    const canvas = getByTestId('timeline-canvas');
+
+    // y = 150 lands on the main video row (captions + text + overlay stack above it).
+    await act(async () => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', { button: 0, clientX: 0, clientY: 150, bubbles: true }),
+      );
+    });
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 300, clientY: 150, bubbles: true }));
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+
+    expect(timeline.select).toHaveBeenCalledWith(['item-a'], false);
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

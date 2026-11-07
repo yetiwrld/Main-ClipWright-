@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ClipboardCopy,
+  ClipboardPaste,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -55,6 +57,14 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [scrollX, setScrollX] = useState(state?.viewState?.scrollX ?? 0);
   const [snapping, setSnapping] = useState(true);
   const [editMode, setEditMode] = useState<EditMode>('normal');
+  const [tool, setTool] = useState<'select' | 'razor'>('select');
+  const [marquee, setMarquee] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    additive: boolean;
+  } | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
   const [dragPreview, setDragPreview] = useState<{ itemId: string; startUs: number } | null>(null);
   // Trim is previewed locally and committed once on release (one undo step).
@@ -238,6 +248,55 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   }, []);
 
   useEffect(() => {
+    if (!marquee) return;
+    const onMove = (event: PointerEvent) => {
+      const node = canvasRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      setMarquee((current) =>
+        current
+          ? {
+              ...current,
+              x2: event.clientX - rect.left + scrollX,
+              y2: event.clientY - rect.top,
+            }
+          : current,
+      );
+    };
+    const onUp = () => {
+      if (state && marquee) {
+        const left = Math.min(marquee.x1, marquee.x2);
+        const right = Math.max(marquee.x1, marquee.x2);
+        const top = Math.min(marquee.y1, marquee.y2);
+        const bottom = Math.max(marquee.y1, marquee.y2);
+        let rowTop = 0;
+        const hits: string[] = [];
+        for (const track of tracksInDrawOrder(state)) {
+          const rowBottom = rowTop + track.heightPx;
+          const rowHit = bottom >= rowTop && top <= rowBottom;
+          rowTop = rowBottom;
+          if (!rowHit || track.locked || track.hidden) continue;
+          for (const id of track.itemIds) {
+            const item = state.items[id];
+            if (!item) continue;
+            const itemLeft = usToX(item.startUs) - scrollX;
+            const itemRight = itemLeft + usToX(item.durationUs);
+            if (itemRight >= left && itemLeft <= right) hits.push(id);
+          }
+        }
+        timeline.select(hits, marquee.additive);
+      }
+      setMarquee(null);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [marquee, scrollX, state, timeline, usToX]);
+
+  useEffect(() => {
     if (!drag) return;
 
     const onMove = (event: PointerEvent) => {
@@ -278,6 +337,19 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       window.removeEventListener('pointerup', onUp);
     };
   }, [applySnap, drag, dragPreview, editMode, endDrag, timeAtPointer, timeline, trimPreview]);
+
+  /** Drag on empty timeline area selects every clip the rectangle touches. */
+  const beginMarquee = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setMarquee({
+      x1: event.clientX - rect.left + scrollX,
+      y1: event.clientY - rect.top,
+      x2: event.clientX - rect.left + scrollX,
+      y2: event.clientY - rect.top,
+      additive: event.shiftKey,
+    });
+  };
 
   const beginScrub = (event: React.PointerEvent) => {
     if (event.button !== 0) return;
@@ -320,6 +392,27 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         timeline.remove(event.shiftKey);
+        return;
+      }
+      if (meta && event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        timeline.copy();
+        return;
+      }
+      if (meta && event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        timeline.cut();
+        return;
+      }
+      if (meta && event.key.toLowerCase() === 'v') {
+        event.preventDefault();
+        timeline.paste(current);
+        return;
+      }
+      if (meta && event.key.toLowerCase() === 'g') {
+        event.preventDefault();
+        if (event.shiftKey) timeline.ungroup();
+        else timeline.group();
         return;
       }
       if (meta && event.key.toLowerCase() === 'd') {
@@ -395,7 +488,22 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           overflow: 'hidden',
         }}
       >
-        <IconButton label="Select tool" shortcut="V" active size={28} icon={<MousePointer2 size={14} />} />
+        <IconButton
+          label="Select tool"
+          shortcut="V"
+          active={tool === 'select'}
+          size={28}
+          icon={<MousePointer2 size={14} />}
+          onClick={() => setTool('select')}
+        />
+        <IconButton
+          label="Razor tool"
+          shortcut="C"
+          active={tool === 'razor'}
+          size={28}
+          icon={<Scissors size={14} />}
+          onClick={() => setTool('razor')}
+        />
         <IconButton
           label="Split at playhead"
           shortcut="S"
@@ -434,6 +542,22 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           icon={<Copy size={14} />}
           onClick={timeline.duplicate}
           disabled={!selection.length}
+        />
+        <IconButton
+          label="Copy"
+          shortcut="Ctrl+C"
+          size={28}
+          icon={<ClipboardCopy size={14} />}
+          onClick={() => timeline.copy()}
+          disabled={!selection.length}
+        />
+        <IconButton
+          label="Paste at playhead"
+          shortcut="Ctrl+V"
+          size={28}
+          icon={<ClipboardPaste size={14} />}
+          onClick={() => timeline.paste(playheadStore.get())}
+          disabled={timeline.clipboardSize === 0}
         />
         <IconButton
           label="Add marker"
@@ -552,14 +676,40 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
 
         <div
           ref={canvasRef}
+          data-testid="timeline-canvas"
           style={{
             position: 'relative',
             flex: 1,
             minWidth: 0,
             overflow: 'hidden',
-            cursor: drag?.kind === 'scrub' ? 'col-resize' : 'default',
+            cursor:
+              drag?.kind === 'scrub'
+                ? 'col-resize'
+                : tool === 'razor'
+                  ? 'crosshair'
+                  : 'default',
+          }}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget && event.button === 0) {
+              beginMarquee(event);
+            }
           }}
         >
+          {marquee && (
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: Math.min(marquee.x1, marquee.x2) - scrollX,
+                top: Math.min(marquee.y1, marquee.y2),
+                width: Math.abs(marquee.x2 - marquee.x1),
+                height: Math.abs(marquee.y2 - marquee.y1),
+                border: '1px solid var(--brand)',
+                background: 'var(--brand-tint)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           {tracks.map((track) => (
             <div
               key={track.id}
@@ -605,7 +755,17 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                     onPointerDown={(event) => {
                       event.stopPropagation();
                       if (event.button !== 0) return;
-                      timeline.select([item.id], event.ctrlKey || event.metaKey);
+                      if (tool === 'razor') {
+                        timeline.splitAt([item.id], applySnap(timeAtPointer(event.clientX), event.altKey).us);
+                        return;
+                      }
+                      // Selecting any member of a group selects the whole group.
+                      const members = item.groupId
+                        ? Object.values(state.items)
+                            .filter((candidate) => candidate.groupId === item.groupId)
+                            .map((candidate) => candidate.id)
+                        : [item.id];
+                      timeline.select(members, event.ctrlKey || event.metaKey);
                       setDrag({
                         kind: 'move',
                         itemId: item.id,

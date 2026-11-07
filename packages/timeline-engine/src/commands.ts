@@ -612,5 +612,113 @@ export function setTrackMuted(
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }
 
+/**
+ * Paste copied items (SPEC 09 §12): the earliest item lands at `atUs`, relative
+ * spacing and track offsets are preserved, and Normal placement rules apply.
+ */
+export function pasteItems(
+  state: TimelineState,
+  params: {
+    items: Array<{ item: TimelineItem; trackId: string }>;
+    atUs: number;
+    fps: Fps;
+    mode?: EditMode;
+  },
+): CommandResult {
+  if (!params.items.length) return fail('invalid', 'The clipboard is empty.');
+  const earliest = Math.min(...params.items.map((entry) => entry.item.startUs));
+  const targetStart = quantizeUs(params.atUs, params.fps);
+  const placedIds: string[] = [];
+  const notes: string[] = [];
+
+  for (const entry of params.items) {
+    const track = state.tracks.find((candidate) => candidate.id === entry.trackId);
+    if (!track) return { ok: false, code: 'invalid', message: 'That track no longer exists.' };
+    if (track.locked) return fail('locked', `“${track.name}” is locked.`);
+  }
+
+  let current = state;
+  for (const [index, entry] of params.items.entries()) {
+    const offsetUs = entry.item.startUs - earliest;
+    const id = `${entry.item.id}~paste${index}_${targetStart.toString(36)}`;
+    const outcome = addItem(current, {
+      fps: params.fps,
+      trackId: entry.trackId,
+      startUs: targetStart + offsetUs,
+      item: { ...entry.item, id },
+    });
+    if (!outcome.ok) return outcome;
+    current = outcome.state;
+    placedIds.push(id);
+    notes.push(...outcome.notes);
+  }
+
+  // Replaying the same paste twice must still be undoable as one step, so the
+  // patches are diffed against the original state rather than the last one.
+  const patches: Patch[] = [];
+  const inverse: Patch[] = [];
+  for (const id of placedIds) {
+    if (!state.items[id] && current.items[id]) {
+      patches.push({ op: 'add', path: ['items', id], value: current.items[id] });
+      inverse.push({ op: 'remove', path: ['items', id] });
+    }
+  }
+  for (const track of current.tracks) {
+    const before = state.tracks.find((candidate) => candidate.id === track.id);
+    if (before && before.itemIds.join('|') !== track.itemIds.join('|')) {
+      patches.push({ op: 'replace', path: ['tracks', state.tracks.indexOf(before), 'itemIds'], value: track.itemIds });
+      inverse.push({
+        op: 'replace',
+        path: ['tracks', state.tracks.indexOf(before), 'itemIds'],
+        value: before.itemIds,
+      });
+    }
+  }
+
+  return { ok: true, state: current, patches, inverse, affectedItemIds: placedIds, notes };
+}
+
+/** Group selected items so they move, trim, split and delete together. */
+export function groupItems(
+  state: TimelineState,
+  params: { itemIds: string[]; groupId?: string },
+): CommandResult {
+  if (params.itemIds.length < 2) return fail('invalid', 'Select at least two clips to group.');
+  const groupId = params.groupId ?? `grp_${params.itemIds[0]!.slice(-4)}${params.itemIds.length}`;
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of params.itemIds) {
+      const item = draft.items[id];
+      if (item) item.groupId = groupId;
+    }
+    if (!draft.groups.some((group) => group.id === groupId)) {
+      draft.groups.push({ id: groupId, itemIds: [...params.itemIds] } as never);
+    }
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: params.itemIds, notes: [] };
+}
+
+export function ungroupItems(
+  state: TimelineState,
+  params: { groupId: string },
+): CommandResult {
+  const members = Object.values(state.items).filter((item) => item.groupId === params.groupId);
+  if (!members.length) return fail('not_found', 'There is no group to ungroup.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const member of members) {
+      const item = draft.items[member.id];
+      if (item) delete item.groupId;
+    }
+    draft.groups = draft.groups.filter((group) => group.id !== params.groupId);
+  });
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: members.map((item) => item.id),
+    notes: [],
+  };
+}
+
 /** Snap points for a gesture; re-exported so the UI needs one import. */
 export { snapPoints };

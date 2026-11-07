@@ -3,6 +3,9 @@ import { createDefaultTimeline, createMediaItem } from '../factory';
 import {
   addItem,
   addMarker,
+  groupItems,
+  pasteItems,
+  ungroupItems,
   deleteItems,
   duplicateItems,
   moveItems,
@@ -279,6 +282,55 @@ describe('timeline commands', () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe('source_bounds');
+  });
+
+  it('pastes a copied clip at the playhead and keeps it undoable as one step', () => {
+    const { state, ids } = fixture();
+    const copied = state.items[ids.first]!;
+    const result = pasteItems(state, {
+      fps: 30,
+      atUs: 10_000_000,
+      items: [{ item: copied, trackId: copied.trackId }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.affectedItemIds).toHaveLength(1);
+    expect(result.state.items[result.affectedItemIds[0]!]!.startUs).toBe(10_000_000);
+    expect(result.patches.length).toBeGreaterThan(0);
+    expect(checkInvariantsMB(result.state)).toEqual([]);
+  });
+
+  it('pastes a locked-track copy as a refusal, not a silent partial paste', () => {
+    const { state, ids, trackId } = fixture();
+    const locked = {
+      ...state,
+      tracks: state.tracks.map((track) =>
+        track.id === trackId ? { ...track, locked: true } : track,
+      ),
+    };
+    const result = pasteItems(locked, {
+      fps: 30,
+      atUs: 0,
+      items: [{ item: state.items[ids.first]!, trackId }],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('locked');
+  });
+
+  it('groups and ungroups selected clips', () => {
+    const { state, ids } = fixture();
+    const grouped = groupItems(state, { itemIds: [ids.first, ids.second] });
+    expect(grouped.ok).toBe(true);
+    if (!grouped.ok) return;
+    expect(grouped.state.items[ids.first]!.groupId).toBe(grouped.state.items[ids.second]!.groupId);
+    expect(grouped.state.groups).toHaveLength(1);
+
+    const groupId = grouped.state.items[ids.first]!.groupId!;
+    const ungrouped = ungroupItems(grouped.state, { groupId });
+    expect(ungrouped.ok).toBe(true);
+    if (!ungrouped.ok) return;
+    expect(ungrouped.state.items[ids.first]!.groupId).toBeUndefined();
+    expect(ungrouped.state.groups).toHaveLength(0);
   });
 
   it('all commands keep the invariants intact', () => {

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CompositionPayloadSchema, type CompositionRecord } from '@clipwright/project-schema/schemas';
+import {
+  CompositionPayloadSchema,
+  type CompositionRecord,
+  type TimelineItem,
+} from '@clipwright/project-schema/schemas';
 import {
   TimelineHistory,
   addItem,
@@ -11,6 +15,9 @@ import {
   setTrackMuted,
   splitItems,
   trimItem,
+  groupItems,
+  pasteItems,
+  ungroupItems,
   type CommandResult,
   type EditMode,
   type Fps,
@@ -20,6 +27,14 @@ import { api, describeError, isDesktop } from '../../api.js';
 import { playheadStore } from './playhead-store.js';
 
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
+
+interface ClipboardEntry {
+  item: TimelineItem;
+  trackId: string;
+}
+
+/** One clipboard for the whole session, shared between clips (SPEC 09 §12). */
+let sessionClipboard: ClipboardEntry[] = [];
 
 interface RecoveryInfo {
   entries: number;
@@ -43,6 +58,7 @@ export interface TimelineApi {
   move: (moves: Array<{ itemId: string; startUs: number; trackId?: string }>, mode?: EditMode) => boolean;
   trim: (itemId: string, edge: 'start' | 'end', toUs: number, ripple?: boolean) => boolean;
   split: (atUs: number) => boolean;
+  splitAt: (itemIds: string[], atUs: number) => boolean;
   remove: (ripple?: boolean) => boolean;
   duplicate: () => boolean;
   addMarkerAt: (atUs: number) => boolean;
@@ -56,6 +72,12 @@ export interface TimelineApi {
     startUs: number;
   }) => boolean;
   dismissNotes: () => void;
+  copy: () => number;
+  cut: () => boolean;
+  paste: (atUs: number) => boolean;
+  group: () => boolean;
+  ungroup: () => boolean;
+  clipboardSize: number;
   /** Unsaved edits found in the journal after a crash (SPEC 03 §5). */
   recovery: RecoveryInfo | null;
   recover: () => Promise<void>;
@@ -75,6 +97,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
   const [notes, setNotes] = useState<string[]>([]);
   const [historyTick, setHistoryTick] = useState(0);
   const [recovery, setRecovery] = useState<RecoveryInfo | null>(null);
+  const [clipboardSize, setClipboardSize] = useState(sessionClipboard.length);
 
   const historyRef = useRef<TimelineHistory | null>(null);
   const seqRef = useRef(0);
@@ -302,6 +325,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       move: (moves, mode) => run(mode ? `Move (${mode})` : 'Move', (s) => moveItems(s, { moves, fps, mode })),
       trim: (itemId, edge, toUs, ripple) => run('Trim', (s) => trimItem(s, { itemId, edge, toUs, fps, ripple })),
       split: (atUs) => run('Split', (s) => splitItems(s, { itemIds: selection, atUs, fps })),
+      splitAt: (itemIds, atUs) => run('Split', (s) => splitItems(s, { itemIds, atUs, fps })),
       remove: (ripple) => run(ripple ? 'Ripple delete' : 'Delete', (s) => deleteItems(s, { itemIds: selection, fps, ripple })),
       duplicate: () => run('Duplicate', (s) => duplicateItems(s, { itemIds: selection, fps })),
       addMarkerAt: (atUs) => run('Add marker', (s) => addMarker(s, { timeUs: atUs, fps })),
@@ -324,6 +348,49 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         });
       },
       dismissNotes: () => setNotes([]),
+      copy: () => {
+        if (!state) return 0;
+        sessionClipboard = selection
+          .map((id) => state.items[id])
+          .filter((item): item is TimelineItem => Boolean(item))
+          .map((item) => ({ item, trackId: item.trackId }));
+        setClipboardSize(sessionClipboard.length);
+        setNotes(
+          sessionClipboard.length
+            ? [`Copied ${sessionClipboard.length} clip${sessionClipboard.length === 1 ? '' : 's'}.`]
+            : ['Nothing selected to copy.'],
+        );
+        return sessionClipboard.length;
+      },
+      cut: () => {
+        if (!state || selection.length === 0) return false;
+        sessionClipboard = selection
+          .map((id) => state.items[id])
+          .filter((item): item is TimelineItem => Boolean(item))
+          .map((item) => ({ item, trackId: item.trackId }));
+        setClipboardSize(sessionClipboard.length);
+        return run('Cut', (s) => deleteItems(s, { itemIds: selection, fps }));
+      },
+      paste: (atUs) => {
+        if (!sessionClipboard.length) {
+          setNotes(['The clipboard is empty.']);
+          return false;
+        }
+        const pasted = run('Paste', (s) =>
+          pasteItems(s, { items: sessionClipboard, atUs, fps }),
+        );
+        return pasted;
+      },
+      group: () => run('Group', (s) => groupItems(s, { itemIds: selection })),
+      ungroup: () => {
+        const groupId = state?.items[selection[0] ?? '']?.groupId;
+        if (!groupId) {
+          setNotes(['Those clips are not grouped.']);
+          return false;
+        }
+        return run('Ungroup', (s) => ungroupItems(s, { groupId }));
+      },
+      clipboardSize,
       recovery,
       recover,
       dismissRecovery: () => setRecovery(null),
@@ -344,6 +411,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       redo,
       recovery,
       recover,
+      clipboardSize,
     ],
   );
 
