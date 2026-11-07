@@ -141,6 +141,43 @@ describe('ExportPanel', () => {
     expect(onChange).toHaveBeenCalledWith({ burnCaptions: false });
   });
 
+  it('offers the five built-in quick presets', () => {
+    render(
+      <ExportPanel state={DEFAULT_EXPORT_STATE} onChange={() => {}} onExport={() => {}} onCancel={() => {}} />,
+    );
+    for (const label of [
+      'Short-form vertical',
+      'Landscape 1080p',
+      'High quality 4K',
+      'Small file for sharing',
+      'Square 1080',
+    ]) {
+      expect(screen.getByText(label), label).toBeTruthy();
+    }
+  });
+
+  it('applies a quick preset through onChange', () => {
+    const onChange = vi.fn();
+    render(
+      <ExportPanel state={DEFAULT_EXPORT_STATE} onChange={onChange} onExport={() => {}} onCancel={() => {}} />,
+    );
+    fireEvent.click(screen.getByText('Landscape 1080p'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ preset: '1080p', aspect: '16:9', fps: 30, quality: 'standard' }),
+    );
+  });
+
+  it('applies the small-file preset with draft quality', () => {
+    const onChange = vi.fn();
+    render(
+      <ExportPanel state={DEFAULT_EXPORT_STATE} onChange={onChange} onExport={() => {}} onCancel={() => {}} />,
+    );
+    fireEvent.click(screen.getByText('Small file for sharing'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ preset: '720p', quality: 'draft', audioBitrate: 128 }),
+    );
+  });
+
   it('shows 4K resolution for 4K preset', () => {
     const state: ExportPanelState = { ...DEFAULT_EXPORT_STATE, preset: '4k-uhd', aspect: '16:9' };
     render(

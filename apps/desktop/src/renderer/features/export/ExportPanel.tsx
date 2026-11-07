@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import {
+  BUILT_IN_QUICK_PRESETS,
   EXPORT_PRESETS,
   ASPECT_RATIOS,
   OUTPUT_FORMATS,
@@ -17,7 +18,14 @@ import {
   resolutionForPreset,
   DEFAULT_AUDIO_BITRATE,
 } from '@clipwright/export-core';
-import type { ExportPresetId, OutputFormatId, QualityPresetId, ExportFps, AudioBitrate } from '@clipwright/export-core';
+import type {
+  ExportPresetId,
+  OutputFormatId,
+  QualityPresetId,
+  ExportFps,
+  AudioBitrate,
+  QuickPreset,
+} from '@clipwright/export-core';
 
 export interface ExportPanelState {
   preset: ExportPresetId;
@@ -91,6 +99,17 @@ export function ExportPanel({
         }}
       >
         {resolution.width}×{resolution.height} · {state.fps} fps · {state.format.toUpperCase()} · ≈ {estimatedSizeMb} MB
+      </div>
+
+      {/* Quick presets (§3.5) */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+        {BUILT_IN_QUICK_PRESETS.map((preset) => (
+          <QuickPresetButton
+            key={preset.id}
+            preset={preset}
+            onApply={() => onChange({ ...preset.settings })}
+          />
+        ))}
       </div>
 
       {/* Resolution preset */}
@@ -226,6 +245,27 @@ export function ExportPanel({
         </button>
       </div>
     </div>
+  );
+}
+
+function QuickPresetButton({ preset, onApply }: { preset: QuickPreset; onApply: () => void }) {
+  return (
+    <button
+      type="button"
+      title={preset.description}
+      onClick={onApply}
+      style={{
+        padding: '4px 10px',
+        borderRadius: 'var(--radius-pill)',
+        border: '1px solid var(--line-default)',
+        background: 'var(--surface-card)',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
+        fontSize: 'var(--fs-xs)',
+      }}
+    >
+      {preset.label}
+    </button>
   );
 }
 
