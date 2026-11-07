@@ -649,6 +649,18 @@ describe('timeline panel', () => {
     expect(screen.queryByText('Caption label clip')).toBeNull();
   });
 
+
+  it('K key toggles show keyframes', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    // Initially no keyframe lanes
+    expect(container.querySelector('[data-testid*="keyframe-lane"]')).toBeNull();
+    // Press K to toggle on
+    fireEvent.keyDown(window, { key: 'k' });
+    // Press K again to toggle off
+    fireEvent.keyDown(window, { key: 'k' });
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

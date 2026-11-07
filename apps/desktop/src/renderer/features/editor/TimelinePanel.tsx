@@ -498,6 +498,11 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         timeline.clearWorkArea();
         return;
       }
+      if (event.key.toLowerCase() === 'k' && !meta && !event.altKey) {
+        event.preventDefault();
+        setShowKeyframes((value) => !value);
+        return;
+      }
       if (event.key.toLowerCase() === 'n' && !meta) {
         event.preventDefault();
         setSnapping((value) => !value);
