@@ -22,6 +22,7 @@ import { ExportService, type StartExportRequest } from './export/export-service.
 import { UpdateService } from './updater/update-service.js';
 import { resolveTrustedKeys } from './updater/update-config.js';
 import { isSmokeTest, runSmokeTestAndExit } from './smoke-test.js';
+import { summariseIntegrity, verifyBundledTools } from './bin-integrity.js';
 import { STARTUP_CHECK_DELAY_MS, autoCheckIntervalMs, shouldAutoCheck } from '@clipwright/update-core';
 
 const isDev = !app.isPackaged;
@@ -131,6 +132,9 @@ function requireExportService(): ExportService {
   if (!exportService) throw new Error('Export service not ready');
   return exportService;
 }
+
+/** Last bundled-tool verification result (SPEC 15 §6.1); null while checking. */
+let binIntegrityReport: Awaited<ReturnType<typeof verifyBundledTools>> | null = null;
 
 /** The updater (SPEC 15 §2). One instance for the app run. */
 let updateService: UpdateService | null = null;
@@ -753,6 +757,19 @@ function registerIPC(): void {
     return err === '' ? true : err;
   });
 
+  // ---- Bundled tool integrity (SPEC 15 §6.1) ----
+  ipcMain.handle('tools:integrity', async () => {
+    if (binIntegrityReport) {
+      return {
+        manifestPresent: binIntegrityReport.manifestPresent,
+        enabled: binIntegrityReport.enabled,
+        problems: binIntegrityReport.problems,
+        summary: summariseIntegrity(binIntegrityReport),
+      };
+    }
+    return null;
+  });
+
   // ---- Updates (SPEC 15) ----
   ipcMain.handle('update:state', async () => requireUpdateService().snapshot());
 
@@ -866,6 +883,27 @@ app.whenReady().then(async () => {
   const storage = storageService;
   const secrets = secretStore;
   const log = logger;
+
+  // SPEC 15 §6.1: verify the bundled binaries before anything spawns them. A
+  // replaced ffmpeg is code execution with paths inside the user's workspace, so
+  // a mismatch disables that tool rather than running it.
+  {
+    const binDir = app.isPackaged
+      ? join(process.resourcesPath, 'bin')
+      : resolve(process.cwd(), 'resources', 'bin');
+    void verifyBundledTools({ binDir }).then((report) => {
+      binIntegrityReport = report;
+      const summary = summariseIntegrity(report);
+      if (summary) {
+        logger?.warn('Bundled tool verification problems', {
+          problems: report.problems,
+          enabled: report.enabled,
+        });
+      } else {
+        logger?.info('Bundled tools verified', { enabled: report.enabled });
+      }
+    });
+  }
   if (storage && secrets && log) {
     providers = new ProviderService(storage, secrets, log);
     consents = new ConsentService(storage, log);

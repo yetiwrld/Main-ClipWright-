@@ -169,6 +169,9 @@ contextBridge.exposeInMainWorld('clipwright', {
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
 
   // ---- Export (SPEC 14) ----
+  // ---- Bundled tool integrity (SPEC 15 §6.1) ----
+  getToolIntegrity: () => ipcRenderer.invoke('tools:integrity'),
+
   // ---- Updates (SPEC 15) ----
   getUpdateState: () => ipcRenderer.invoke('update:state'),
   checkForUpdates: (options) => ipcRenderer.invoke('update:check', options),

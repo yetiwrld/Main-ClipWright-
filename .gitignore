@@ -57,3 +57,4 @@ Thumbs.db
 .tmp-release/
 .tmp-portable/
 .tmp-smoke/
+.tmp-bin-integrity/
