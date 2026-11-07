@@ -1,0 +1,96 @@
+{
+  "$comment": "SPEC 06 §3 — presets are data, not code, so they can be corrected without touching logic. No model names, prices or limits are stored here: models are always discovered with listModels or typed by the user. `capabilities` lists only what the endpoint genuinely offers.",
+  "version": 1,
+  "presets": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.openai.com/v1",
+      "locality": "online",
+      "capabilities": ["transcription", "text"],
+      "needsKey": true,
+      "notes": "Text and audio transcription."
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "locality": "online",
+      "capabilities": ["transcription", "text"],
+      "needsKey": true,
+      "notes": "OpenAI-compatible endpoint with text and audio transcription."
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "kind": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "locality": "online",
+      "capabilities": ["text"],
+      "needsKey": true,
+      "notes": "Text only: this gateway does not offer the audio transcriptions endpoint."
+    },
+    {
+      "id": "together",
+      "name": "Together",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.together.xyz/v1",
+      "locality": "online",
+      "capabilities": ["text"],
+      "needsKey": true,
+      "notes": "Text only."
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "kind": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "locality": "online",
+      "capabilities": ["text"],
+      "needsKey": true,
+      "notes": "Text only. JSON is requested in the prompt and validated by the app."
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "kind": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "locality": "online",
+      "capabilities": ["text"],
+      "needsKey": true,
+      "notes": "Text only."
+    },
+    {
+      "id": "ollama-local",
+      "name": "Ollama (this computer)",
+      "kind": "ollama",
+      "baseUrl": "http://localhost:11434",
+      "locality": "local",
+      "capabilities": ["text"],
+      "needsKey": false,
+      "notes": "Free app that runs language models on your computer. Nothing leaves this machine."
+    },
+    {
+      "id": "ollama-network",
+      "name": "Ollama (another computer)",
+      "kind": "ollama",
+      "baseUrl": "http://192.168.1.10:11434",
+      "locality": "network",
+      "capabilities": ["text"],
+      "needsKey": false,
+      "notes": "Replace the address with the other computer's IP. Transcript text will leave this machine."
+    },
+    {
+      "id": "custom",
+      "name": "Custom (OpenAI-compatible)",
+      "kind": "openai-compatible",
+      "baseUrl": "",
+      "locality": "online",
+      "capabilities": ["transcription", "text"],
+      "needsKey": true,
+      "notes": "Any service that speaks the OpenAI wire format. Enter its base URL."
+    }
+  ]
+}

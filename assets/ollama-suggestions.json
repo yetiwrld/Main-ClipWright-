@@ -1,0 +1,30 @@
+{
+  "$comment": "SPEC 06 §7.3 — editable suggestions for the Ollama model picker. Sizes are approximate and shown as guidance only; nothing here claims quality. Model names come from the Ollama library, and the app always lists what is actually installed.",
+  "version": 1,
+  "suggestions": [
+    {
+      "name": "llama3.2",
+      "approxSizeGb": 2.0,
+      "ramGuidanceGb": 8,
+      "notes": "General purpose; usually reliable at returning JSON."
+    },
+    {
+      "name": "qwen2.5:7b",
+      "approxSizeGb": 4.7,
+      "ramGuidanceGb": 16,
+      "notes": "Stronger reasoning; needs more memory."
+    },
+    {
+      "name": "mistral",
+      "approxSizeGb": 4.1,
+      "ramGuidanceGb": 16,
+      "notes": "Works well for short structured answers."
+    },
+    {
+      "name": "phi3:mini",
+      "approxSizeGb": 2.2,
+      "ramGuidanceGb": 8,
+      "notes": "Small and quick; shorter context."
+    }
+  ]
+}

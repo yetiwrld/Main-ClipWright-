@@ -1,0 +1,6 @@
+{
+  "$comment": "SPEC 06 §7.2 — SHA-256 digests for downloadable model files. A model with no entry here downloads but is reported as unverified; Clipwright never ships a hash it has not verified against a real file. Digests are added as each build is verified on the reference machine.",
+  "version": 1,
+  "whisper": {},
+  "onnx": {}
+}
