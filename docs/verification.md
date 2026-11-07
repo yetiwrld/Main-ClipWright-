@@ -144,7 +144,9 @@ Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
 | `verify-binaries.mjs` catches unpinned hashes | Yes — exits 1, naming all three binaries and the missing `checksums.json` |
 | `extract-notes.mjs` produces notes from the CHANGELOG | Yes; refuses a version that has no section |
 | `make-manifest.mjs` signs and self-verifies | Yes, with real keys over real files |
+| Release scripts are actually in the repository | Yes — and this was **not** true before: an unanchored `.gitignore` pattern (`release/`) excluded all nine of them. `scripts/check-repo.mjs` now fails if a workflow references an untracked script. |
 | `gen-update-key.mjs` generates a usable pair | Yes |
+| **The whole chain end to end with a real key** | Rehearsed: generated a key pair, built fake artefacts, extracted the CHANGELOG notes, signed the manifest, then verified the output with the app's own code — signature, both digests per file, `SHA256SUMS.txt`, `latest.yml` cross-check, and rejection of a single flipped byte. |
 
 ### NOT verified
 
