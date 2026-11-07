@@ -19,6 +19,9 @@ import { ModelService } from './ai/model-service.js';
 import { MomentsService } from './ai/moments-service.js';
 import { ConnectivityService, type ProcessingMode } from '@clipwright/ai-core';
 import { ExportService, type StartExportRequest } from './export/export-service.js';
+import { UpdateService } from './updater/update-service.js';
+import { resolveTrustedKeys } from './updater/update-config.js';
+import { STARTUP_CHECK_DELAY_MS, autoCheckIntervalMs, shouldAutoCheck } from '@clipwright/update-core';
 
 const isDev = !app.isPackaged;
 
@@ -126,6 +129,76 @@ let exportService: ExportService | null = null;
 function requireExportService(): ExportService {
   if (!exportService) throw new Error('Export service not ready');
   return exportService;
+}
+
+/** The updater (SPEC 15 §2). One instance for the app run. */
+let updateService: UpdateService | null = null;
+let updateAutoCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+function requireUpdateService(): UpdateService {
+  if (!updateService) throw new Error('Update service not ready');
+  return updateService;
+}
+
+/** In-memory record of the last check; the settings table is the durable copy. */
+let lastUpdateCheckAt: number | null = null;
+
+/**
+ * `electron-updater` is required lazily: it reads `app.isPackaged` at import
+ * time, and in development it must not try to talk to GitHub at all (§3).
+ */
+function getElectronUpdater(): import('./updater/update-service.js').UpdaterLike | null {
+  if (isDev) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
+    return autoUpdater as never;
+  } catch (error) {
+    logger?.warn('electron-updater unavailable', { error: (error as Error).message });
+    return null;
+  }
+}
+
+/**
+ * SPEC 15 §3 — automatic checks.
+ *
+ * Two things matter more than the schedule itself: a startup check must not run
+ * for at least 20 s (so it never competes with the app opening), and no check may
+ * run more often than the user's interval. `shouldAutoCheck` owns the rule; this
+ * only supplies the timer.
+ */
+function startAutomaticUpdateChecks(storage: StorageService, log: Logger): void {
+  const settings = storage.getSettings();
+  if (settings.autoCheckUpdates === 'never' || !settings.privacy.updateCheck) {
+    log.info('Automatic update checks are off');
+    return;
+  }
+  if (isDev) return;
+
+  const run = (): void => {
+    const current = storage.getSettings();
+    const service = updateService;
+    if (!service) return;
+    const due = shouldAutoCheck({
+      now: Date.now(),
+      lastCheckedAt: lastUpdateCheckAt,
+      setting: current.autoCheckUpdates,
+    });
+    void service.autoCheckIfDue(due).catch((error: unknown) => {
+      // Automatic failures are silent for the user (§3) but never swallowed.
+      log.warn('Automatic update check failed', { error: (error as Error)?.message });
+    });
+  };
+
+  // A startup check runs once, well after the window is usable.
+  setTimeout(run, STARTUP_CHECK_DELAY_MS)?.unref?.();
+
+  // ...then on the user's interval for the rest of the session.
+  const interval = autoCheckIntervalMs(settings.autoCheckUpdates);
+  if (interval) {
+    updateAutoCheckTimer = setInterval(run, Math.max(interval, 6 * 60 * 60 * 1000));
+    updateAutoCheckTimer.unref?.();
+  }
 }
 
 /** Bytes handed to each provider during this run, for the data-sent log. */
@@ -679,6 +752,38 @@ function registerIPC(): void {
     return err === '' ? true : err;
   });
 
+  // ---- Updates (SPEC 15) ----
+  ipcMain.handle('update:state', async () => requireUpdateService().snapshot());
+
+  ipcMain.handle('update:check', async (_event, options?: { manual?: boolean }) => {
+    const result = await requireUpdateService().check({ manual: options?.manual ?? true });
+    return result;
+  });
+
+  ipcMain.handle('update:download', async () => requireUpdateService().download());
+
+  ipcMain.handle('update:cancelDownload', async () => {
+    requireUpdateService().cancelDownload();
+    return requireUpdateService().snapshot();
+  });
+
+  ipcMain.handle('update:install', async () => requireUpdateService().installAndRestart());
+
+  ipcMain.handle('update:skip', async () => {
+    requireUpdateService().skip();
+    return requireUpdateService().snapshot();
+  });
+
+  ipcMain.handle('update:remindLater', async () => {
+    requireUpdateService().remindLater();
+    return requireUpdateService().snapshot();
+  });
+
+  ipcMain.handle('update:dismiss', async () => {
+    requireUpdateService().dismiss();
+    return requireUpdateService().snapshot();
+  });
+
   // ---- Export (SPEC 14) ----
   ipcMain.handle('export:start', async (_event, request: StartExportRequest) => {
     const service = requireExportService();
@@ -775,6 +880,28 @@ app.whenReady().then(() => {
     // Anything left mid-flight from a previous session is reported honestly
     // rather than silently resumed (§6 "restarted" messaging).
     exportService.markInterrupted();
+
+    // SPEC 15 §2: the updater lives in main and the renderer only sees state.
+    updateService = new UpdateService({
+      currentVersion: app.getVersion(),
+      channel: storage.getSettings().updateChannel,
+      keys: resolveTrustedKeys(process.env),
+      getUpdater: () => getElectronUpdater(),
+      fetch: (url, init) => fetch(url, init) as never,
+      cacheDir: join(app.getPath('userData'), 'updates'),
+      getLastCheckedAt: () => lastUpdateCheckAt,
+      setLastCheckedAt: (at) => {
+        lastUpdateCheckAt = at;
+      },
+      onStateChange: (state) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send('update:state', state);
+        }
+      },
+      logger: log,
+      isInstallerSigned: () => Boolean(process.env.CSC_LINK),
+    });
+    startAutomaticUpdateChecks(storage, log);
   }
 
   // Serves `clipwright-media://media/<mediaId>` from the media registry only.

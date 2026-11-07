@@ -169,6 +169,21 @@ contextBridge.exposeInMainWorld('clipwright', {
   openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
 
   // ---- Export (SPEC 14) ----
+  // ---- Updates (SPEC 15) ----
+  getUpdateState: () => ipcRenderer.invoke('update:state'),
+  checkForUpdates: (options) => ipcRenderer.invoke('update:check', options),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  cancelUpdateDownload: () => ipcRenderer.invoke('update:cancelDownload'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  skipUpdateVersion: () => ipcRenderer.invoke('update:skip'),
+  remindUpdateLater: () => ipcRenderer.invoke('update:remindLater'),
+  dismissUpdate: () => ipcRenderer.invoke('update:dismiss'),
+  onUpdateState: (handler) => {
+    const listener = (_event, state) => handler(state);
+    ipcRenderer.on('update:state', listener);
+    return () => ipcRenderer.removeListener('update:state', listener);
+  },
+
   startExport: (request) => ipcRenderer.invoke('export:start', request),
   cancelExport: (jobId) => ipcRenderer.invoke('export:cancel', jobId),
   retryExport: (jobId) => ipcRenderer.invoke('export:retry', jobId),

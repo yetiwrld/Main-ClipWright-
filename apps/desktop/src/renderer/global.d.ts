@@ -589,6 +589,17 @@ export interface ClipwrightBridge {
   ): Promise<CreateClipsResultPayload>;
   onMomentsProgress(callback: (p: MomentsProgressPayload) => void): () => void;
 
+  // Updates (SPEC 15)
+  getUpdateState(): Promise<UpdateStatePayload>;
+  checkForUpdates(options?: { manual?: boolean }): Promise<UpdateCheckResultPayload>;
+  downloadUpdate(): Promise<UpdateDownloadResultPayload>;
+  cancelUpdateDownload(): Promise<UpdateStatePayload>;
+  installUpdate(): Promise<{ ok: boolean; error?: UpdateErrorPayload }>;
+  skipUpdateVersion(): Promise<UpdateStatePayload>;
+  remindUpdateLater(): Promise<UpdateStatePayload>;
+  dismissUpdate(): Promise<UpdateStatePayload>;
+  onUpdateState(callback: (state: UpdateStatePayload) => void): () => void;
+
   // Export (SPEC 14)
   startExport(request: ExportStartRequestPayload): Promise<ExportStartResultPayload>;
   cancelExport(jobId: string): Promise<boolean>;
@@ -661,6 +672,75 @@ export interface ExportProgressPayload {
   etaSec: number | null;
   message: string;
 }
+
+/* ---------- Updates (SPEC 15) ---------- */
+
+export type UpdateStatusPayload =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'verifying'
+  | 'ready'
+  | 'installing'
+  | 'error';
+
+export interface UpdateReleasePayload {
+  version: string;
+  summary: string;
+  full: string;
+  releasedAt: string;
+  prerelease: boolean;
+  downloadBytes: number;
+  signed: boolean;
+  htmlUrl: string;
+}
+
+export interface UpdateErrorPayload {
+  kind:
+    | 'offline'
+    | 'rate-limited'
+    | 'unverified'
+    | 'damaged'
+    | 'not-enough-space'
+    | 'quarantined'
+    | 'no-signature'
+    | 'unknown';
+  message: string;
+  retryable: boolean;
+  detail?: string;
+}
+
+export interface UpdateProgressPayload {
+  percent: number;
+  transferredBytes: number;
+  totalBytes: number;
+  bytesPerSecond: number;
+  etaSec: number | null;
+}
+
+export interface UpdateStatePayload {
+  status: UpdateStatusPayload;
+  currentVersion: string;
+  channel: 'stable' | 'beta';
+  lastCheckedAt: number | null;
+  release: UpdateReleasePayload | null;
+  progress: UpdateProgressPayload | null;
+  error: UpdateErrorPayload | null;
+  skippedVersion: string | null;
+  snoozedUntil: number | null;
+  notice: string | null;
+}
+
+export type UpdateCheckResultPayload =
+  | { status: 'up-to-date'; version: string }
+  | { status: 'available'; release: UpdateReleasePayload }
+  | { status: 'error'; error: UpdateErrorPayload };
+
+export type UpdateDownloadResultPayload =
+  | { ok: true; filePath: string }
+  | { ok: false; error: UpdateErrorPayload };
 
 export interface ExportStartRequestPayload {
   jobId: string;

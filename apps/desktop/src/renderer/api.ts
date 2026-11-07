@@ -9,6 +9,7 @@ import type {
   MomentsProgressPayload,
   ProviderSaveInput,
   TranscribeRequestPayload,
+  UpdateStatePayload,
 } from './global.js';
 
 /**
@@ -305,6 +306,35 @@ export const api = {
   },
   onMomentsProgress(callback: (p: MomentsProgressPayload) => void) {
     return getBridge()?.onMomentsProgress(callback) ?? (() => undefined);
+  },
+
+  // ---- Updates (SPEC 15) ----
+  async getUpdateState() {
+    return requireBridge('Reading update status').getUpdateState();
+  },
+  async checkForUpdates(options?: { manual?: boolean }) {
+    return requireBridge('Checking for updates').checkForUpdates(options);
+  },
+  async downloadUpdate() {
+    return requireBridge('Downloading the update').downloadUpdate();
+  },
+  async cancelUpdateDownload() {
+    return requireBridge('Cancelling the download').cancelUpdateDownload();
+  },
+  async installUpdate() {
+    return requireBridge('Installing the update').installUpdate();
+  },
+  async skipUpdateVersion() {
+    return requireBridge('Skipping that version').skipUpdateVersion();
+  },
+  async remindUpdateLater() {
+    return requireBridge('Snoozing that update').remindUpdateLater();
+  },
+  async dismissUpdate() {
+    return requireBridge('Closing that notice').dismissUpdate();
+  },
+  onUpdateState(callback: (state: UpdateStatePayload) => void) {
+    return getBridge()?.onUpdateState(callback) ?? (() => undefined);
   },
 
   // ---- Export (SPEC 14) ----
