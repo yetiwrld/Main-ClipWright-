@@ -42,3 +42,6 @@ app-state.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Encoder integration test scratch output
+.tmp-export-it/

@@ -178,6 +178,19 @@ describe('buildExportPlan', () => {
     expect(plan.durationSeconds).toBeCloseTo(60);
   });
 
+  it('is deterministic: same inputs produce identical plans', () => {
+    const first = buildExportPlan(makeSettings());
+    const second = buildExportPlan(makeSettings());
+    expect(second).toEqual(first);
+    expect(second.id).toBe(first.id);
+  });
+
+  it('produces different plan ids for different settings', () => {
+    const base = buildExportPlan(makeSettings());
+    const other = buildExportPlan(makeSettings({ quality: 'high' }));
+    expect(other.id).not.toBe(base.id);
+  });
+
   it('marks audio-bearing items correctly', () => {
     const plan = buildExportPlan(makeSettings());
     const videoItem = plan.items.find((i) => i.itemId === 'item-a')!;

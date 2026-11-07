@@ -134,6 +134,37 @@ export interface ExportSettings {
 }
 
 /**
+ * Deterministic plan ID.
+ *
+ * SPEC 14 §2.3 requires the planner to be deterministic, so the ID is derived
+ * from the settings that define the output rather than from the clock. The same
+ * settings always produce the same plan, including its ID (tests assert this).
+ */
+function planId(settings: ExportSettings): string {
+  const key = [
+    settings.compositionId,
+    settings.preset,
+    settings.aspect,
+    settings.fps,
+    settings.format,
+    settings.quality,
+    settings.rateControl,
+    settings.videoBitrate ?? 0,
+    settings.audioBitrate,
+    settings.rangeUs[0],
+    settings.rangeUs[1],
+    settings.isDraft ? 'draft' : 'final',
+  ].join('|');
+  // FNV-1a 32-bit: small, dependency-free, stable across platforms.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `plan-${settings.compositionId}-${hash.toString(16).padStart(8, '0')}`;
+}
+
+/**
  * Build an ExportPlan from the settings and composition snapshot.
  * The planner is deterministic: the same inputs always produce the same plan.
  */
@@ -175,7 +206,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
   const quality = QUALITY_PRESETS_LOOKUP[settings.quality];
 
   return {
-    id: `plan-${settings.compositionId}-${Date.now()}`,
+    id: planId(settings),
     compositionId: settings.compositionId,
     projectId: settings.projectId,
     width,

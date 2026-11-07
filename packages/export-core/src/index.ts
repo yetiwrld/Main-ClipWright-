@@ -40,11 +40,14 @@ export {
   validateExport,
   parseFrameRate,
   formatValidationSummary,
+  formatValidationVerdict,
+  failedCheckNames,
 } from './validation.js';
 export type {
   ValidationReport,
   ValidationCheck,
   ValidationStatus,
+  ValidationOptions,
   ProbeResult,
 } from './validation.js';
 
@@ -62,6 +65,30 @@ export type {
   ExportJobStatus,
   ExportQueueState,
 } from './job-queue.js';
+
+// Encoder (ffmpeg arguments, codec table, hardware selection)
+export {
+  buildEncoderArgs,
+  buildDecodeArgs,
+  buildLoudnessArgs,
+  chooseVideoEncoder,
+  containerFor,
+  audioArgs,
+  metadataArgs,
+  videoQualityArgs,
+  sourceFilterChain,
+  hardwareQualityValue,
+  parseIntegratedLoudness,
+  loudnessGainDb,
+  cfrArgs,
+  detectCapabilities,
+  COLOUR_ARGS,
+  DEFAULT_CAPABILITIES,
+  SOFTWARE_H264,
+  SOFTWARE_VP9,
+  HARDWARE_ENCODERS,
+} from './encoder.js';
+export type { EncoderCapabilities, EncoderInputs, HardwareEncoderId, VideoEncoderChoice } from './encoder.js';
 
 // Subtitles
 export {
