@@ -87,6 +87,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     updateEffectParams: vi.fn(() => true),
     updateMarker: vi.fn(() => true),
     deleteMarker: vi.fn(() => true),
+    setViewState: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -755,6 +756,13 @@ describe('timeline panel', () => {
     expect(loopButton).toBeTruthy();
     fireEvent.click(loopButton);
     expect(screen.getByRole('button', { name: /^Loop playback: on$/ })).toBeTruthy();
+  });
+
+
+  it('setViewState method exists on the timeline API', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    expect(typeof timeline.setViewState).toBe('function');
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

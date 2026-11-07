@@ -39,6 +39,7 @@ import {
   updateEffectParams,
   updateMarker,
   deleteMarker,
+  setViewState,
   splitItems,
   trimItem,
   trimItems,
@@ -1387,6 +1388,24 @@ describe('timeline commands', () => {
         }
       }
     });
+  });
+
+
+  it('sets view state and preserves it through other operations', () => {
+    const { state } = fixture();
+    const result = setViewState(state, { pxPerSecond: 120, scrollX: 500 });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.state.viewState?.pxPerSecond).toBe(120);
+      expect(result.state.viewState?.scrollX).toBe(500);
+      // View state should survive a move operation
+      const moved = moveItems(result.state, { fps: 30, moves: [{ itemId: 'item-b', startUs: 7_000_000 }] });
+      expect(moved.ok).toBe(true);
+      if (moved.ok) {
+        expect(moved.state.viewState?.pxPerSecond).toBe(120);
+        expect(moved.state.viewState?.scrollX).toBe(500);
+      }
+    }
   });
 
   it('all commands keep the invariants intact', () => {

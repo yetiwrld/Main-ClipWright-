@@ -2258,3 +2258,36 @@ export function deleteMarker(
     notes: ['Marker deleted.'],
   };
 }
+/**
+ * Update the timeline view state (SPEC 09 §25): zoom level, scroll position,
+ * and header width. View state is not part of the editing history — it is
+ * persisted with the project but not undoable via Ctrl+Z.
+ */
+export function setViewState(
+  state: TimelineState,
+  params: {
+    pxPerSecond?: number;
+    scrollX?: number;
+    scrollY?: number;
+    headerWidthPx?: number;
+  },
+): CommandResult {
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const current = draft.viewState ?? {};
+    draft.viewState = {
+      pxPerSecond: params.pxPerSecond ?? current.pxPerSecond ?? 80,
+      scrollX: params.scrollX ?? current.scrollX ?? 0,
+      scrollY: params.scrollY ?? current.scrollY ?? 0,
+      headerWidthPx: params.headerWidthPx ?? current.headerWidthPx ?? 184,
+    };
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: ['View state updated.'],
+  };
+}

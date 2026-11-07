@@ -75,6 +75,7 @@ export {
   updateEffectParams,
   updateMarker,
   deleteMarker,
+  setViewState,
   type CommandOk,
   type CommandError,
   type CommandResult,
