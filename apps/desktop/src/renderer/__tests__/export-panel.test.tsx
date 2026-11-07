@@ -24,6 +24,23 @@ describe('ExportPanel', () => {
     expect(screen.getByTestId('export-button')).toBeTruthy();
   });
 
+  it('tells the user that text and effects are not rendered yet', () => {
+    // SPEC 16's honesty rule: a user who adds a title must find out before the
+    // export runs, not after waiting for a file with no title in it.
+    render(
+      <ExportPanel
+        state={DEFAULT_EXPORT_STATE}
+        onChange={() => {}}
+        onExport={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const note = screen.getByTestId('export-limits-note');
+    expect(note.textContent).toContain('Text, effects');
+    expect(note.textContent).toContain('transitions');
+    expect(note.textContent).toContain('not rendered yet');
+  });
+
   it('shows resolution summary', () => {
     render(
       <ExportPanel

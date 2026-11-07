@@ -1,255 +1,192 @@
 # ClipWright Verification Report
 
-**Generated:** 2026-11-07
+**Last updated:** 2026-11-07
 **Branch:** `arena/695acd97-main-clipwright`
-**Commit:** `a917cc5`
-**Engine tests:** 81 · **Renderer tests:** 44 · **Total:** 324 across 14 files
+
+Every number below comes from a command that was run, in this repository, on this
+date. Where something could not be verified in this environment, it says so
+rather than leaving a gap a reader might mistake for a pass.
 
 ---
 
-## 1. Test Infrastructure
+## 1. Automated tests
 
-| Layer | Runner | Location | Count |
-|-------|--------|----------|-------|
-| Unit / property | Vitest | `packages/timeline-engine/src/__tests__/` | 53 |
-| Unit / schema | Vitest | `packages/project-schema/src/__tests__/` | 8 |
-| Unit / AI | Vitest | `packages/ai-core/src/__tests__/` | 71 |
-| Unit / media | Vitest | `packages/media-core/src/__tests__/` | 11 |
-| Unit / design-system | Vitest | `packages/design-system/src/__tests__/` | 4 |
-| Unit / main | Vitest | `apps/desktop/src/main/__tests__/` | 22 |
-| Renderer (jsdom) | Vitest + @testing-library/react | `apps/desktop/src/renderer/__tests__/` | 27 |
-| **Total** | | | **277** |
+```bash
+pnpm test:unit
+```
 
-All tests run from the repo root: `npx vitest run`.
-No Playwright browser binaries are available in this environment — UI verification is via TypeScript typecheck, jsdom renderer tests, and Vite build.
+```
+Test Files  39 passed (39)
+     Tests  909 passed (909)
+```
 
----
+| Area | Tests | What they actually check |
+|---|---:|---|
+| `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
+| `apps/desktop/src/main` | 198 | Export service, queue, ffmpeg orchestration, audio mixing, updates, releases, packaging |
+| `apps/desktop/src/renderer` | 137 | Export dialog, queue panel, update dialog (jsdom) |
+| `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
+| `packages/update-core` | 108 | Version rules, manifest verification, signatures, update state machine |
+| `packages/timeline-engine` | 92 | Commands, invariants, undo/redo |
+| `packages/media-core` | 11 | Probing, peaks, path resolution |
+| `packages/project-schema` | 8 | Schema validation and migration |
+| `packages/design-system` | 4 | Component contracts |
+| **Total** | **909** | 39 files |
 
-## 2. Engine Commands Verified
+### Tests that run real processes
 
-Every command returns immer patches for undo/redo, validates before mutating, and runs `checkInvariantsMB` after mutation.
+These are not mocks, and that distinction matters — a test that fakes ffmpeg
+cannot tell you whether the ffmpeg arguments are right.
 
-| Command | SPEC | Tests | Status |
-|---------|------|-------|--------|
-| `moveItems` | §12 | ✓ | Pass |
-| `trimItem` / `trimItems` | §12 | ✓ | Pass |
-| `moveItemsToTrack` | §12 | ✓ | Pass |
-| `splitItems` | §12 | ✓ | Pass |
-| `deleteItems` (ripple) | §12 | ✓ | Pass |
-| `duplicateItems` | §12 | ✓ | Pass |
-| `pasteItems` | §12 | ✓ | Pass |
-| `groupItems` / `ungroupItems` | §12 | ✓ | Pass |
-| `addItem` | §15 | ✓ | Pass |
-| `addMarker` | §18 | ✓ | Pass |
-| `setTrackMuted` | §9 | ✓ | Pass |
-| `setTrackMagnetic` | §9.4 | ✓ | Pass |
-| `rollAt` (rolling edit) | §12 | ✓ | Pass |
-| `detachAudio` | §9.6 | ✓ | Pass |
-| `unlink` | §9.6 | ✓ | Pass |
-| `toggleItemDisabled` | §21 | ✓ | Pass |
-| `addTrack` | §9.1 | ✓ | Pass |
-| `toggleTrackLock` | §9.1 | ✓ | Pass |
-| `toggleTrackHidden` | §9.1 | ✓ | Pass |
-| `deleteTrack` | §9.1 | ✓ | Pass |
-| `addTransition` | §16 | ✓ | Pass |
-| `updateTransition` | §16 | ✓ | Pass |
-| `removeTransition` | §16 | ✓ | Pass |
+| Test file | Runs |
+|---|---|
+| `__tests__/ffmpeg-runner.test.ts` | Bundled `ffmpeg`/`ffprobe`: probing, decoding, loudness, black/freeze detection |
+| `__tests__/export-runner.test.ts` | A complete encode end to end, then validates the produced file |
+| `__tests__/export-service.test.ts` | Real footage through the service: published file, audio stream, temp cleanup |
+| `__tests__/audio-mixer.test.ts` | Real PCM decoding, mixing, EBU R128 measurement, normalisation |
+| `__tests__/decode-frame-source.test.ts` | Per-item decoders over real clips |
+| `__tests__/release-roundtrip.test.ts` | The real signing script, verified with the app's own verification code |
+| `__tests__/smoke-test.test.ts` | The real bundled binaries, reporting their real versions |
+
+Bundled tooling in this environment is **ffmpeg 4.1** (a 2018 build). That is a
+deliberate constraint: if the code works on the oldest build we might ship, it
+works on newer ones. Capability detection (`-vsync cfr` vs `-fps_mode`) exists
+because of it.
 
 ---
 
-## 3. Acceptance Checks (SPEC 09 §30)
+## 2. Static checks
 
-### Playhead (§6–7)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | Clicking ruler places playhead on nearest frame | ⚠ | Rendered in component; no Playwright |
-| 2 | Dragging scrubs smoothly, snaps to frame | ⚠ | Rendered; no Playwright |
-| 3 | Scrubbing never shows blank preview | ⚠ | Not verifiable without browser |
-| 4 | Left/Right = 1 frame, Shift = 1 sec, Home/End | ✓ | Renderer test "moves the playhead by exactly one frame" |
-| 5 | Timecode entry accepts formats, clamps | ✓ | Renderer test "commits a timecode typed into the field and clamps" |
-| 6 | A/V sync during playback | ⚠ | No playback engine yet |
-| 7 | Follow-playhead page-flip | ⚠ | Not implemented |
-| 8 | Zoom never changes playhead time | ⚠ | Rendered; no Playwright |
-
-### Tracks and Clips (§9–10)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 9 | Create, rename, reorder, hide, lock, mute, solo, delete | ✓ | Engine tests for `addTrack`, `toggleTrackLock`, `toggleTrackHidden`, `deleteTrack`, `setTrackMuted`; renderer tests for magnetic toggle |
-| 10 | Magnetic main track closes gaps | ✓ | Engine `addItem` magnetic insert logic; renderer test "toggles magnetic on the main track header" |
-| 11 | Incompatible drops refused; below-tracks creates new track | ⚠ | Drop handler added; full multi-track drop validation not yet tested |
-
-### Editing (§12–14)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 12 | Split with/without selection, keyframes, captions | ✓ | Engine `splitItems` tests; renderer razor tool test |
-| 13 | Trim cannot exceed source media; edge hit zones | ✓ | Engine `trimItem` tests; renderer trim handle tests |
-| 14 | Ripple delete, rolling edit, Q/W trims; locked tracks | ✓ | Engine tests for `deleteItems`, `rollAt`, `trimItems`; renderer tests for Delete/Shift+Del, Q/W, Alt+Up/Down, rolling edit |
-| 15 | Copy/cut/paste, duplicate preserve layout | ✓ | Engine `pasteItems`, `duplicateItems` tests; renderer clipboard test |
-| 16 | Overlap policy: Normal/Insert/Overwrite | ✓ | Engine `addItem` magnetic insert; renderer overlap tests |
-| 17 | Extending clip clamped at next clip | ✓ | Engine `trimItem` clamp tests |
-| 18 | Group/ungroup, linked audio/video | ✓ | Engine `groupItems`/`ungroupItems`, `detachAudio`/`unlink` tests |
-
-### Interaction Quality (§14–15, §16, §21)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 19 | 4 px threshold; Esc cancels drag | ⚠ | Marquee implemented; no Playwright for Esc |
-| 20 | Snapping (8 px) for edges, markers, transitions | ⚠ | `applySnap` helper exists; no Playwright |
-| 21 | Multi-clip drag preserves offsets | ⚠ | Engine `moveItems` supports multi-move; no Playwright |
-| 22 | Drag from media library places items | ✓ | Renderer drag-drop test "drops a media asset onto the timeline canvas" |
-| 23 | Transitions attach, resize, re-align, clamp, survive trim | ✓ | Engine `addTransition`/`updateTransition`/`removeTransition` tests |
-| 24 | Keyframe diamonds drag/copy/delete | ✓ | Renderer tests: right-click menu, Delete key, Ctrl+D duplicate, pointer drag |
-
-### Persistence and Performance (§24–25, §27)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 25 | Save → close → reopen restores state | ⚠ | Schema exists; no full persistence integration test |
-| 26 | Hard kill loses ≤ 2 s of work | ⚠ | Not yet implemented |
-| 27 | 2,000-item project performance | ⚠ | Not yet tested |
-| 28 | Undo/redo round-trips every command | ✓ | Engine test "undo restores the exact state for every command" |
-
-### Quality Bar (§29–30)
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 29 | All unit tests pass | ✓ | 277 tests, 0 failures |
-| 30 | Visual review against specs/01 | ⚠ | Design system tokens enforced by lint; no visual review without browser |
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | Passes across all 10 packages |
+| `pnpm lint` | Design-token audit: 0 hard-coded hex colours, px radii or ms durations in renderer UI |
+| `pnpm lint` | No-fakes & determinism audit: passes (no `Math.random()`/`Date.now()` in engine packages, no banned claims) |
+| `pnpm --filter @clipwright/desktop build` | Renderer + main + preload build; the main bundle loads under a stubbed Electron |
 
 ---
 
-## 4. Context Menus (SPEC 09 §21)
+## 3. Export engine (SPEC 14)
 
-| Menu | Items | Status |
-|------|-------|--------|
-| Clip | Cut · Copy · Paste · Duplicate · Delete · Ripple delete · Split at playhead · Detach audio · Unlink · Group/Ungroup · Enable/Disable | ✓ |
-| Track header | Mute · Lock · Hide · Add track above/below · Delete track (disabled for main) | ✓ |
-| Empty track area | Paste · Add marker here · Add track | ✓ |
+### Verified by automated tests
 
-Escape closes the menu. Right-click on a clip selects it first.
+| Behaviour | Evidence |
+|---|---|
+| Plan is deterministic for the same input | `planId` is FNV-1a over the settings; tests assert stability |
+| Encoder arguments match the spec for each combo | `encoder.test.ts`, 231 cases including codec × rate control × hardware |
+| Hardware encoders are tested, not assumed | `validateHardwareEncoders` runs a real encode; a candidate that fails is skipped |
+| Frame pipeline respects back-pressure | `export-runner.test.ts` writes to a pipe and handles EPIPE |
+| Cancellation stops the encoder process | Test asserts the child is gone and the partial file removed |
+| The published MP4 really contains the source footage | `export-service.test.ts` exports a moving-bar clip with no frame-source override |
+| The published MP4 really contains audio | `export-service.test.ts` exports a tone and asserts the audio stream via ffprobe |
+| Audio normalisation lands near −16 LUFS | `audio-mixer.test.ts` measures with ebur128 after gain |
+| The limiter holds a −1 dBTP ceiling | `audio-mix.test.ts`, including a deliberately hot mix |
+| The limiter is O(n) | A 10-minute clip limits in linear time (the naive version was quadratic) |
+| Validation checks 13–14 measure the *produced file* | `export-runner.test.ts` asserts the measured values, not the target values |
+| Name clashes never overwrite silently | `export-service.test.ts` asserts `clash 2.mp4` exists alongside `clash.mp4` |
+| The temp mix WAV is deleted after publishing | `export-service.test.ts` asserts the cache directory is empty |
 
----
+### NOT verified
 
-## 5. Transition Engine (SPEC 09 §16)
+| Gap | Why, and what it needs |
+|---|---|
+| **The compositor is not in the export path.** Text, effects, transitions, keyframed transforms and blend modes are not rendered | Each item is decoded and the topmost visible one is shown. `renderFrame` exists and is tested separately; wiring it into the frame producer is the next phase. Disclosed in the export dialog itself, in `docs/limitations.md`, and locked by a renderer test. |
+| Frame blending | Not implemented; nearest-time selection is used and documented |
+| Hardware encoding on real GPUs | No GPU in this environment. The *validation* logic is tested with fakes; actual NVENC/QSV/AMF output is unverified |
+| 4K 60 fps performance | Not benchmarked here; the code path is tested at 320×180 |
+| Resumable export | Not implemented (SPEC 14 §9); a failed export restarts |
 
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Attach at junction | ✓ | Engine test "attaches a transition at a junction" |
-| Duration clamping to handles | ✓ | Engine test "clamps duration to available source handles" |
-| Fade/dip without handles | ✓ | Engine logic allows fade/dip when maxDuration < minDuration |
-| Alignment (center/start/end) | ✓ | Engine test "updates a transition duration and alignment" |
-| Type change | ✓ | Engine `updateTransition` patch.type |
-| Remove transition | ✓ | Engine test "removes a transition" |
-| Locked track refusal | ✓ | Engine test "refuses to add a transition on a locked track" |
-| Invariants after operations | ✓ | Engine test "keeps invariants intact after transition operations" |
-
----
-
-## 6. Phase 5 — Keyframes, Markers, Work Area, Effects, Captions, Playback
-
-### Keyframes (SPEC 09 §17)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Engine commands (add/remove/update/move/duplicate) | ✓ | 8 engine tests |
-| TimelineApi wiring | ✓ | 5 methods |
-| Diamond markers rendering | ✓ | Renderer test |
-| Show keyframes toggle (K key) | ✓ | Renderer test |
-| Diamond drag/copy/delete interactions | ✓ | 3 renderer tests |
-
-### Markers (SPEC 09 §18)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Engine commands (update/delete) | ✓ | 4 engine tests |
-| TimelineApi wiring | ✓ | 2 methods |
-| Context menu (rename/delete) | ✓ | Renderer test |
-| Double-click rename | ✓ | Code |
-| Show markers toggle | ✓ | Renderer test |
-| Ctrl+Left/Right navigation | ✓ | Renderer test |
-
-
-### Waveforms and Thumbnails (SPEC 09 §19)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Waveform peaks on clips | ✓ | `useMediaPeaks` hook + `WaveformCanvas` component |
-| Peak resolution selection (256/4096) | ✓ | `selectPeakResolution` chooses by px/s |
-| Thumbnail filmstrip on video clips | ✓ | `ThumbnailFilmstrip` component + `drawThumbnailFilmstrip` |
-| Show waveforms toolbar toggle | ✓ | IconButton with BarChart3 icon |
-| IPC: media:getPeaks | ✓ | Main process handler reads peaks256/peaks4096.bin |
-| IPC: media:getThumbnail | ✓ | Main process handler reads poster thumbnail |
-| Preload bridge: getPeaks/getThumbnail | ✓ | Added to preload/index.cjs |
-| MediaRecord: peaks/thumb paths | ✓ | peaks256Path, peaks4096Path, thumbPath in schema |
-
-### Work Area (SPEC 09 §18)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Engine commands (set/clear) | ✓ | 5 engine tests |
-| TimelineApi wiring | ✓ | 2 methods |
-| I/O/Alt+X keyboard shortcuts | ✓ | Renderer test |
-| Ruler band rendering | ✓ | Code |
-| Draggable handles | ✓ | 2 renderer tests |
-
-### Effects (SPEC 09 §17)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Engine commands (apply/remove/toggle/update) | ✓ | 6 engine tests |
-| TimelineApi wiring | ✓ | 4 methods |
-| Inspector effects panel | ✓ | Renderer test |
-
-### Captions (SPEC 09 §20)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Engine commands (split/merge/trim) | ✓ | 5 engine tests |
-| TimelineApi wiring | ✓ | 3 methods |
-| Caption text rendering on timeline | ✓ | Renderer test |
-
-### Playback (SPEC 09 §23)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Play/pause transport button | ✓ | Renderer test |
-| Spacebar shortcut | ✓ | Renderer test |
-| Loop within work area | ✓ | Code |
-
-### Ruler Context Menu (SPEC 09 §21)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Add marker · Set work-area · Clear · Fit project | ✓ | Renderer test |
-
-### Zoom (SPEC 09 §8)
-
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Ctrl+0 fit · Ctrl+= zoom in · Ctrl+- zoom out | ✓ | Renderer test |
+**Honesty note (fixed while writing this report):** the export dialog previously
+said nothing about the compositing gap, so a user who added a title and exported
+would only discover the omission by watching the finished file. It now says so
+before the export runs, and `export-panel.test.tsx` fails if that note is
+removed. `docs/export.md` lists the same limits.
 
 ---
 
-## 7. Known Limitations
+## 4. Updates (SPEC 15)
 
-1. **No Playwright browser binaries** — UI checks 1–3, 6–8, 19–21, 25–27, 30 cannot be verified in this environment. TypeScript typecheck, jsdom renderer tests, and Vite build are the verification layer.
-2. **Keyframes (§17)** — Not yet implemented. Phase 5 scope.
-3. **Work area (§18)** — Markers implemented; work-area in/out/loop playback not yet wired.
-4. **Waveforms/thumbnails (§19)** — ✓ Implemented. Waveform peaks drawn on canvas for video/audio clips; thumbnail filmstrip on video clips. 'Show waveforms' toolbar toggle. 7 renderer tests.
-5. **Captions on timeline (§20)** — Caption tracks exist; segment word-boundary operations not yet wired.
-6. **Effects panel** — Not yet implemented.
-7. **Export engine** — Not yet implemented (Phase 6).
+Verified by `update-service.test.ts` (33 tests) and `update-core` (108 tests):
+
+| Behaviour | Evidence |
+|---|---|
+| A release with no signature is refused | Test |
+| A release signed by an unknown key is refused | Test |
+| A manifest edited after signing is refused | Test |
+| `latest.yml` disagreeing with the signed manifest is refused | Test |
+| A redirect off `github.com` is refused before download | Test |
+| A download whose hash does not match is deleted | Test asserts the file is gone |
+| Nothing downloads or installs without an explicit action | State-machine tests |
+| A build with no embedded key refuses every update | Test — fails closed |
+| The CI script's signature verifies with the app's code | `release-roundtrip.test.ts`, real keys |
+| The CI script refuses when the secret and embedded key disagree | `release-roundtrip.test.ts` |
+
+### NOT verified
+
+| Gap | Why |
+|---|---|
+| A real GitHub release, end to end | No published release exists yet; the tests use a fake network with real cryptography |
+| `electron-updater` driving an actual download | `electron-updater` is injected and faked in tests; the real library is exercised only in a packaged build |
+| Installing an update and relaunching | Needs Windows and a published release |
+| The embedded key is a placeholder | Updates are **refused** by design until a real key is embedded |
 
 ---
 
-## 8. Build Verification
+## 5. Packaging and release (SPEC 15)
 
-| Check | Status |
-|-------|--------|
-| `pnpm typecheck` (all packages) | ✓ Pass |
-| `pnpm lint` (design tokens + no-fakes audit) | ✓ Pass |
-| `cd apps/desktop && npx vite build` | ✓ Pass (482 KB JS, 5.4 KB CSS) |
-| `npx vitest run` (full suite) | ✓ Pass (277 tests, 14 files) |
+| Check | Result |
+|---|---|
+| `electron-builder.yml` parses, 12 top-level keys, no duplicates | Checked |
+| `assets/icon.ico` has 16/24/32/48/64/128/256 px frames | Verified by parsing the ICO header |
+| Main process builds to `dist/main/index.cjs` | Yes; 561 KB across 12 files, loads under stubbed Electron |
+| Renderer uses relative URLs (`file://` safe) | `index.html` references `./assets/...` |
+| `assert-package.mjs` catches a package with no installer | Yes — exits 1 on this checkout, naming the missing artefacts |
+| `verify-binaries.mjs` catches unpinned hashes | Yes — exits 1, naming all three binaries and the missing `checksums.json` |
+| `extract-notes.mjs` produces notes from the CHANGELOG | Yes; refuses a version that has no section |
+| `make-manifest.mjs` signs and self-verifies | Yes, with real keys over real files |
+| `gen-update-key.mjs` generates a usable pair | Yes |
+
+### NOT verified
+
+| Gap | Why |
+|---|---|
+| **A real Windows installer was never built here.** | This environment is Linux. electron-builder's NSIS target needs Windows (or Wine). The configuration, the build pipeline and the assertions are all in place and tested on Linux up to the point where Windows is required. |
+| **`resources/bin` holds Linux symlinks and no pinned hashes.** | `verify-binaries.mjs` refuses to package them, correctly. Real Windows binaries must be fetched and their digests reviewed. |
+| Install → launch → export → uninstall on a clean VM | Needs Windows; `smoke-install.mjs` implements the steps but skips off Windows |
+| Code signing | No certificate; everything says "unsigned" |
+
+---
+
+## 6. User interface
+
+Renderer tests run in jsdom with Testing Library (137 tests). What that covers
+and what it does not:
+
+| Covered | Not covered |
+|---|---|
+| The update dialog shows the unsigned notice | Pixel-level layout |
+| "Install and restart" is absent before verification | Real Electron window behaviour |
+| The export dialog assembles the right plan | Drag interactions in the editor |
+| The queue panel distinguishes active from queued jobs | Screen readers (no automated a11y suite) |
+| Progress reflects reported values, not animation | — |
+
+No Playwright browser binaries are available in this environment, so there is no
+end-to-end UI test here. `pnpm test:e2e` is wired up for an environment that
+has them.
+
+---
+
+## 7. How to reproduce
+
+```bash
+corepack enable && pnpm install
+pnpm typecheck
+pnpm lint
+pnpm test:unit
+pnpm --filter @clipwright/desktop build
+node scripts/release/assert-package.mjs    # expected to fail without Windows packaging
+node scripts/release/verify-binaries.mjs   # expected to fail until binaries are pinned
+```
+
+The last two failing is the current, correct state: they fail for real reasons
+that are listed above, not because they are stubs.

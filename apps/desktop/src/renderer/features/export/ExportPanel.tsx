@@ -212,6 +212,29 @@ export function ExportPanel({
         onChange={(v) => onChange({ normaliseLoudness: v })}
       />
 
+      {/*
+        Honesty rule: the export path decodes and composites video and mixes
+        audio, but does not yet render text, effects, transitions or keyframes.
+        A user who adds a title and exports deserves to know it will not appear
+        before they wait ten minutes for the file, not after.
+      */}
+      <p
+        data-testid="export-limits-note"
+        style={{
+          margin: 0,
+          padding: 'var(--space-2)',
+          borderRadius: 'var(--radius-sm)',
+          background: 'var(--surface-sunken)',
+          color: 'var(--text-secondary)',
+          fontSize: 'var(--fs-xs)',
+          lineHeight: 'var(--lh-sm)',
+        }}
+      >
+        Video and audio are exported from your timeline. Text, effects,
+        transitions and keyframed moves are not rendered yet — see Export limits
+        in the docs.
+      </p>
+
       {/* Buttons */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
         <button
