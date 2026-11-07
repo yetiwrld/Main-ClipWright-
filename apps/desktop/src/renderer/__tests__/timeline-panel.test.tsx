@@ -824,6 +824,17 @@ describe('timeline panel', () => {
     expect(timeline.mergeCaptionSegments).toHaveBeenCalledWith('item-a', 'item-b');
   });
 
+
+  it('Ctrl+/ toggles shortcuts panel', () => {
+    const state = fixture();
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    expect(container.querySelector('[data-testid="shortcuts-panel"]')).toBeNull();
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true });
+    expect(container.querySelector('[data-testid="shortcuts-panel"]')).toBeTruthy();
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true });
+    expect(container.querySelector('[data-testid="shortcuts-panel"]')).toBeNull();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

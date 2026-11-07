@@ -81,6 +81,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [showMarkers, setShowMarkers] = useState(true);
   const [loopPlayback, setLoopPlayback] = useState(false);
   const [followPlayhead, setFollowPlayhead] = useState(true);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [marquee, setMarquee] = useState<{
     x1: number;
     y1: number;
@@ -639,6 +640,11 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           );
           return;
         }
+      }
+      if (meta && event.key === '/') {
+        event.preventDefault();
+        setShowShortcuts((value) => !value);
+        return;
       }
       if (meta && event.key.toLowerCase() === 'j') {
         event.preventDefault();
@@ -1288,6 +1294,68 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           )}
         </div>
       </div>
+
+      {showShortcuts && (
+        <div
+          data-testid="shortcuts-panel"
+          style={{
+            position: 'absolute',
+            top: 40,
+            right: 16,
+            width: 280,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            background: 'var(--surface-card)',
+            border: '1px solid var(--line-default)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-lg)',
+            padding: 'var(--space-3)',
+            zIndex: 100,
+          }}
+        >
+          <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--text-primary)' }}>Keyboard shortcuts</div>
+          {[
+            ['Space', 'Play / Pause'],
+            ['S', 'Split at playhead'],
+            ['Q / W', 'Trim start / end to playhead'],
+            ['Shift+Q / W', 'Ripple trim to playhead'],
+            ['← / →', 'Move ±1 frame'],
+            ['Shift+← / →', 'Move ±1 second'],
+            ['↑ / ↓', 'Prev / next edit point'],
+            ['Ctrl+← / →', 'Prev / next marker'],
+            ['Home / End', 'Start / end'],
+            ['M', 'Add marker'],
+            ['I / O', 'Set work area in / out'],
+            ['Alt+X', 'Clear work area'],
+            ['V / C', 'Select / Razor tool'],
+            ['N', 'Toggle snapping'],
+            ['K', 'Show keyframes'],
+            ['Ctrl+= / Ctrl+-', 'Zoom in / out'],
+            ['Ctrl+0', 'Fit project'],
+            ['Ctrl+A', 'Select all'],
+            ['Esc', 'Deselect / cancel drag'],
+            ['Alt+← / →', 'Nudge ±1 frame'],
+            ['Alt+↑ / ↓', 'Move to track above / below'],
+            ['Ctrl+C / X / V', 'Copy / Cut / Paste'],
+            ['Ctrl+D', 'Duplicate'],
+            ['Ctrl+G', 'Group'],
+            ['Ctrl+Shift+G', 'Ungroup'],
+            ['Ctrl+Z', 'Undo'],
+            ['Ctrl+Shift+Z', 'Redo'],
+            ['Del', 'Delete'],
+            ['Shift+Del', 'Ripple delete'],
+            ['Ctrl+J', 'Merge captions'],
+          ].map(([key, action]) => (
+            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: 'var(--fs-xs)' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{action}</span>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{key}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+            Press Ctrl+/ to close
+          </div>
+        </div>
+      )}
 
       {menu && (
         <ContextMenu
