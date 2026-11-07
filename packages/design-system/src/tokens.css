@@ -109,9 +109,11 @@
   --surface-hover: #28282B;
   --surface-pressed: #303034;
   --surface-overlay: rgba(0, 0, 0, 0.6);
+  --surface-raised: #28282B;
 
   /* 3.3 Lines */
   --line-faint: rgba(255, 255, 255, 0.06);
+  --line-subtle: rgba(255, 255, 255, 0.08);
   --line-default: #2E2E32;
   --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
@@ -129,6 +131,8 @@
   --warning-tint: rgba(245, 197, 66, 0.14);
   --error: #F0524F;
   --error-tint: rgba(240, 82, 79, 0.14);
+  --danger: #F0524F;
+  --danger-tint: rgba(240, 82, 79, 0.14);
   --info: #4DA3FF;
   --info-tint: rgba(77, 163, 255, 0.14);
 
@@ -147,6 +151,7 @@
   /* 4. Typography */
   --font-sans: "Manrope", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --font-ui: var(--font-sans);
 
   --fs-xs: 0.75rem;
   --lh-xs: 1rem;
@@ -180,10 +185,12 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-pill: 999px;
+  --radius-full: 999px;
 
   /* 5.4 Depth */
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   --glow-playhead: 0 0 8px rgba(255, 122, 0, 0.35);
   --glow-brand-hover: 0 0 0 4px var(--brand-tint);
 
@@ -203,7 +210,9 @@
   --surface-hover: #EAEAEF;
   --surface-pressed: #E0E0E6;
   --surface-overlay: rgba(0, 0, 0, 0.35);
+  --surface-raised: #EAEAEF;
   --line-faint: rgba(0, 0, 0, 0.06);
+  --line-subtle: rgba(0, 0, 0, 0.08);
   --line-default: #D6D6DC;
   --text-primary: #141416;
   --text-secondary: #484852;

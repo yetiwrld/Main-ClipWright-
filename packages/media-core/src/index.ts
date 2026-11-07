@@ -1,1 +1,3 @@
-export const MEDIA_CORE_VERSION = '1.0.0';
+export * from './media-core.js';
+export type { JobType, JobStatus, PriorityLevel, JobRecord, JobProgress } from './job-queue.js';
+export { JobQueue } from './job-queue.js';

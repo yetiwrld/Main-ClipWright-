@@ -9,7 +9,7 @@
   "main": "./dist/main/index.cjs",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vite build && node scripts/build-electron.mjs",
+    "build": "vite build",
     "typecheck": "tsc --noEmit",
     "dist:win": "pnpm build && electron-builder --win nsis portable --x64 --publish never"
   },

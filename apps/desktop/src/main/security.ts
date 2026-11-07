@@ -15,6 +15,23 @@ export const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+/**
+ * Development-only policy: Vite serves an inline React Refresh preamble and uses
+ * a websocket for HMR, and Electron loads the renderer from the dev server
+ * origin. Production always uses CONTENT_SECURITY_POLICY above.
+ */
+export const DEV_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: file:",
+  "media-src 'self' data: blob: file:",
+  "font-src 'self' data:",
+  "connect-src 'self' ws: wss: http://localhost:* http://127.0.0.1:*",
+  "object-src 'none'",
+  "base-uri 'self'",
+].join('; ');
+
 export interface SecureWindowConfig {
   minWidth: number;
   minHeight: number;
