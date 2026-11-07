@@ -1,0 +1,17 @@
+{
+  "name": "@clipwright/compositor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clipwright/caption-styles": "workspace:*",
+    "@clipwright/project-schema": "workspace:*",
+    "@clipwright/timeline-engine": "workspace:*"
+  }
+}

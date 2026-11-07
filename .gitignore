@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build & packaging outputs
+dist/
+build/
+out/
+release/
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.dmg
+*.blockmap
+resources/bin/*.exe
+resources/bin/ffmpeg
+resources/bin/ffprobe
+resources/bin/yt-dlp
+resources/bin/whisper-cli
+
+# Caches & logs
+.cache/
+.vite/
+.turbo/
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Local runtime workspaces & secrets
+workspace-dev/
+workspace-test/
+test-results/
+playwright-report/
+secrets.bin
+app-state.json
+*.part
+*.partial.*
+*.FAILED-VALIDATION.*
+
+# OS
+.DS_Store
+Thumbs.db

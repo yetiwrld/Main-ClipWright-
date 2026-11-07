@@ -1,0 +1,35 @@
+{
+  "name": "@clipwright/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clipwright Studio Desktop Application",
+  "author": "Clipwright Studio",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/main/index.cjs",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build && node scripts/build-electron.mjs",
+    "typecheck": "tsc --noEmit",
+    "dist:win": "pnpm build && electron-builder --win nsis portable --x64 --publish never"
+  },
+  "dependencies": {
+    "@clipwright/ai-core": "workspace:*",
+    "@clipwright/audio-core": "workspace:*",
+    "@clipwright/caption-styles": "workspace:*",
+    "@clipwright/compositor": "workspace:*",
+    "@clipwright/design-system": "workspace:*",
+    "@clipwright/export-core": "workspace:*",
+    "@clipwright/media-core": "workspace:*",
+    "@clipwright/project-schema": "workspace:*",
+    "@clipwright/timeline-engine": "workspace:*",
+    "better-sqlite3": "^11.8.0",
+    "electron-updater": "^6.3.9",
+    "immer": "^10.1.1",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.2",
+    "zustand": "^5.0.3"
+  }
+}

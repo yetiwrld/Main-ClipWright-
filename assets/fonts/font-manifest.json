@@ -1,0 +1,146 @@
+[
+  {
+    "family": "Manrope",
+    "slug": "manrope",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 400,
+        "file": "manrope-400.woff2"
+      },
+      {
+        "weight": 500,
+        "file": "manrope-500.woff2"
+      },
+      {
+        "weight": 600,
+        "file": "manrope-600.woff2"
+      },
+      {
+        "weight": 700,
+        "file": "manrope-700.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Inter",
+    "slug": "inter",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 400,
+        "file": "inter-400.woff2"
+      },
+      {
+        "weight": 500,
+        "file": "inter-500.woff2"
+      },
+      {
+        "weight": 600,
+        "file": "inter-600.woff2"
+      },
+      {
+        "weight": 700,
+        "file": "inter-700.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Montserrat",
+    "slug": "montserrat",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 600,
+        "file": "montserrat-600.woff2"
+      },
+      {
+        "weight": 700,
+        "file": "montserrat-700.woff2"
+      },
+      {
+        "weight": 800,
+        "file": "montserrat-800.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Poppins",
+    "slug": "poppins",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 500,
+        "file": "poppins-500.woff2"
+      },
+      {
+        "weight": 600,
+        "file": "poppins-600.woff2"
+      },
+      {
+        "weight": 700,
+        "file": "poppins-700.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Anton",
+    "slug": "anton",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 400,
+        "file": "anton-400.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Playfair Display",
+    "slug": "playfair-display",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 600,
+        "file": "playfair-display-600.woff2"
+      },
+      {
+        "weight": 700,
+        "file": "playfair-display-700.woff2"
+      }
+    ]
+  },
+  {
+    "family": "Bangers",
+    "slug": "bangers",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 400,
+        "file": "bangers-400.woff2"
+      }
+    ]
+  },
+  {
+    "family": "JetBrains Mono",
+    "slug": "jetbrains-mono",
+    "license": "OFL-1.1",
+    "source": "bundled",
+    "weights": [
+      {
+        "weight": 400,
+        "file": "jetbrains-mono-400.woff2"
+      },
+      {
+        "weight": 600,
+        "file": "jetbrains-mono-600.woff2"
+      }
+    ]
+  }
+]
