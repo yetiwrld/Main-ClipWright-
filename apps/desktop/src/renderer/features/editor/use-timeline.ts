@@ -65,7 +65,7 @@ export interface TimelineApi {
   trimToPlayhead: (edge: 'start' | 'end', atUs: number, ripple: boolean) => boolean;
   /** Move the selection to the adjacent track (SPEC 09 §12 Alt+Up/Down). */
   moveSelectionToTrack: (direction: 'up' | 'down') => boolean;
-  remove: (ripple?: boolean) => boolean;
+  remove: (ripple: boolean, rippleAll?: boolean) => boolean;
   duplicate: () => boolean;
   addMarkerAt: (atUs: number) => boolean;
   toggleMute: (trackId: string) => boolean;
@@ -338,7 +338,10 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         ),
       moveSelectionToTrack: (direction) =>
         run('Move track', (s) => moveItemsToTrack(s, { itemIds: selection, direction, fps })),
-      remove: (ripple) => run(ripple ? 'Ripple delete' : 'Delete', (s) => deleteItems(s, { itemIds: selection, fps, ripple })),
+      remove: (ripple, rippleAll) =>
+        run(ripple ? 'Ripple delete' : 'Delete', (s) =>
+          deleteItems(s, { itemIds: selection, fps, ripple, rippleAll }),
+        ),
       duplicate: () => run('Duplicate', (s) => duplicateItems(s, { itemIds: selection, fps })),
       addMarkerAt: (atUs) => run('Add marker', (s) => addMarker(s, { timeUs: atUs, fps })),
       toggleMute: (trackId) =>

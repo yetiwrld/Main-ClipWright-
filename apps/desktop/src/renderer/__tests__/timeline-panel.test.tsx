@@ -120,10 +120,10 @@ describe('timeline panel', () => {
     expect(timeline.split).toHaveBeenCalledWith(1_000_000);
 
     fireEvent.keyDown(window, { key: 'Delete' });
-    expect(timeline.remove).toHaveBeenCalledWith(false);
+    expect(timeline.remove).toHaveBeenCalledWith(false, false);
 
     fireEvent.keyDown(window, { key: 'Delete', shiftKey: true });
-    expect(timeline.remove).toHaveBeenCalledWith(true);
+    expect(timeline.remove).toHaveBeenCalledWith(true, false);
 
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     expect(timeline.undo).toHaveBeenCalled();
@@ -153,6 +153,22 @@ describe('timeline panel', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     // The clip is 2 s long, so 10 minutes clamps to the project duration.
     expect(playheadStore.get()).toBe(2_000_000);
+  });
+
+  it('routes Delete with ripple and the ripple-all-tracks toggle', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state, { selection: ['item-a'] });
+    render(<TimelinePanel timeline={timeline} />);
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(timeline.remove).toHaveBeenCalledWith(false, false);
+
+    fireEvent.keyDown(window, { key: 'Delete', shiftKey: true });
+    expect(timeline.remove).toHaveBeenLastCalledWith(true, false);
+
+    fireEvent.click(screen.getByRole('button', { name: /Ripple all tracks: off/ }));
+    fireEvent.keyDown(window, { key: 'Delete', shiftKey: true });
+    expect(timeline.remove).toHaveBeenLastCalledWith(true, true);
   });
 
   it('routes the clipboard and grouping shortcuts', () => {

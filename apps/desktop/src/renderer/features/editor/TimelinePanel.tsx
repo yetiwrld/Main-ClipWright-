@@ -13,6 +13,7 @@ import {
   MousePointer2,
   Plus,
   Scissors,
+  Shuffle,
   Trash2,
   Volume2,
   VolumeX,
@@ -56,6 +57,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [pxPerSecond, setPxPerSecond] = useState(state?.viewState?.pxPerSecond ?? 80);
   const [scrollX, setScrollX] = useState(state?.viewState?.scrollX ?? 0);
   const [snapping, setSnapping] = useState(true);
+  const [rippleAllTracks, setRippleAllTracks] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>('normal');
   const [tool, setTool] = useState<'select' | 'razor'>('select');
   const [marquee, setMarquee] = useState<{
@@ -391,7 +393,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
-        timeline.remove(event.shiftKey);
+        timeline.remove(event.shiftKey, rippleAllTracks);
         return;
       }
       if (event.key === 'q' || event.key === 'Q') {
@@ -476,7 +478,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editMode, fps, selection, state, timeline]);
+  }, [editMode, fps, rippleAllTracks, selection, state, timeline]);
 
   if (!state) {
     return (
@@ -588,6 +590,14 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           size={28}
           icon={<Magnet size={14} />}
           onClick={() => setSnapping((value) => !value)}
+        />
+        <IconButton
+          label={rippleAllTracks ? 'Ripple all tracks: on' : 'Ripple all tracks: off'}
+          shortcut="Shift+Del"
+          active={rippleAllTracks}
+          size={28}
+          icon={<Shuffle size={14} />}
+          onClick={() => setRippleAllTracks((value) => !value)}
         />
         <div style={{ width: 1, height: 18, background: 'var(--line-subtle)' }} />
         <SegmentedControl<EditMode>
