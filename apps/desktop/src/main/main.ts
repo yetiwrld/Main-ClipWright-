@@ -581,171 +581,32 @@ function registerIPC(): void {
   const modelsDir = () => resolve(storageService?.getWorkspaceDir() ?? app.getPath('documents'), 'Models', 'whisper');
 
   ipcMain.handle('models:list', async () => {
-    const ai = await import('@clipwright/ai-core');
-    const installed = ai.listInstalledModels(modelsDir());
-    return ai.WHISPER_MODELS.map((m) => {
-      const found = installed.find((i) => i.name === m.name);
-      return { name: m.name, label: m.label, speed: m.speed, expectedBytes: m.bytes, installed: !!found, bytes: found?.bytes ?? 0 };
-    });
+    // One source of truth: the model manager's cards, not a second catalogue copy.
+    const snapshot = requireModels().snapshot();
+    return snapshot.whisper.map((card) => ({
+      name: card.id,
+      label: card.label,
+      speed: card.accuracy ?? 'unrated',
+      expectedBytes: card.expectedBytes,
+      installed: card.status === 'installed',
+      bytes: card.installedBytes,
+      compatibility: card.compatibility,
+      verified: card.verified,
+      status: card.status,
+    }));
   });
 
-  ipcMain.handle('models:install', async (event, modelName: string) => {
-    const ai = await import('@clipwright/ai-core');
-    const controller = new AbortController();
-    const sender = event.sender;
-    sender.once('destroyed', () => controller.abort());
-    const path = await ai.downloadWhisperModel(modelName, modelsDir(), controller.signal, (percent) => {
-      if (!sender.isDestroyed()) sender.send('models:progress', { modelName, percent });
-    });
-    return { path };
+  ipcMain.handle('models:install', async (_event, modelName: string) => {
+    // Queues through the manager so the download resumes, verifies and is
+    // reported with real progress rather than a fire-and-forget fetch.
+    const result = requireModels().downloadWhisper(modelName);
+    return { queued: result.queued, needsBytes: result.needsBytes };
   });
 
   ipcMain.handle('models:delete', async (_event, modelName: string) => {
-    const { unlink } = await import('node:fs/promises');
-    await unlink(resolve(modelsDir(), `ggml-${modelName}.bin`)).catch(() => undefined);
+    await requireModels().deleteWhisper(modelName);
     return true;
   });
-
-  // ---- AI providers, models, consent and moments (SPEC 06 & 07) */
-  const push = (channel: string, payload: unknown) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
-  };
-
-  // Progress is a push, not a poll: the window gets every download and batch tick.
-  models?.setProgressSink((event) => push('ai:modelProgress', event));
-  moments?.setProgressSink((progress) => push('ai:momentsProgress', progress));
-
-  ipcMain.handle('ai:providers:list', async () => requireProviders().list());
-  ipcMain.handle('ai:providers:save', async (_event, input) => requireProviders().save(input));
-  ipcMain.handle('ai:providers:remove', async (_event, providerId: string) => {
-    requireProviders().remove(providerId);
-    return true;
-  });
-  ipcMain.handle('ai:providers:duplicate', async (_event, providerId: string) => requireProviders().duplicate(providerId));
-  ipcMain.handle('ai:providers:test', async (_event, providerId: string) => requireProviders().test(providerId));
-  ipcMain.handle('ai:providers:models', async (_event, providerId: string) => requireProviders().listModels(providerId));
-  ipcMain.handle('ai:providers:setDefault', async (_event, task, providerId: string | null) =>
-    requireProviders().setDefault(task, providerId)
-  );
-  ipcMain.handle('ai:route', async (_event, task) => {
-    const modelSnapshot = requireModels().snapshot();
-    const installed = modelSnapshot.whisper.filter((card) => card.status === 'installed');
-    let ollamaAvailable = false;
-    let ollamaModel: string | undefined;
-    try {
-      const overview = await requireModels().ollama();
-      ollamaAvailable = overview.status.state === 'running' && overview.models.length > 0;
-      ollamaModel = overview.models[0]?.name;
-    } catch {
-      ollamaAvailable = false;
-    }
-    const state = await requireConnectivity().check();
-    return requireProviders().resolveTask(
-      task,
-      {
-        whisperModelInstalled: installed.length > 0,
-        whisperModelName: installed[0]?.id,
-        ollamaAvailable,
-        ollamaModel,
-      },
-      state
-    );
-  });
-  ipcMain.handle('ai:connectivity', async (_event, force?: boolean) => requireConnectivity().check(force));
-
-  // ---- Consent and privacy */
-  ipcMain.handle('ai:consent:prompt', async (_event, providerId: string, category) => {
-    const record = requireStorage().listProviders().find((provider) => provider.id === providerId);
-    if (!record) throw new Error('That provider no longer exists.');
-    let host = record.baseUrl;
-    try {
-      host = new URL(record.baseUrl).host;
-    } catch {
-      /* keep the raw address */
-    }
-    return requireConsents().buildPrompt({
-      providerId: record.id,
-      providerName: record.name,
-      locality: record.locality,
-      host,
-      category,
-    });
-  });
-  ipcMain.handle('ai:consent:grant', async (_event, decision) => requireConsents().grant(decision));
-  ipcMain.handle('ai:consent:revoke', async (_event, providerId: string, category) => {
-    requireConsents().revoke(providerId, category);
-    return true;
-  });
-  ipcMain.handle('ai:privacy:overview', async () => requireConsents().overview());
-  ipcMain.handle('ai:privacy:clearLog', async () => requireConsents().clearLog());
-  ipcMain.handle('ai:privacy:exportCsv', async () => {
-    const csv = requireConsents().toCsv();
-    const target = await dialog.showSaveDialog({
-      title: 'Save data-sent log',
-      defaultPath: 'clipwright-data-sent.csv',
-      filters: [{ name: 'CSV', extensions: ['csv'] }],
-    });
-    if (target.canceled || !target.filePath) return null;
-    writeFileSync(target.filePath, csv, 'utf8');
-    return target.filePath;
-  });
-
-  // ---- Local models */
-  ipcMain.handle('ai:models:snapshot', async () => requireModels().snapshot());
-  ipcMain.handle('ai:models:download', async (_event, modelId: string) => requireModels().downloadWhisper(modelId));
-  ipcMain.handle('ai:models:cancel', async (_event, modelId: string) => requireModels().cancelDownload(modelId));
-  ipcMain.handle('ai:models:delete', async (_event, modelId: string) => {
-    await requireModels().deleteWhisper(modelId);
-    return true;
-  });
-  ipcMain.handle('ai:models:verify', async (_event, modelId: string) => requireModels().verifyWhisper(modelId));
-  ipcMain.handle('ai:models:setDefault', async (_event, modelId: string) =>
-    requireStorage().updateSettings({ defaultWhisperModel: modelId })
-  );
-  ipcMain.handle('ai:models:openFolder', async () => {
-    const folder = requireModels().snapshot().folders.whisper;
-    const error = await shell.openPath(folder);
-    return error || folder;
-  });
-  ipcMain.handle('ai:models:recordSpeed', async (_event, modelId: string, throughputFactor: number) => {
-    requireModels().recordSpeed(modelId, throughputFactor);
-    return true;
-  });
-
-  // ---- Ollama */
-  ipcMain.handle('ai:ollama:overview', async () => requireModels().ollama());
-  ipcMain.handle('ai:ollama:pull', async (event, modelName: string) => {
-    const sender = event.sender;
-    await requireModels().pullOllama(modelName, (progress) => {
-      if (!sender.isDestroyed()) sender.send('ai:ollamaProgress', progress);
-    });
-    return true;
-  });
-  ipcMain.handle('ai:ollama:cancel', async (_event, modelName: string) => requireModels().cancelOllamaPull(modelName));
-  ipcMain.handle('ai:ollama:delete', async (_event, modelName: string) => {
-    await requireModels().deleteOllama(modelName);
-    return true;
-  });
-  ipcMain.handle('ai:ollama:test', async (_event, modelName: string) => requireModels().testOllama(modelName));
-  ipcMain.handle('ai:ollama:setBaseUrl', async (_event, baseUrl: string) =>
-    requireStorage().updateSettings({ ollamaBaseUrl: baseUrl.trim() })
-  );
-
-  // ---- Moments */
-  ipcMain.handle('moments:list', async (_event, projectId: string) => requireMoments().list(projectId));
-  ipcMain.handle('moments:analyze', async (_event, request) => requireMoments().analyze(request));
-  ipcMain.handle('moments:update', async (_event, projectId: string, patch) =>
-    requireMoments().updateMoment(projectId, patch)
-  );
-  ipcMain.handle('moments:addManual', async (_event, projectId: string, range) =>
-    requireMoments().addManualMoment(projectId, range)
-  );
-  ipcMain.handle('moments:rescore', async (_event, projectId: string, momentId: string) =>
-    requireMoments().rescore(projectId, momentId)
-  );
-  ipcMain.handle('moments:createClips', async (_event, projectId: string, momentIds: string[], options) =>
-    requireMoments().createClips(projectId, momentIds, options ?? {})
-  );
 
   // ---- App info */
   ipcMain.handle('app:info', async () => ({

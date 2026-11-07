@@ -525,7 +525,7 @@ export interface ClipwrightBridge {
 
   // Transcription models
   listModels(): Promise<WhisperModelEntry[]>;
-  installModel(modelName: string): Promise<{ path: string }>;
+  installModel(modelName: string): Promise<{ queued: boolean; needsBytes: number }>;
   deleteModel(modelName: string): Promise<boolean>;
   onModelProgress(callback: (p: { modelName: string; percent: number }) => void): () => void;
 

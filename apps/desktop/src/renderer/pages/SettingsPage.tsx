@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Route } from '../App.js';
+import { Button } from '@clipwright/design-system';
 import { api, describeError, isDesktop } from '../api.js';
 import type { AppSettings, AppInfo } from '../global.js';
 import { AiProvidersSection } from '../sections/AiProvidersSection.js';
@@ -87,7 +88,9 @@ export function SettingsPage({ section, onNavigate }: Props) {
         ) : (
           <div>
             {section === 'general' && <GeneralSection settings={settings} update={update} />}
-            {section === 'models' && <ModelsSection />}
+            {section === 'models' && (
+              <ModelsSection settings={settings} update={update} onOpenModels={() => onNavigate({ name: 'models' })} />
+            )}
             {section === 'performance' && <PerformanceSection settings={settings} update={update} />}
             {section === 'providers' && (
               <AiProvidersSection settings={settings} onUpdateSettings={async (patch) => update(patch)} />
@@ -225,12 +228,40 @@ function GeneralSection({ settings, update }: { settings: AppSettings; update: U
   );
 }
 
-function ModelsSection() {
+function ModelsSection({
+  settings,
+  update,
+  onOpenModels,
+}: {
+  settings: AppSettings;
+  update: UpdateFn;
+  onOpenModels: () => void;
+}) {
   return (
-    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-      Transcription models are installed from the Models page, which shows real download size and status
-      for each Whisper model.
-    </div>
+    <>
+      <SettingRow
+        label="Default speech model"
+        desc="Used for new projects. 'Automatic' picks the best model that is installed and fits this computer."
+      >
+        <select
+          value={settings.defaultWhisperModel}
+          onChange={(e) => update({ defaultWhisperModel: e.target.value })}
+          style={selectStyle}
+        >
+          <option value="auto">Automatic</option>
+          {['tiny', 'tiny.en', 'base', 'small', 'medium', 'large-v3-turbo', 'large-v3'].map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+      <SettingRow label="Download and manage models" desc="Sizes, RAM needs, verification and resumable downloads">
+        <Button variant="secondary" onClick={onOpenModels}>
+          Open the model manager
+        </Button>
+      </SettingRow>
+    </>
   );
 }
 
@@ -256,28 +287,6 @@ function PerformanceSection({ settings, update }: { settings: AppSettings; updat
         />
       </SettingRow>
     </>
-  );
-}
-
-function ProvidersSection({ settings }: { settings: AppSettings; update: UpdateFn }) {
-  const providers = settings.defaultProviders ?? {};
-  const entries = Object.entries(providers).filter(([, v]) => Boolean(v));
-
-  return (
-    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-      <p style={{ marginTop: 0 }}>
-        API keys are stored by the operating system's credential store and never written into the workspace folder.
-      </p>
-      {entries.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)' }}>No online providers are configured. Offline transcription is fully supported.</p>
-      ) : (
-        <ul style={{ paddingLeft: 20 }}>
-          {entries.map(([role, id]) => (
-            <li key={role}>{role.replace(/_/g, ' ')} → {String(id)}</li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 

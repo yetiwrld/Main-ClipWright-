@@ -25,8 +25,8 @@ export function SetupDialog({ onComplete, onNavigate }: Props) {
       .getSettings()
       .then((s) => setProcessingMode(s.processingMode))
       .catch(() => undefined);
-    return api.onModelProgress(({ modelName, percent }) => {
-      if (modelName === 'small') setModelPercent(percent);
+    return api.onModelDownloadProgress((event) => {
+      if (event.id === 'small' && event.percent !== null) setModelPercent(event.percent);
     });
   }, []);
 
@@ -52,9 +52,11 @@ export function SetupDialog({ onComplete, onNavigate }: Props) {
     try {
       await api.updateSettings({ processingMode, firstRunCompleted: true });
       if (!skipModel && downloadModel) {
+        // Queued through the model manager: it keeps running in the background
+        // and its progress stays visible in Settings → Models.
         setModelPercent(0);
         await api.installModel('small').catch((err) => {
-          setError(`The model download did not finish: ${describeError(err)}`);
+          setError(`The model download could not start: ${describeError(err)}`);
         });
       }
       onComplete();
