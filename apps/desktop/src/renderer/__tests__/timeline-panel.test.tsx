@@ -702,6 +702,23 @@ describe('timeline panel', () => {
     expect(playheadStore.get()).toBeLessThan(2_000_000);
   });
 
+
+  it('toggles show markers visibility', () => {
+    const state = fixture();
+    const marker = { id: 'mk-vis', timeUs: 2_000_000, name: 'Test', color: '#FFB000' };
+    const stateWithMarker = { ...state, markers: [marker] };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithMarker)} />);
+    // Marker should be visible initially
+    expect(container.querySelector('[data-testid="marker-mk-vis"]')).toBeTruthy();
+    // Toggle off
+    const toggle = screen.getByRole('button', { name: /^Show markers$/ });
+    fireEvent.click(toggle);
+    expect(container.querySelector('[data-testid="marker-mk-vis"]')).toBeNull();
+    // Toggle back on
+    fireEvent.click(toggle);
+    expect(container.querySelector('[data-testid="marker-mk-vis"]')).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

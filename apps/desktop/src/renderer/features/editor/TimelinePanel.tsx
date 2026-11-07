@@ -73,6 +73,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [editMode, setEditMode] = useState<EditMode>('normal');
   const [tool, setTool] = useState<'select' | 'razor'>('select');
   const [showKeyframes, setShowKeyframes] = useState(false);
+  const [showMarkers, setShowMarkers] = useState(true);
   const [marquee, setMarquee] = useState<{
     x1: number;
     y1: number;
@@ -646,6 +647,13 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           onClick={() => setShowKeyframes((value) => !value)}
         />
         <IconButton
+          label="Show markers"
+          size={28}
+          active={showMarkers}
+          icon={<Flag size={14} />}
+          onClick={() => setShowMarkers((value) => !value)}
+        />
+        <IconButton
           label="Split at playhead"
           shortcut="S"
           size={28}
@@ -1131,7 +1139,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           )}
 
           <PlayheadMarker pxPerSecond={pxPerSecond} scrollX={scrollX} />
-          {state.markers.map((marker) => (
+          {showMarkers && state.markers.map((marker) => (
             <div
               key={marker.id}
               data-testid={`marker-${marker.id}`}
