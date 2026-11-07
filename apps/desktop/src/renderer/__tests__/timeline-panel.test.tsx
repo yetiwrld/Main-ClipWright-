@@ -719,6 +719,18 @@ describe('timeline panel', () => {
     expect(container.querySelector('[data-testid="marker-mk-vis"]')).toBeTruthy();
   });
 
+
+  it('spacebar toggles play/pause', () => {
+    const state = fixture();
+    render(<TimelinePanel timeline={fakeTimeline(state)} />);
+    const playButton = screen.getByRole('button', { name: /^Play$/ });
+    expect(playButton).toBeTruthy();
+    // Spacebar should toggle play state
+    fireEvent.keyDown(window, { key: ' ' });
+    // After space, button should show Pause
+    expect(screen.getByRole('button', { name: /^Pause$/ })).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

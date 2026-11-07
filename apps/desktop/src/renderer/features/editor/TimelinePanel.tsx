@@ -5,6 +5,8 @@ import {
   ChevronDown,
   ChevronUp,
   Diamond,
+  Pause,
+  Play,
   Copy,
   Flag,
   Lock,
@@ -51,6 +53,7 @@ import {
 } from '@clipwright/timeline-engine';
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import { usePlayback } from './use-playback.js';
 
 const HEADER_WIDTH = 184;
 const MIN_PX_PER_SECOND = 0.25;
@@ -109,6 +112,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   pxPerSecondRef.current = pxPerSecond;
 
   const durationUs = state ? projectDurationUs(state) : 1_000_000;
+  const playback = usePlayback(durationUs, fps, state?.workArea);
   const pxPerUs = pxPerSecond / 1_000_000;
 
   const usToX = useCallback((us: number) => us * pxPerSecondRef.current / 1_000_000, []);
@@ -504,6 +508,11 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
         setShowKeyframes((value) => !value);
         return;
       }
+      if (event.key === ' ' && !meta && !event.altKey) {
+        event.preventDefault();
+        playback.toggle();
+        return;
+      }
       if (event.key.toLowerCase() === 'n' && !meta) {
         event.preventDefault();
         setSnapping((value) => !value);
@@ -744,6 +753,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           ]}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+          <IconButton label={playback.isPlaying ? 'Pause' : 'Play'} shortcut='Space' size={28} icon={playback.isPlaying ? <Pause size={14} /> : <Play size={14} />} onClick={playback.toggle} />
           <PlayheadReadout durationUs={durationUs} fps={fps} />
           <IconButton label="Zoom out" size={28} icon={<Minus size={14} />} onClick={() => zoomBy(1 / 1.25)} />
           <div style={{ width: 96 }}>
