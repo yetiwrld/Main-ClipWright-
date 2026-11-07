@@ -2,8 +2,8 @@
 
 **Generated:** 2026-11-07
 **Branch:** `arena/695acd97-main-clipwright`
-**Commit:** `f26fe8c`
-**Engine tests:** 53 · **Renderer tests:** 27 · **Total:** 277 across 14 files
+**Commit:** `a917cc5`
+**Engine tests:** 81 · **Renderer tests:** 44 · **Total:** 324 across 14 files
 
 ---
 
@@ -148,7 +148,77 @@ Escape closes the menu. Right-click on a clip selects it first.
 
 ---
 
-## 6. Known Limitations
+## 6. Phase 5 — Keyframes, Markers, Work Area, Effects, Captions, Playback
+
+### Keyframes (SPEC 09 §17)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Engine commands (add/remove/update/move/duplicate) | ✓ | 8 engine tests |
+| TimelineApi wiring | ✓ | 5 methods |
+| Diamond markers rendering | ✓ | Renderer test |
+| Show keyframes toggle (K key) | ✓ | Renderer test |
+
+### Markers (SPEC 09 §18)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Engine commands (update/delete) | ✓ | 4 engine tests |
+| TimelineApi wiring | ✓ | 2 methods |
+| Context menu (rename/delete) | ✓ | Renderer test |
+| Double-click rename | ✓ | Code |
+| Show markers toggle | ✓ | Renderer test |
+| Ctrl+Left/Right navigation | ✓ | Renderer test |
+
+### Work Area (SPEC 09 §18)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Engine commands (set/clear) | ✓ | 5 engine tests |
+| TimelineApi wiring | ✓ | 2 methods |
+| I/O/Alt+X keyboard shortcuts | ✓ | Renderer test |
+| Ruler band rendering | ✓ | Code |
+| Draggable handles | ✓ | 2 renderer tests |
+
+### Effects (SPEC 09 §17)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Engine commands (apply/remove/toggle/update) | ✓ | 6 engine tests |
+| TimelineApi wiring | ✓ | 4 methods |
+| Inspector effects panel | ✓ | Renderer test |
+
+### Captions (SPEC 09 §20)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Engine commands (split/merge/trim) | ✓ | 5 engine tests |
+| TimelineApi wiring | ✓ | 3 methods |
+| Caption text rendering on timeline | ✓ | Renderer test |
+
+### Playback (SPEC 09 §23)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Play/pause transport button | ✓ | Renderer test |
+| Spacebar shortcut | ✓ | Renderer test |
+| Loop within work area | ✓ | Code |
+
+### Ruler Context Menu (SPEC 09 §21)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Add marker · Set work-area · Clear · Fit project | ✓ | Renderer test |
+
+### Zoom (SPEC 09 §8)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Ctrl+0 fit · Ctrl+= zoom in · Ctrl+- zoom out | ✓ | Renderer test |
+
+---
+
+## 7. Known Limitations
 
 1. **No Playwright browser binaries** — UI checks 1–3, 6–8, 19–21, 25–27, 30 cannot be verified in this environment. TypeScript typecheck, jsdom renderer tests, and Vite build are the verification layer.
 2. **Keyframes (§17)** — Not yet implemented. Phase 5 scope.
@@ -160,7 +230,7 @@ Escape closes the menu. Right-click on a clip selects it first.
 
 ---
 
-## 7. Build Verification
+## 8. Build Verification
 
 | Check | Status |
 |-------|--------|
