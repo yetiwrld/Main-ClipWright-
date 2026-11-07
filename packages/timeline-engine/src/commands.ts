@@ -9,7 +9,7 @@ import { current, enablePatches, produceWithPatches, type Patch } from 'immer';
 enablePatches();
 import type { CompositionPayload, TimelineItem } from '@clipwright/project-schema';
 import { frameDurationUs, quantizeUs, type Fps } from './time';
-import { itemEndUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
+import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
 
 export type TimelineState = CompositionPayload;
 export type EditMode = 'normal' | 'insert' | 'overwrite';
@@ -1576,5 +1576,56 @@ export function removeTransition(
     inverse,
     affectedItemIds: [params.itemId],
     notes: ['Transition removed.'],
+  };
+}
+/**
+ * Set the work area in/out points (SPEC 09 §18). I sets inUs, O sets outUs.
+ * Both points are clamped to the project duration and in < out.
+ */
+export function setWorkArea(
+  state: TimelineState,
+  params: { edge: 'in' | 'out'; timeUs: number; fps: Fps },
+): CommandResult {
+  const projectEnd = projectDurationUs(state);
+  const quantized = quantizeUs(Math.max(0, Math.min(params.timeUs, projectEnd)), params.fps);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const existing = draft.workArea ?? { inUs: 0, outUs: projectEnd };
+    if (params.edge === 'in') {
+      draft.workArea = { inUs: quantized, outUs: Math.max(quantized + frameDurationUs(params.fps), existing.outUs) };
+    } else {
+      draft.workArea = { inUs: Math.min(quantized - frameDurationUs(params.fps), existing.inUs), outUs: quantized };
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: [`Work area ${params.edge} set.`],
+  };
+}
+
+/**
+ * Clear the work area (SPEC 09 §18). Alt+X in the editor.
+ */
+export function clearWorkArea(
+  state: TimelineState,
+): CommandResult {
+  if (!state.workArea) return { ok: true, state, patches: [], inverse: [], affectedItemIds: [], notes: ['No work area to clear.'] };
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.workArea = undefined;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: ['Work area cleared.'],
   };
 }

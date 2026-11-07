@@ -70,6 +70,8 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     addTransition: vi.fn(() => true),
     updateTransition: vi.fn(() => true),
     removeTransition: vi.fn(() => true),
+    setWorkArea: vi.fn(() => true),
+    clearWorkArea: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -464,6 +466,27 @@ describe('timeline panel', () => {
 
     fireEvent(canvas, dropEvent);
     expect(timeline.placeMedia).not.toHaveBeenCalled();
+  });
+
+
+  it('routes I and O keys to setWorkArea', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    playheadStore.set(1_000_000);
+    fireEvent.keyDown(window, { key: 'i' });
+    expect(timeline.setWorkArea).toHaveBeenCalledWith('in', 1_000_000);
+    playheadStore.set(3_000_000);
+    fireEvent.keyDown(window, { key: 'o' });
+    expect(timeline.setWorkArea).toHaveBeenCalledWith('out', 3_000_000);
+  });
+
+  it('routes Alt+X to clearWorkArea', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    render(<TimelinePanel timeline={timeline} />);
+    fireEvent.keyDown(window, { key: 'x', altKey: true });
+    expect(timeline.clearWorkArea).toHaveBeenCalled();
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

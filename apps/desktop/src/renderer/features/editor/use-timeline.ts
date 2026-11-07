@@ -24,6 +24,8 @@ import {
   addTransition,
   updateTransition,
   removeTransition,
+  setWorkArea,
+  clearWorkArea,
   toggleItemDisabled,
   addTrack,
   toggleTrackLock,
@@ -89,6 +91,8 @@ export interface TimelineApi {
   addTransition: (trackId: string, leftItemId: string, rightItemId: string, type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom', durationUs?: number, alignment?: 'center' | 'start' | 'end') => boolean;
   updateTransition: (itemId: string, patch: { durationUs?: number; alignment?: 'center' | 'start' | 'end'; type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom' }) => boolean;
   removeTransition: (itemId: string) => boolean;
+  setWorkArea: (edge: 'in' | 'out', timeUs: number) => boolean;
+  clearWorkArea: () => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
@@ -388,6 +392,10 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Update transition', (s) => updateTransition(s, { itemId, patch, fps })),
       removeTransition: (itemId: string) =>
         run('Remove transition', (s) => removeTransition(s, { itemId })),
+      setWorkArea: (edge, timeUs) =>
+        run('Set work area', (s) => setWorkArea(s, { edge, timeUs, fps })),
+      clearWorkArea: () =>
+        run('Clear work area', (s) => clearWorkArea(s)),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),

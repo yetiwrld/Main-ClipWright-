@@ -23,6 +23,8 @@ import {
   addTransition,
   updateTransition,
   removeTransition,
+  setWorkArea,
+  clearWorkArea,
   splitItems,
   trimItem,
   trimItems,
@@ -856,6 +858,99 @@ describe('timeline commands', () => {
           expect(removed.ok).toBe(true);
           if (removed.ok) {
             expect(checkInvariantsMB(removed.state)).toEqual([]);
+          }
+        }
+      }
+    });
+  });
+
+
+  describe('work area (SPEC 09 §18)', () => {
+    function workAreaFixture(): TimelineState {
+      const base = createDefaultTimeline({ id: 'wa-1', name: 'Work Area' });
+      const track = base.tracks[0]!;
+      const item = createMediaItem({
+        id: 'item-1',
+        trackId: track.id,
+        label: 'Clip',
+        mediaId: 'media-1',
+        startUs: 0,
+        durationUs: 4_000_000,
+        sourceDurationUs: 10_000_000,
+      });
+      return {
+        ...base,
+        tracks: base.tracks.map((candidate) =>
+          candidate.id === track.id ? { ...candidate, itemIds: [item.id] } : candidate,
+        ),
+        items: { [item.id]: item },
+      };
+    }
+
+    it('sets work area in and out points', () => {
+      const state = workAreaFixture();
+      const inResult = setWorkArea(state, { edge: 'in', timeUs: 1_000_000, fps: 30 });
+      expect(inResult.ok).toBe(true);
+      if (inResult.ok) {
+        expect(inResult.state.workArea!.inUs).toBe(1_000_000);
+      }
+      const outResult = setWorkArea(inResult.ok ? inResult.state : state, { edge: 'out', timeUs: 3_000_000, fps: 30 });
+      expect(outResult.ok).toBe(true);
+      if (outResult.ok) {
+        expect(outResult.state.workArea!.outUs).toBe(3_000_000);
+        expect(outResult.state.workArea!.inUs).toBe(1_000_000);
+      }
+    });
+
+    it('clamps work area to project duration', () => {
+      const state = workAreaFixture();
+      const result = setWorkArea(state, { edge: 'out', timeUs: 100_000_000, fps: 30 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.state.workArea!.outUs).toBe(4_000_000);
+      }
+    });
+
+    it('clears the work area', () => {
+      const state = workAreaFixture();
+      const inResult = setWorkArea(state, { edge: 'in', timeUs: 1_000_000, fps: 30 });
+      expect(inResult.ok).toBe(true);
+      if (inResult.ok) {
+        const cleared = clearWorkArea(inResult.state);
+        expect(cleared.ok).toBe(true);
+        if (cleared.ok) {
+          expect(cleared.state.workArea).toBeUndefined();
+        }
+      }
+    });
+
+    it('setting in after out clamps out', () => {
+      const state = workAreaFixture();
+      const outResult = setWorkArea(state, { edge: 'out', timeUs: 2_000_000, fps: 30 });
+      expect(outResult.ok).toBe(true);
+      if (outResult.ok) {
+        const inResult = setWorkArea(outResult.state, { edge: 'in', timeUs: 3_000_000, fps: 30 });
+        expect(inResult.ok).toBe(true);
+        if (inResult.ok) {
+          // in > out, so out should be pushed to at least in + 1 frame
+          expect(inResult.state.workArea!.outUs).toBeGreaterThanOrEqual(inResult.state.workArea!.inUs);
+        }
+      }
+    });
+
+    it('keeps invariants intact after work area operations', () => {
+      const state = workAreaFixture();
+      const inResult = setWorkArea(state, { edge: 'in', timeUs: 1_000_000, fps: 30 });
+      expect(inResult.ok).toBe(true);
+      if (inResult.ok) {
+        const outResult = setWorkArea(inResult.state, { edge: 'out', timeUs: 3_000_000, fps: 30 });
+        expect(outResult.ok).toBe(true);
+        if (outResult.ok) {
+          expect(checkInvariantsMB(outResult.state)).toEqual([]);
+          const cleared = clearWorkArea(outResult.state);
+          expect(cleared.ok).toBe(true);
+          if (cleared.ok) {
+            expect(checkInvariantsMB(cleared.state)).toEqual([]);
           }
         }
       }

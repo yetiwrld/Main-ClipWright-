@@ -59,6 +59,8 @@ export {
   addTransition,
   updateTransition,
   removeTransition,
+  setWorkArea,
+  clearWorkArea,
   type CommandOk,
   type CommandError,
   type CommandResult,

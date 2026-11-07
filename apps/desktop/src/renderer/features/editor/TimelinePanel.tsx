@@ -243,6 +243,14 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       }
     }
 
+    // Work area band (SPEC 09 §18).
+    if (state.workArea) {
+      const inX = usToX(state.workArea.inUs) - scrollX;
+      const outX = usToX(state.workArea.outUs) - scrollX;
+      context.fillStyle = 'rgba(0, 122, 255, 0.12)';
+      context.fillRect(Math.max(0, inX), 0, Math.max(0, outX - inX), 28);
+    }
+
     // Markers as small flags on the ruler.
     context.fillStyle = brand;
     for (const marker of state.markers) {
@@ -471,6 +479,21 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
       if (event.key.toLowerCase() === 'm' && !meta) {
         event.preventDefault();
         timeline.addMarkerAt(current);
+        return;
+      }
+      if (event.key.toLowerCase() === 'i' && !meta) {
+        event.preventDefault();
+        timeline.setWorkArea('in', current);
+        return;
+      }
+      if (event.key.toLowerCase() === 'o' && !meta) {
+        event.preventDefault();
+        timeline.setWorkArea('out', current);
+        return;
+      }
+      if (event.altKey && event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        timeline.clearWorkArea();
         return;
       }
       if (event.key.toLowerCase() === 'n' && !meta) {
