@@ -8,6 +8,7 @@ import {
   type TimelineState,
 } from '@clipwright/timeline-engine';
 import { TimelinePanel } from '../features/editor/TimelinePanel.js';
+import { ItemInspector } from '../features/editor/Inspector.js';
 import { EditorPage } from '../features/editor/EditorPage.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
 import type { TimelineApi } from '../features/editor/use-timeline.js';
@@ -590,6 +591,23 @@ describe('timeline panel', () => {
     fireEvent.keyDown(window, { key: '=', ctrlKey: true });
     // Ctrl+- should zoom out (no error)
     fireEvent.keyDown(window, { key: '-', ctrlKey: true });
+  });
+
+
+  it('inspector shows effects section when item has effects', () => {
+    const state = fixture();
+    const itemWithEffects = {
+      ...state.items['item-a'],
+      effects: [{ id: 'eff-1', effectId: 'blur', enabled: true, params: {} }],
+    };
+    const stateWithEffects = {
+      ...state,
+      items: { ...state.items, ['item-a']: itemWithEffects },
+    };
+    const timeline = fakeTimeline(stateWithEffects, { selection: ['item-a'] });
+    render(<ItemInspector state={stateWithEffects} timeline={timeline} />);
+    expect(screen.getByText('Effects')).toBeTruthy();
+    expect(screen.getByText('blur')).toBeTruthy();
   });
 
   it('says the desktop app is required instead of pretending to edit', () => {

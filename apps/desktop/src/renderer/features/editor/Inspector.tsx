@@ -1,6 +1,6 @@
 import React from 'react';
-import { Film, Plus } from 'lucide-react';
-import { Button, Card, EmptyState, Input, Slider } from '@clipwright/design-system';
+import { Film, Plus, Power, Trash2 } from 'lucide-react';
+import { Button, Card, EmptyState, IconButton, Input, Slider } from '@clipwright/design-system';
 import {
   formatTimecode,
   quantizeUs,
@@ -192,6 +192,43 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           Volume edits arrive with the audio tools; the value is stored on the clip and used for preview muting.
         </div>
       </Field>
+
+      {/* Effects section (SPEC 09 §17) */}
+      {(item.effects && item.effects.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+          <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Effects</span>
+          {item.effects.map((effect) => (
+            <div
+              key={effect.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                padding: 'var(--space-1) var(--space-2)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--surface-raised)',
+                opacity: effect.enabled ? 1 : 0.5,
+              }}
+            >
+              <IconButton
+                label={effect.enabled ? 'Disable effect' : 'Enable effect'}
+                size={28}
+                icon={<Power size={12} />}
+                onClick={() => timeline.toggleEffectEnabled(item.id, effect.effectId)}
+              />
+              <span style={{ flex: 1, fontSize: 'var(--fs-xs)', color: 'var(--text-primary)' }}>
+                {effect.effectId}
+              </span>
+              <IconButton
+                label="Remove effect"
+                size={28}
+                icon={<Trash2 size={12} />}
+                onClick={() => timeline.removeEffect(item.id, effect.effectId)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
         Source in {formatTimecode(item.sourceInUs, fps)}
