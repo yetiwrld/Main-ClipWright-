@@ -85,6 +85,10 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
 
   useEffect(() => {
     if (!compId) return;
+    if (!isDesktop()) {
+      setLoadError('The editor runs inside the Clipwright desktop app.');
+      return;
+    }
     let cancelled = false;
     void api
       .getComposition(projectId, compId)
