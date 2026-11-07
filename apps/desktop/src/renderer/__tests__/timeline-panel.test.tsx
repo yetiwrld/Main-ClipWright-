@@ -517,6 +517,29 @@ describe('timeline panel', () => {
     expect(typeof timeline.trimCaptionSegment).toBe('function');
   });
 
+
+  it('toggles show keyframes and renders keyframe lane', () => {
+    const state = fixture();
+    // Add keyframes to the fixture item
+    const itemWithKfs = {
+      ...state.items['item-a'],
+      keyframes: { opacity: [{ timeUs: 1_000_000, value: 0.5, interpolation: 'linear' as const }] },
+    };
+    const stateWithKfs = {
+      ...state,
+      items: { ...state.items, ['item-a']: itemWithKfs },
+    };
+    const { container } = render(<TimelinePanel timeline={fakeTimeline(stateWithKfs)} />);
+    // Keyframe lane should not show initially (not selected, showKeyframes off)
+    expect(container.querySelector('[data-testid="item-a-keyframe-lane"]')).toBeNull();
+
+    // Toggle show keyframes
+    const toggle = screen.getByRole('button', { name: /^Show keyframes$/ });
+    fireEvent.click(toggle);
+    const lane = container.querySelector('[data-testid="item-a-keyframe-lane"]');
+    expect(lane).toBeTruthy();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

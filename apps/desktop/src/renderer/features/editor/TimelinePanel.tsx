@@ -4,6 +4,7 @@ import {
   ClipboardPaste,
   ChevronDown,
   ChevronUp,
+  Diamond,
   Copy,
   Flag,
   Lock,
@@ -71,6 +72,7 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [rippleAllTracks, setRippleAllTracks] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>('normal');
   const [tool, setTool] = useState<'select' | 'razor'>('select');
+  const [showKeyframes, setShowKeyframes] = useState(false);
   const [marquee, setMarquee] = useState<{
     x1: number;
     y1: number;
@@ -576,6 +578,14 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           onClick={() => setTool('razor')}
         />
         <IconButton
+          label="Show keyframes"
+          shortcut="K"
+          size={28}
+          active={showKeyframes}
+          icon={<Diamond size={14} />}
+          onClick={() => setShowKeyframes((value) => !value)}
+        />
+        <IconButton
           label="Split at playhead"
           shortcut="S"
           size={28}
@@ -961,6 +971,41 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                       }}
                       style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize' }}
                     />
+                    {item.keyframes && Object.keys(item.keyframes).length > 0 && (selected || showKeyframes) && (
+                      <div
+                        data-testid={`${item.id}-keyframe-lane`}
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          height: 12,
+                          borderTop: '1px solid var(--line-subtle)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        {Object.entries(item.keyframes).flatMap(([property, kfs]) =>
+                          kfs.map((kf) => (
+                            <div
+                              key={`${property}-${kf.timeUs}`}
+                              data-testid={`${item.id}-kf-${property}-${kf.timeUs}`}
+                              title={`${property} @ ${kf.timeUs}us`}
+                              style={{
+                                position: 'absolute',
+                                left: `${(kf.timeUs / item.durationUs) * 100}%`,
+                                transform: 'translateX(-50%)',
+                                width: 8,
+                                height: 8,
+                                background: 'var(--brand)',
+                                clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+                              }}
+                            />
+                          )),
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
