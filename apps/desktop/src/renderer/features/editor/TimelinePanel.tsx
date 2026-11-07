@@ -763,6 +763,37 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
               beginMarquee(event);
             }
           }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const raw = event.dataTransfer.getData('application/x-clipwright-media');
+            if (!raw) return;
+            try {
+              const parsed = JSON.parse(raw) as {
+                mediaId: string;
+                label: string;
+                type: 'video' | 'audio' | 'image';
+                durationUs: number;
+                sourceDurationUs: number;
+              };
+              const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+              const x = event.clientX - rect.left + (canvasRef.current?.scrollLeft ?? 0);
+              const timeUs = timeAtPointer(event.clientX);
+              timeline.placeMedia({
+                mediaId: parsed.mediaId,
+                label: parsed.label,
+                type: parsed.type,
+                durationUs: parsed.durationUs,
+                sourceDurationUs: parsed.sourceDurationUs,
+                startUs: timeUs,
+              });
+            } catch {
+              // Invalid drop data — ignore
+            }
+          }}
         >
           {marquee && (
             <div

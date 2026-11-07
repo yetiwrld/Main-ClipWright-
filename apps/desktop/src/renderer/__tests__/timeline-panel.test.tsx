@@ -413,6 +413,59 @@ describe('timeline panel', () => {
     expect(typeof timeline.removeTransition).toBe('function');
   });
 
+
+  it('drops a media asset onto the timeline canvas', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const canvas = container.querySelector('[data-testid="timeline-canvas"]') as HTMLElement;
+    expect(canvas).toBeTruthy();
+
+    const dataTransfer = {
+      getData: vi.fn(() => JSON.stringify({
+        mediaId: 'media-new',
+        label: 'New video.mp4',
+        type: 'video',
+        durationUs: 3_000_000,
+        sourceDurationUs: 3_000_000,
+      })),
+      dropEffect: '',
+    };
+    const dropEvent = new Event('drop', { bubbles: true, cancelable: true }) as Event;
+    (dropEvent as unknown as { dataTransfer: typeof dataTransfer }).dataTransfer = dataTransfer;
+    Object.defineProperty(dropEvent, 'clientX', { value: 100 });
+    Object.defineProperty(dropEvent, 'currentTarget', { value: canvas });
+
+    fireEvent(canvas, dropEvent);
+    expect(timeline.placeMedia).toHaveBeenCalledWith({
+      mediaId: 'media-new',
+      label: 'New video.mp4',
+      type: 'video',
+      durationUs: 3_000_000,
+      sourceDurationUs: 3_000_000,
+      startUs: expect.any(Number),
+    });
+  });
+
+  it('ignores drops without clipwright media data', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const canvas = container.querySelector('[data-testid="timeline-canvas"]') as HTMLElement;
+
+    const dataTransfer = {
+      getData: vi.fn(() => ''),
+      dropEffect: '',
+    };
+    const dropEvent = new Event('drop', { bubbles: true, cancelable: true }) as Event;
+    (dropEvent as unknown as { dataTransfer: typeof dataTransfer }).dataTransfer = dataTransfer;
+    Object.defineProperty(dropEvent, 'clientX', { value: 100 });
+    Object.defineProperty(dropEvent, 'currentTarget', { value: canvas });
+
+    fireEvent(canvas, dropEvent);
+    expect(timeline.placeMedia).not.toHaveBeenCalled();
+  });
+
   it('says the desktop app is required instead of pretending to edit', () => {
     render(<EditorPage projectId="p1" compId="clip-1" onBack={() => undefined} />);
     // No `window.clipwright` here, so nothing is faked: the page states it.

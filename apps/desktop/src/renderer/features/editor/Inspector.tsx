@@ -50,7 +50,23 @@ export function MediaLibrary({
       {media.map((asset) => {
         const durationUs = asset.info?.durationUs ?? 0;
         return (
-          <Card key={asset.id}>
+          <Card
+            key={asset.id}
+            draggable={asset.status === 'ok'}
+            onDragStart={(event) => {
+              event.dataTransfer.setData(
+                'application/x-clipwright-media',
+                JSON.stringify({
+                  mediaId: asset.id,
+                  label: asset.originalName,
+                  type: asset.kind,
+                  durationUs: durationUs || 3_000_000,
+                  sourceDurationUs: durationUs || 3_000_000,
+                }),
+              );
+              event.dataTransfer.effectAllowed = 'copy';
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
