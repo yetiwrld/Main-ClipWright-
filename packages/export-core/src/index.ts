@@ -62,3 +62,14 @@ export type {
   ExportJobStatus,
   ExportQueueState,
 } from './job-queue.js';
+
+// Subtitles
+export {
+  generateSrt,
+  generateVtt,
+  generateSubtitles,
+  extractCuesFromItems,
+  formatSrtTimestamp,
+  formatVttTimestamp,
+} from './subtitles.js';
+export type { CaptionCue } from './subtitles.js';
