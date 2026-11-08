@@ -16,7 +16,7 @@
  */
 import { createHash, sign, createPublicKey, verify } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
@@ -100,6 +100,13 @@ const verifier = createPublicKey({
 });
 const ok = verify(null, Buffer.from(manifestText, 'utf8'), verifier, Buffer.from(signature, 'base64'));
 if (!ok) {
+  // Remove what was just written before failing. CI runs these steps in
+  // sequence, and an unverifiable manifest left on disk is exactly the artefact
+  // that must not reach the publish step — the app would refuse it, and the
+  // release would be broken in a way that only a user discovers.
+  await rm(manifestPath, { force: true });
+  await rm(sigPath, { force: true });
+  await rm(join(outDir, 'SHA256SUMS.txt'), { force: true });
   fail(
     'The manifest signature does not verify with UPDATE_PUBLIC_KEY_B64. The secret and the embedded key are out of sync — refusing to publish.',
   );

@@ -11,7 +11,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -62,6 +62,48 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
+});
+
+describe('a refused signature leaves nothing to publish', () => {
+  it('removes the manifest, signature and sums when the key does not match', async () => {
+    // CI runs these steps in sequence. An unverifiable manifest left on disk is
+    // precisely the artefact that must not reach the publish step: the app would
+    // refuse it and the release would be broken in a way only a user discovers.
+    const scratch = join(TMP, 'refusal');
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(join(scratch, SETUP), Buffer.alloc(1000, 0x41));
+
+    const wrongPair = generateKeyPairSync('ed25519');
+
+    let exitCode = 0;
+    try {
+      execFileSync(process.execPath, [
+        join(process.cwd(), 'scripts/release/make-manifest.mjs'),
+        '--dir', scratch,
+        '--version', VERSION,
+        '--channel', 'stable',
+        '--out', scratch,
+      ], {
+        env: {
+          ...process.env,
+          // Sign with the throwaway key, verify against the real one.
+          UPDATE_SIGNING_KEY: wrongPair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+          UPDATE_PUBLIC_KEY_B64: publicKeyB64,
+        },
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      exitCode = (error as { status?: number }).status ?? 1;
+    }
+
+    expect(exitCode).not.toBe(0);
+    expect(existsSync(join(scratch, 'release-manifest.json'))).toBe(false);
+    expect(existsSync(join(scratch, 'release-manifest.json.sig'))).toBe(false);
+    expect(existsSync(join(scratch, 'SHA256SUMS.txt'))).toBe(false);
+    // The artefacts themselves are untouched — they were never the problem.
+    expect(existsSync(join(scratch, SETUP))).toBe(true);
+    rmSync(scratch, { recursive: true, force: true });
+  });
 });
 
 const manifestText = () => readFileSync(join(DIST, 'release-manifest.json'), 'utf8');
