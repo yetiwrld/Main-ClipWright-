@@ -14,6 +14,7 @@ import {
   type ActiveEffect,
   type ItemGeometry,
   type VisibleLayer,
+  type WipeShape,
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
@@ -102,6 +103,43 @@ export function cssFiltersFor(effects: readonly ActiveEffect[]): string {
 }
 
 /** Effects in a chain the preview cannot approximate, by their catalogue names. */
+/**
+ * The `clip-path` for a wipe, mirroring the export's per-pixel mask (SPEC 12 §4.2).
+ *
+ * The export computes an alpha per pixel from the projection of the pixel onto the
+ * wipe's normal; CSS has no such primitive, so the four axis-aligned directions and
+ * the diagonals are expressed as polygons. A soft edge needs a gradient mask rather
+ * than a clip, so `softness` is deliberately ignored here and the preview shows a
+ * hard edge — the same kind of approximation the effect filters already make, and
+ * flagged in `docs/limitations.md` rather than silently wrong.
+ *
+ * `position` is how far the revealed region reaches, so the polygon keeps the
+ * region *behind* the normal: for `left` (normal +x) that is the left-hand side.
+ */
+export function wipeClipPath(shape: WipeShape): string {
+  const p = Math.min(1, Math.max(0, shape.position));
+  // Percentage along each axis where the edge lies.
+  const along = (axis: number) => (axis >= 0 ? p : 1 - p) * 100;
+  if (shape.axisY === 0) {
+    const edge = along(shape.axisX);
+    return shape.axisX > 0
+      ? `inset(0 ${100 - edge}% 0 0)`
+      : `inset(0 0 0 ${edge}%)`;
+  }
+  if (shape.axisX === 0) {
+    const edge = along(shape.axisY);
+    return shape.axisY > 0
+      ? `inset(0 0 ${100 - edge}% 0)`
+      : `inset(${edge}% 0 0 0)`;
+  }
+  // Diagonal: reveal the triangular half the normal points away from.
+  const x = shape.axisX > 0 ? 0 : 100;
+  const y = shape.axisY > 0 ? 0 : 100;
+  const fx = shape.axisX > 0 ? p * 100 : 100 - p * 100;
+  const fy = shape.axisY > 0 ? p * 100 : 100 - p * 100;
+  return `polygon(${x}% ${y}%, ${fx}% ${y}%, ${x}% ${fy}%)`;
+}
+
 export function unsupportedEffectNames(effects: readonly ActiveEffect[]): string[] {
   const names: string[] = [];
   for (const effect of effects) {
@@ -382,6 +420,7 @@ export function PreviewPane({
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
                 transitionScale={transition?.scale ?? 1}
+                transitionWipe={transition?.wipe}
                 effectFilter={cssFiltersFor(effects)}
                 initialAspect={canvas.width / canvas.height}
                 muted={muted}
@@ -527,7 +566,13 @@ function transitionFor(
   layer: VisibleLayer,
   state: TimelineState,
   timeUs: number,
-): { fromOpacity: number; offsetX: number; scale: number } | null {
+): {
+  fromOpacity: number;
+  offsetX: number;
+  scale: number;
+  /** Set on the incoming side of a running wipe (SPEC 12 §4.2). */
+  wipe?: WipeShape;
+} | null {
   const item = state.items[layer.id];
   if (!item) return null;
 
@@ -544,6 +589,7 @@ function transitionFor(
       fromOpacity: fadedByLayers ? 1 : at.state.toOpacity,
       offsetX: at.state.toOffsetX,
       scale: at.state.toScale,
+      wipe: at.state.wipe,
     };
   }
 
@@ -584,6 +630,7 @@ const PreviewLayer = memo(function PreviewLayer({
   initialAspect,
   transitionOffsetX,
   transitionScale,
+  transitionWipe,
   effectFilter,
   muted,
   playing,
@@ -603,6 +650,8 @@ const PreviewLayer = memo(function PreviewLayer({
   effectFilter: string;
   /** Scale from a running `zoom` transition. */
   transitionScale: number;
+  /** The sweeping edge of a running `wipe` (SPEC 12 §4.2). */
+  transitionWipe?: WipeShape;
   muted: boolean;
   playing: boolean;
   onPlayRejected: () => void;
@@ -662,6 +711,11 @@ const PreviewLayer = memo(function PreviewLayer({
         transform: `translate(${(geometry.offsetX + transitionOffsetX) * 100}%, ${
           geometry.offsetY * 100
         }%)`,
+        // A wipe clips the layer rather than fading it, so it is a `clip-path` on
+        // the outermost element: clipping an inner one would be undone by the
+        // wrapper's own transform and would clip the wrong edge on a slid layer.
+        // A soft edge is a two-stop gradient mask instead of a hard inset.
+        ...(transitionWipe ? { clipPath: wipeClipPath(transitionWipe) } : {}),
       }}
     >
       <div

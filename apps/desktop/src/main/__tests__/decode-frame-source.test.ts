@@ -1093,4 +1093,95 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
       expect(green).toBeLessThan(40);
     }, 120_000);
   });
+  /**
+   * SPEC 12 §4.2 — `wipe`: "linear reveal along a direction with soft edge".
+   *
+   * The discriminating measurement is *spatial*. A mean would not do: an
+   * un-clipped stack and a correct wipe both average to a mix of the two clips at
+   * mid-transition, so a mean test passes against the broken renderer, which drew
+   * the incoming clip over the outgoing one. Instead the frame is split into its
+   * left and right halves and each half is checked on its own: at half progress the
+   * left must be the incoming clip and the right the outgoing one.
+   */
+  it('wipes between two clips left to right in the exported file', async () => {
+    const first = makeSolidSource('wipe-first.mp4', [220, 30, 30]); // red, outgoing
+    const second = makeSolidSource('wipe-second.mp4', [30, 30, 220]); // blue, incoming
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'wipe-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'wipe-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'wipe', durationUs: 400_000, alignment: 'center',
+            params: { direction: 'left', softness: 0 }, easing: 'linear',
+            crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-wipe.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-wipe',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'wipe-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    /**
+     * Mean red/blue in the left or right quarter of the frame at a given time.
+     *
+     * The quarters, not halves: the edge sits at the midpoint at half progress, so
+     * sampling right up to it mixes the two clips in a fairly wide band; a quarter
+     * in is unambiguously on one side.
+     */
+    const quarter = (seconds: number, side: 'left' | 'right'): [number, number] => {
+      const rgbPath = join(TMP, 'wipe-probe.rgb');
+      // Crop to the quarter *before* decoding to RGB so the 4:2:0 chroma is
+      // resampled within the region rather than across the wipe's edge.
+      const crop = side === 'left' ? 'crop=iw/4:ih:0:0' : 'crop=iw/4:ih:iw*3/4:0';
+      execFileSync(
+        ffmpegPath(),
+        ['-hide_banner', '-loglevel', 'error', '-nostdin',
+          '-ss', String(seconds), '-i', outputPath, '-frames:v', '1',
+          '-vf', `${crop},scale=in_color_matrix=bt709:out_color_matrix=bt709`,
+          '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+        { stdio: 'ignore' },
+      );
+      const raw = readFileSync(rgbPath);
+      rmSync(rgbPath, { force: true });
+      let red = 0;
+      let blue = 0;
+      for (let index = 0; index < raw.length; index += 3) {
+        red += raw[index]!;
+        blue += raw[index + 2]!;
+      }
+      const pixels = Math.max(1, raw.length / 3);
+      return [red / pixels, blue / pixels];
+    };
+
+    // Half way through the centred window [0.8 s, 1.2 s), which is 1.0 s.
+    const [leftRed, leftBlue] = quarter(1.0, 'left');
+    const [rightRed, rightBlue] = quarter(1.0, 'right');
+
+    // The revealed side is the incoming blue clip...
+    expect(leftBlue, 'left quarter should be the incoming clip').toBeGreaterThan(150);
+    expect(leftRed, 'left quarter should not still be the outgoing clip').toBeLessThan(90);
+    // ...and the side the edge has not reached is still the outgoing red clip.
+    expect(rightRed, 'right quarter should still be the outgoing clip').toBeGreaterThan(150);
+    expect(rightBlue, 'right quarter should not yet be the incoming clip').toBeLessThan(90);
+  }, 180_000);
 });

@@ -216,10 +216,16 @@ describe('transitionState', () => {
     expect(transitionState('crossfade', 9).toOpacity).toBe(1);
   });
 
-  it('leaves both sides opaque for a wipe, since the edge is per-pixel', () => {
+  it('leaves both sides opaque for a wipe, and reports the edge instead', () => {
+    // Neither side fades — a wipe is a moving clip, not a fade — but "both
+    // opaque" on its own is what the renderers used to receive, and with no edge
+    // to go on they drew the incoming clip over the outgoing one: a cut. The shape
+    // is the part that makes it a wipe.
     const state = transitionState('wipe', 0.5, { direction: 'left' });
     expect(state.fromOpacity).toBe(1);
     expect(state.toOpacity).toBe(1);
+    expect(state.wipe).toBeDefined();
+    expect(state.wipe!.position).toBe(0.5);
   });
 });
 

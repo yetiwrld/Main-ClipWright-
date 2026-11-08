@@ -96,6 +96,7 @@ export {
 export {
   compositeLayers,
   compositeRgb,
+  compositeRgbMasked,
   joinYuv,
   rgbToYuv,
   splitYuv,
@@ -119,6 +120,9 @@ export {
   transitionBezier,
   transitionProgress,
   transitionState,
+  wipeAlphaAt,
+  wipeDirection,
+  type WipeShape,
   transitionWindow,
   type TransitionAlignment,
   type TransitionState,

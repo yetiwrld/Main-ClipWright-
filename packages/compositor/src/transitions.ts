@@ -95,6 +95,91 @@ export interface TransitionState {
   toScale: number;
   /** Colour a `dip-color` transition passes through, when there is one. */
   dipColor?: string;
+  /**
+   * For `wipe`: the sweeping edge, and how soft it is.
+   *
+   * A wipe is the one transition that cannot be expressed as an opacity or an
+   * offset — which pixels show which side depends on their position — so the shape
+   * is described here and each renderer rasterises it. Reporting both sides as
+   * fully opaque without this (which this function used to do) told the renderers
+   * to draw the incoming clip *over* the outgoing one, which is a hard cut with
+   * extra steps.
+   */
+  wipe?: WipeShape;
+}
+
+/** The moving edge of a wipe, in normalised frame coordinates (0–1). */
+export interface WipeShape {
+  /** Normal pointing at the region the wipe has not yet revealed. */
+  axisX: number;
+  axisY: number;
+  /** How far the revealed region reaches along the normal, 0–1. */
+  position: number;
+  /** Width of the soft edge, as a fraction of the frame's extent along the normal. */
+  softness: number;
+  /**
+   * The incoming side is revealed behind the edge as it advances; the outgoing
+   * side keeps everything the incoming one has not covered.
+   */
+  reveal: 'incoming';
+}
+
+/**
+ * The direction a wipe sweeps, as a unit normal and the scale that keeps the edge
+ * equidistant across a non-square frame.
+ *
+ * The spec lists L/R/U/D and the diagonals. A diagonal on a 16:9 frame has to be
+ * normalised by the frame's extent along that direction, or the edge would drift at
+ * a different apparent speed in x and y and the reveal would finish early on one
+ * axis.
+ */
+export function wipeDirection(
+  direction: Transition['params'] extends { direction?: infer D } ? D : unknown,
+): { x: number; y: number } {
+  switch (direction) {
+    case 'right':
+      return { x: -1, y: 0 };
+    case 'up':
+      return { x: 0, y: 1 };
+    case 'down':
+      return { x: 0, y: -1 };
+    case 'diagonal-up':
+      return { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
+    case 'diagonal-down':
+      return { x: -Math.SQRT1_2, y: -Math.SQRT1_2 };
+    case 'left':
+    default:
+      // `left` is the default: the edge sweeps left-to-right, revealing from the
+      // left, which is what a user means by an unqualified "wipe".
+      return { x: 1, y: 0 };
+  }
+}
+
+/**
+ * The alpha of the incoming side at a normalised position along the wipe's normal,
+ * given the shape and the progress `p`.
+ *
+ * `t` is 0 at the edge's starting side and 1 at the far side. `softness` widens a
+ * linear ramp centred on the edge; at 0 the edge is hard, which is the classic
+ * wipe, and the ramp is symmetric so the transition is reversible.
+ */
+export function wipeAlphaAt(
+  t: number,
+  progress: number,
+  softness: number,
+): number {
+  const p = Math.min(1, Math.max(0, progress));
+  // The endpoints are exact. Without this a hard edge sits *on* t = 0 at p = 0,
+  // which the `t <= edge` test counts as revealed — so the incoming clip appears
+  // as a one-pixel seam along the leading edge for the whole first frame.
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  const half = Math.max(0, softness) / 2;
+  // The edge runs from just outside 0 to just outside 1, so the soft ramp has
+  // somewhere to live at both ends instead of being clipped in half.
+  const edge = -half + p * (1 + 2 * half);
+  if (half <= 1e-6) return t <= edge ? 1 : 0;
+  return Math.min(1, Math.max(0, (edge - t) / (2 * half) + 0.5));
 }
 
 /**
@@ -155,12 +240,25 @@ export function transitionState(
         : { ...base, fromOpacity: 0, toOpacity: (progress - 0.5) * 2, dipColor: color };
     }
 
-    case 'wipe':
-      // A wipe is a hard edge sweeping across the frame, so both sides stay fully
-      // opaque and the edge itself — which needs to know about pixels — belongs to
-      // the renderer. Reporting it as "both visible" is what tells the renderer to
-      // draw the clip rather than a fade.
-      return { ...base, fromOpacity: 1, toOpacity: 1 };
+    case 'wipe': {
+      // Both sides stay fully opaque — neither fades — but the incoming side is
+      // clipped by a moving edge, so the *shape* travels with the state. Without
+      // it a renderer could only draw the incoming clip over the outgoing one,
+      // which is a cut, not a wipe.
+      const normal = wipeDirection(params.direction);
+      return {
+        ...base,
+        fromOpacity: 1,
+        toOpacity: 1,
+        wipe: {
+          axisX: normal.x,
+          axisY: normal.y,
+          position: progress,
+          softness: typeof params.softness === 'number' ? Math.max(0, params.softness) : 0,
+          reveal: 'incoming',
+        },
+      };
+    }
 
     case 'slide': {
       // Both pictures move together as one strip. `direction` names the way the

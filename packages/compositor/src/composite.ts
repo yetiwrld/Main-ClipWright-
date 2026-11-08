@@ -272,6 +272,68 @@ export function compositeRgb(
 }
 
 /**
+ * Composite a layer through a per-pixel alpha mask (SPEC 12 §4.2, `wipe`).
+ *
+ * A wipe cannot be expressed as an opacity — which pixels belong to which side
+ * depends on where they are — so the renderer builds the mask with
+ * `wipeAlphaAt` and composites through it here. The mask is multiplied into the
+ * layer's opacity, so a half-transparent layer under a wipe still fades correctly.
+ *
+ * `mask` holds one value per pixel, row-major, matching the layer's dimensions.
+ */
+export function compositeRgbMasked(
+  base: RgbFrame,
+  layer: RgbFrame,
+  opacity: number,
+  mode: BlendMode,
+  mask: Float32Array | Uint8Array,
+): void {
+  const alpha = Math.min(1, Math.max(0, opacity));
+  if (alpha <= 0) return;
+  if (base.width !== layer.width || base.height !== layer.height) {
+    throw new Error(
+      `Cannot composite a ${layer.width}×${layer.height} layer onto a ${base.width}×${base.height} frame.`,
+    );
+  }
+  const pixels = base.width * base.height;
+  if (mask.length < pixels) {
+    throw new Error(`A mask of ${mask.length} values cannot cover ${pixels} pixels.`);
+  }
+  const out = base.data;
+  const src = layer.data;
+  for (let pixel = 0; pixel < pixels; pixel += 1) {
+    const m = mask[pixel]!;
+    // Fully transparent and fully opaque are the two common cases and skipping
+    // them is what keeps a 1080p wipe export from spending its time on arithmetic
+    // that changes nothing.
+    if (m <= 0) continue;
+    const i = pixel * 3;
+    if (m >= 1) {
+      if (mode === 'normal' && alpha >= 1) {
+        out[i] = src[i]!;
+        out[i + 1] = src[i + 1]!;
+        out[i + 2] = src[i + 2]!;
+        continue;
+      }
+      for (let channel = 0; channel < 3; channel += 1) {
+        const cb = out[i + channel]! / 255;
+        const cs = src[i + channel]! / 255;
+        const blended = blendChannel(mode, cb, cs);
+        out[i + channel] = (alpha * blended + (1 - alpha) * cb) * 255;
+      }
+      continue;
+    }
+    const a = alpha * m;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const cb = out[i + channel]! / 255;
+      const cs = src[i + channel]! / 255;
+      const blended = blendChannel(mode, cb, cs);
+      out[i + channel] = (a * blended + (1 - a) * cb) * 255;
+    }
+  }
+}
+
+/**
  * Composite every layer of a frame onto its base, in order.
  *
  * Layers are bottom-first, as `visibleLayers` returns them; each one replaces the

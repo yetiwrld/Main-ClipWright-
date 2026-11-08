@@ -64,8 +64,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    decoded, blended bottom-first at its own opacity and blend mode, and the result
    is written — so an overlay track, a faded clip and a `multiply` layer all reach
    the file. Transitions render too: the two clips either side of a cut are both
-   drawn across the overlap and faded, slid or zoomed per the transition's type and
-   easing. Effects render, but **not the way §12 §3.1 specifies**: the spec asks for
+   drawn across the overlap and faded, slid, zoomed or **wiped** per the transition's
+   type and easing. A wipe is a genuine per-pixel reveal in the file — the incoming
+   clip is masked by the edge while the outgoing clip stays whole underneath — and a
+   `clip-path` in the preview. Effects render, but **not the way §12 §3.1 specifies**: the spec asks for
    GLSL fragment shaders in a hidden WebGL2 window run by both preview and export,
    and this build has no GL context anywhere. Effects are a CPU implementation
    (`packages/compositor/src/effects.ts`) that the export applies to every frame and
@@ -129,7 +131,11 @@ This document tracks architectural scope boundaries and honest limitations per `
      shader pipeline interleaves them so they differ;
    - a **blur's sigma is this module's own**, not ffmpeg's `gblur=sigma`, so the two
      agree in shape and not in parameter naming. The kernel itself is checked tap by
-     tap against the textbook Gaussian.
+     tap against the textbook Gaussian;
+   - a **wipe's soft edge is exact in the export and hard in the preview**: the
+     export ramps alpha across the edge as §4.2 specifies, while CSS has no
+     gradient clip, so the preview shows the hard-edged version. Setting softness to
+     0 — the default — makes the two identical.
    The export is correct and tested; the preview is honest and approximate, and the
    banner is what makes that acceptable.
    - **Adjustment layers grade what is below them, with one approximation.** An

@@ -34,16 +34,19 @@ import {
   activeEffects,
   applyEffectsToFrame,
   compositeRgb,
+  compositeRgbMasked,
   effectPassCount,
   effectsForLayer,
   evaluateProperty,
   transitionAt,
+  wipeAlphaAt,
   joinYuv,
   rgbToYuv,
   splitYuv,
   yuvToRgb,
   type ActiveEffect,
   type BlendMode,
+  type WipeShape,
   type ItemGeometryInput,
   type RgbFrame,
 } from '@clipwright/compositor';
@@ -141,12 +144,17 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
   const transitionOpacityFor = (
     item: PlannedItem,
     timeUs: number,
-  ): { opacity: number; active: boolean } => {
+  ): { opacity: number; active: boolean; wipe?: WipeShape } => {
     if (item.transitionIn) {
       const at = transitionAt(item.startUs, asTransition(item.transitionIn), timeUs);
       if (at) {
         const fadedByLayers = transitionFade(item, at.progress) < 1;
-        return { opacity: fadedByLayers ? 1 : at.state.toOpacity, active: true };
+        return {
+          opacity: fadedByLayers ? 1 : at.state.toOpacity,
+          active: true,
+          // The incoming clip is the one the wipe reveals.
+          wipe: at.state.wipe,
+        };
       }
     }
     // Outgoing side: the next item on this track may be transitioning in.
@@ -155,6 +163,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       .sort((a, b) => a.startUs - b.startUs)[0];
     if (successor?.transitionIn) {
       const at = transitionAt(successor.startUs, asTransition(successor.transitionIn), timeUs);
+      // The outgoing side is not clipped: it stays whole underneath and the
+      // incoming clip is masked over it. Clipping both would leave a gap.
       if (at) return { opacity: at.state.fromOpacity, active: true };
     }
     return { opacity: 1, active: false };
@@ -408,6 +418,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         effects: ActiveEffect[];
         /** Stacking order of the layer's track; decides which adjustment layers grade it. */
         trackOrder: number;
+        /** Set while a wipe is revealing this layer (SPEC 12 §4.2). */
+        wipe?: WipeShape;
       }> = [];
 
       /*
@@ -456,6 +468,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               blendMode: asBlendMode(item.blendMode),
               effects: activeEffects(item.effects),
               trackOrder: item.trackOrder ?? 0,
+              wipe: transition.wipe,
             });
           }
           continue;
@@ -476,6 +489,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           blendMode: asBlendMode(item.blendMode),
           effects,
           trackOrder: item.trackOrder ?? 0,
+          wipe: transition.wipe,
         });
       }
 
@@ -553,6 +567,20 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         if (layer.effects.length > 0) {
           applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
         }
+        if (layer.wipe) {
+          // A wipe is the one transition that is not an opacity: which pixels show
+          // the incoming clip depends on where they are, so the layer is composited
+          // through a per-pixel mask instead. Building the mask costs one pass over
+          // the frame, and only while a wipe is actually running.
+          compositeRgbMasked(
+            base,
+            rgb,
+            layer.opacity,
+            layer.blendMode,
+            wipeMaskFor(layer.wipe, plan.width, plan.height),
+          );
+          continue;
+        }
         compositeRgb(base, rgb, layer.opacity, layer.blendMode);
       }
       // Adjustment layers stacked above everything on the canvas still grade what
@@ -623,6 +651,38 @@ export function blankFrame(width: number, height: number): Buffer {
  * default was before the colour was configurable, so a bad value degrades to the
  * old behaviour instead of failing the export.
  */
+/**
+ * The alpha mask for a wipe, one value per pixel (SPEC 12 §4.2).
+ *
+ * The shape's normal is normalised in the *frame's* space, so `t` runs 0 → 1 across
+ * the projection of each pixel onto that normal. On a 16:9 frame a horizontal wipe
+ * therefore sweeps the full width, and a diagonal one sweeps corner to corner at a
+ * constant speed rather than arriving at one side first.
+ */
+function wipeMaskFor(shape: WipeShape, width: number, height: number): Float32Array {
+  const mask = new Float32Array(width * height);
+  // Projection bounds, so `t` is normalised to [0, 1] for any direction.
+  const corners = [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ].map(([x, y]) => x! * shape.axisX + y! * shape.axisY);
+  const min = Math.min(...corners);
+  const span = Math.max(...corners) - min || 1;
+  for (let y = 0; y < height; y += 1) {
+    // Sample at pixel centres: sampling at the corner shifts a hard edge half a
+    // pixel left of where it belongs, which is visible as a seam at p = 0.
+    const ny = (y + 0.5) / height;
+    for (let x = 0; x < width; x += 1) {
+      const nx = (x + 0.5) / width;
+      const t = (nx * shape.axisX + ny * shape.axisY - min) / span;
+      mask[y * width + x] = wipeAlphaAt(t, shape.position, shape.softness);
+    }
+  }
+  return mask;
+}
+
 function fillCanvas(frame: RgbFrame, color: string | undefined): void {
   const match = /^#?([0-9a-f]{6})$/i.exec(color ?? '');
   const value = match ? parseInt(match[1]!, 16) : 0;
