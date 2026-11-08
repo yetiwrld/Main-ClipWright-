@@ -202,6 +202,16 @@ if (check) {
       console.error('  The same packages are present; a version or repository URL changed.');
     }
     console.error('Run `node scripts/release/make-notices.mjs` and commit the result.\n');
+    // Also emit a check annotation: this step fails on the Windows CI runner while
+    // passing on a Linux checkout, and the console output of that step is not
+    // reachable from here. `%` and newlines are escaped per GitHub's command syntax.
+    const announce = (message) =>
+      console.log(`::error title=notices out of date::${message.replaceAll('%', '%25').replaceAll('\n', ' ')}`);
+    if (added.length > 0) announce(`installed but not listed: ${added.join(', ')}`);
+    if (removed.length > 0) announce(`listed but not installed: ${removed.join(', ')}`);
+    if (added.length === 0 && removed.length === 0) {
+      announce('Same packages; a version or repository URL changed.');
+    }
     process.exit(1);
   }
   console.log(`make-notices: OK — ${packages.length} packages, file is current.`);
