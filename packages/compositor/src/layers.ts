@@ -16,8 +16,9 @@
  * be invisible over.
  */
 
-import type { Keyframe } from '@clipwright/project-schema/schemas';
+import type { Keyframe, Transition } from '@clipwright/project-schema/schemas';
 import { evaluateNumber } from './keyframes.js';
+import { transitionWindow } from './transitions.js';
 
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'add' | 'soft-light';
 
@@ -34,14 +35,30 @@ export interface LayerItem {
   /** Hidden or disabled items are not drawn at all. */
   disabled?: boolean;
   hiddenTrack?: boolean;
+  /**
+   * A transition entering this item (SPEC 12 §4). It matters here because a
+   * transition widens the span the item is drawn over: a centred crossfade begins
+   * before the item's own start, so an item that has not started yet can still be
+   * on screen.
+   */
+  transitionIn?: Transition;
 }
 
 export interface VisibleLayer {
   id: string;
-  /** 0–1 after keyframes are evaluated. */
+  /** 0–1 after keyframes are evaluated, including any transition fade. */
   opacity: number;
   blendMode: BlendMode;
   trackOrder: number;
+  /**
+   * How far through its incoming transition this layer is at the sampled time,
+   * `0`–`1`, or `undefined` when no transition covers it.
+   *
+   * Reported rather than baked into `opacity` because the other transition types
+   * are not fades: a slide moves the picture and a wipe needs an edge, and a caller
+   * that only understood opacity would render those as a crossfade.
+   */
+  transitionProgress?: number;
 }
 
 /**
@@ -59,17 +76,34 @@ export function visibleLayers(
   const layers: VisibleLayer[] = [];
   for (const item of items) {
     if (item.disabled || item.hiddenTrack) continue;
-    if (timeUs < item.startUs || timeUs >= item.startUs + item.durationUs) continue;
+    // The span the item is drawn over is its own range widened by an incoming
+    // transition: a centred crossfade starts before `startUs`, and the frames
+    // before the cut are still the *outgoing* clip's, so the incoming item cannot
+    // simply be invisible there.
+    const incoming = item.transitionIn
+      ? transitionWindow(item.startUs, item.transitionIn)
+      : undefined;
+    const drawFrom = Math.min(item.startUs, incoming?.startUs ?? item.startUs);
+    const drawTo = Math.max(item.startUs + item.durationUs, incoming?.endUs ?? 0);
+    if (timeUs < drawFrom || timeUs >= drawTo) continue;
+
+    // A transition only affects opacity for the fades; the others are applied by
+    // the renderer using `transitionProgress`.
+    const progress = progressThrough(incoming, timeUs, item.transitionIn);
+    const fade = transitionOpacity(item.transitionIn, progress);
+
     const opacity = evaluateNumber(item.keyframes?.['opacity'], timeUs, item.opacity ?? 1);
     // Clamp rather than drop an out-of-range value: a keyframed opacity of 1.2 is
     // a file that asks for "fully opaque", not a reason to hide the clip.
     const clamped = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
-    if (clamped <= 0) continue;
+    const combined = clamped * fade;
+    if (combined <= 0) continue;
     layers.push({
       id: item.id,
-      opacity: clamped,
+      opacity: combined,
       blendMode: item.blendMode ?? 'normal',
       trackOrder: item.trackOrder,
+      ...(progress === null ? {} : { transitionProgress: progress }),
     });
   }
   return layers.sort((a, b) => {
@@ -151,4 +185,31 @@ export function layerBlendFilter(mode: BlendMode, opacity: number): string | nul
   const b = Number(alpha.toFixed(6));
   const mix = `blend=all_expr='A*${a}+B*${b}'`;
   return first ? `${first},${mix}` : mix;
+}
+
+/** How far through its incoming transition an item is, or `null` if none covers it. */
+function progressThrough(
+  window: { startUs: number; endUs: number; durationUs: number } | undefined,
+  timeUs: number,
+  transition: Transition | undefined,
+): number | null {
+  if (!window || !transition || window.durationUs <= 0) return null;
+  if (timeUs < window.startUs || timeUs >= window.endUs) return null;
+  return Math.min(1, Math.max(0, (timeUs - window.startUs) / window.durationUs));
+}
+
+/**
+ * The opacity multiplier a transition imposes on the incoming item.
+ *
+ * Only the two shapes that keep one side dark contribute a pure fade; a crossfade
+ * needs *both* clips and is resolved by the renderer, which knows about the
+ * outgoing one. Returning 1 for those is deliberate: multiplying here as well would
+ * apply the fade twice.
+ */
+function transitionOpacity(transition: Transition | undefined, progress: number | null): number {
+  if (!transition || progress === null) return 1;
+  if (transition.type === 'fade-black' || transition.type === 'dip-color') {
+    return progress < 0.5 ? 0 : (progress - 0.5) * 2;
+  }
+  return 1;
 }

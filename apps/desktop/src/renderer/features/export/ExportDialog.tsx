@@ -301,6 +301,9 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       // The export needs to know which clip is on top, and the item itself does
       // not store that — the track's order does.
       trackOrder: state.tracks.find((track) => track.id === item.trackId)?.order ?? 0,
+      // Transitions travel too (SPEC 12 §4); without them the export cuts hard
+      // where the preview fades, which is the difference a user notices first.
+      transitionIn: item.transitionIn,
     });
   }
   return items;

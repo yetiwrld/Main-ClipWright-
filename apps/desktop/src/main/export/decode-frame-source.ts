@@ -32,6 +32,7 @@ import {
 import {
   compositeRgb,
   evaluateProperty,
+  transitionAt,
   joinYuv,
   rgbToYuv,
   splitYuv,
@@ -40,6 +41,7 @@ import {
   type ItemGeometryInput,
   type RgbFrame,
 } from '@clipwright/compositor';
+import type { Transition } from '@clipwright/project-schema/schemas';
 import { ffmpegPath, CancelledError } from './ffmpeg-runner.js';
 import { expectedFrameBytes, type FrameSource } from './export-runner.js';
 
@@ -51,6 +53,8 @@ interface ItemDecoder {
   buffered: Buffer;
   /** Frames actually produced so far (for shortfall detection). */
   framesProduced: number;
+  /** The last frame successfully read, kept so a transition can hold it. */
+  lastFrame?: Buffer;
   /** Frames the item should contribute across the export. */
   expectedFrames: number;
   /** `true` once the process exited or a read error occurred. */
@@ -97,13 +101,85 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
    * the plan happened to list items in, which is a bug that shows up once every few
    * exports.
    */
+  /**
+   * How far an item's successor's transition reaches back before the cut.
+   *
+   * A `start`-aligned window lies entirely before it, a centred one reaches back by
+   * half, an `end`-aligned one not at all. Used to keep the *outgoing* clip drawable
+   * across the overlap — during a crossfade it has already ended.
+   */
+  const extensionFor = (item: PlannedItem): number => {
+    const successor = videoItems
+      .filter((other) => other.trackId === item.trackId && other.startUs > item.startUs)
+      .sort((a, b) => a.startUs - b.startUs)[0];
+    const transition = successor?.transitionIn;
+    if (!transition || transition.durationUs <= 0) return 0;
+    if (transition.alignment === 'start') return transition.durationUs;
+    if (transition.alignment === 'center') return Math.round(transition.durationUs / 2);
+    return 0;
+  };
+
+  /** Fade imposed by a transition on an item, given how far through it is. */
+  const transitionFade = (item: PlannedItem | undefined, progress: number | null): number => {
+    if (!item?.transitionIn || progress === null) return 1;
+    const type = item.transitionIn.type;
+    if (type === 'fade-black' || type === 'dip-color') {
+      return progress < 0.5 ? 0 : (progress - 0.5) * 2;
+    }
+    return 1;
+  };
+
+  /** Opacity for one side of a transition at this instant. */
+  const transitionOpacityFor = (
+    item: PlannedItem,
+    timeUs: number,
+  ): { opacity: number; active: boolean } => {
+    if (item.transitionIn) {
+      const at = transitionAt(item.startUs, asTransition(item.transitionIn), timeUs);
+      if (at) {
+        const fadedByLayers = transitionFade(item, at.progress) < 1;
+        return { opacity: fadedByLayers ? 1 : at.state.toOpacity, active: true };
+      }
+    }
+    // Outgoing side: the next item on this track may be transitioning in.
+    const successor = videoItems
+      .filter((other) => other.trackId === item.trackId && other.startUs > item.startUs)
+      .sort((a, b) => a.startUs - b.startUs)[0];
+    if (successor?.transitionIn) {
+      const at = transitionAt(successor.startUs, asTransition(successor.transitionIn), timeUs);
+      if (at) return { opacity: at.state.fromOpacity, active: true };
+    }
+    return { opacity: 1, active: false };
+  };
+
   const visibleAt = (frameIndex: number): PlannedItem[] => {
     const timeUs = frameIndex * frameDurationUs;
     return videoItems
-      .filter((item) => timeUs >= item.startUs && timeUs < item.startUs + item.durationUs)
+      .filter((item) => {
+        const drawTo = item.startUs + item.durationUs + extensionFor(item);
+        // The incoming side is widened by its own transition window.
+        const incoming = item.transitionIn;
+        const drawFrom = incoming
+          ? Math.min(
+              item.startUs,
+              item.startUs -
+                (incoming.alignment === 'start'
+                  ? incoming.durationUs
+                  : incoming.alignment === 'center'
+                    ? Math.round(incoming.durationUs / 2)
+                    : 0),
+            )
+          : item.startUs;
+        return timeUs >= drawFrom && timeUs < drawTo;
+      })
       .sort((a, b) => {
         const order = (a.trackOrder ?? 0) - (b.trackOrder ?? 0);
-        return order !== 0 ? order : a.itemId.localeCompare(b.itemId);
+        if (order !== 0) return order;
+        // Same track: the clip that starts later is on top, because that is the one
+        // arriving. During a crossfade both are visible at once and ordering by id
+        // would paint the outgoing clip over the incoming one for half the window.
+        if (a.startUs !== b.startUs) return a.startUs - b.startUs;
+        return a.itemId.localeCompare(b.itemId);
       });
   };
 
@@ -166,8 +242,17 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
     // `scale`/`crop` once, so an animated item is decoded as several segments with
     // a constant value each (SPEC 12 §2.2). An item with no keys — the common case
     // — takes the single-decode path exactly as before.
+    // Decode the item's whole *drawable* span, not just its own duration: during a
+    // transition it is still on screen after it has ended, and a decoder trimmed to
+    // `durationUs` runs dry exactly at the cut — where the fade needs it most.
+    // One extra frame of slack: `-t` is exclusive at its boundary, so a decoder
+    // trimmed to exactly `durationUs` produces no frame for the instant the item
+    // ends. That instant is the *cut* — precisely when a transition needs both
+    // clips — so without the slack the outgoing side vanishes for one frame and
+    // the crossfade flickers to the incoming clip alone.
+    const decodeDurationUs = item.durationUs + extensionFor(item) + frameDurationUs;
     const segments = geometrySegments({
-      durationUs: item.durationUs,
+      durationUs: decodeDurationUs,
       keyframeTimes: animatedTimes(item),
       geometryAt,
     });
@@ -177,7 +262,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       args = buildSegmentedDecodeArgs({
         sourcePath: mediaPath,
         inUs: sourceInUs,
-        durationUs: item.durationUs,
+        durationUs: decodeDurationUs,
         filterComplex: segmentedDecodeChain({
           segments,
           targetFps: plan.fps,
@@ -192,7 +277,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       args = buildDecodeArgs({
         sourcePath: mediaPath,
         inUs: sourceInUs,
-        durationUs: item.durationUs,
+        durationUs: decodeDurationUs,
         filterChain: chainFor(segments[0]?.geometry ?? geometryAt(0)),
       });
     }
@@ -203,7 +288,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       child,
       buffered: Buffer.alloc(0),
       framesProduced: 0,
-      expectedFrames: Math.max(1, Math.round((item.durationUs / 1_000_000) * plan.fps)),
+      expectedFrames: Math.max(1, Math.round((decodeDurationUs / 1_000_000) * plan.fps)),
       done: false,
       stderr: '',
     };
@@ -243,6 +328,9 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
     const frame = decoder.buffered.subarray(0, frameBytes);
     decoder.buffered = decoder.buffered.subarray(frameBytes);
     decoder.framesProduced += 1;
+    // Copied, because `buffered` is a subarray of a buffer that is replaced on the
+    // next read: holding a view of it would see the following frame's bytes.
+    decoder.lastFrame = Buffer.from(frame);
     return frame;
   };
 
@@ -279,7 +367,11 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       }
       for (const [itemId, decoder] of decoders) {
         const item = decoder.item;
-        const offScreen = index * frameDurationUs >= item.startUs + item.durationUs;
+        // The *drawable* end, not the item's own: during a transition the outgoing
+        // clip is still on screen after it has ended, and killing its decoder here
+        // would leave the crossfade painting a hole.
+        const offScreen =
+          index * frameDurationUs >= item.startUs + item.durationUs + extensionFor(item);
         if (offScreen) {
           decoder.child.kill('SIGKILL');
           decoders.delete(itemId);
@@ -307,16 +399,34 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         if (!decoder) continue;
         const frame = await readFrame(decoder);
         if (!frame) {
-          // Shortfall on this layer: drop it and let the ones below show through,
-          // rather than failing the whole export over one bad clip.
+          /*
+            The decoder ran out of material while the item is still supposed to be
+            on screen. That happens at exactly one place in practice: a crossfade
+            whose outgoing clip ends where its source ends, so there are no "handles"
+            past the cut. Dropping the layer there makes the transition flicker to
+            the incoming clip for a frame or two, which reads as a stutter.
+
+            Holding the last decoded frame for the remainder of the drawable span is
+            what an editor does with a still frame, and it is visibly better than a
+            hole. The warning still names the item, so the shortfall is not silent.
+          */
           warnings.push(`The source video for ${item.itemId} ended early.`);
           decoder.child.kill('SIGKILL');
           decoders.delete(item.itemId);
+          if (decoder.lastFrame) {
+            const transition = transitionOpacityFor(item, index * frameDurationUs);
+            stack.push({
+              frame: decoder.lastFrame,
+              opacity: clampOpacity(item.opacity) * transition.opacity,
+              blendMode: asBlendMode(item.blendMode),
+            });
+          }
           continue;
         }
-        stack.push({
+        const transition = transitionOpacityFor(item, index * frameDurationUs);
+          stack.push({
           frame,
-          opacity: clampOpacity(item.opacity),
+          opacity: clampOpacity(item.opacity) * transition.opacity,
           blendMode: asBlendMode(item.blendMode),
         });
       }
@@ -452,6 +562,33 @@ const BLEND_MODES: readonly BlendMode[] = [
   'add',
   'soft-light',
 ];
+
+/**
+ * A planned transition as the schema's shape.
+ *
+ * The plan carries it structurally rather than by importing the schema, so the
+ * export package does not depend on the project schema. The cast is safe because
+ * the planner copies the stored value; the enums are re-asserted here so a file
+ * written by a newer build degrades to a sensible default instead of crashing.
+ */
+function asTransition(
+  transition: PlannedItem['transitionIn'] | undefined,
+): Transition | undefined {
+  if (!transition) return undefined;
+  const alignment =
+    transition.alignment === 'start' || transition.alignment === 'end'
+      ? transition.alignment
+      : 'center';
+  return {
+    id: 'planned',
+    type: transition.type as Transition['type'],
+    durationUs: transition.durationUs,
+    alignment,
+    params: transition.params,
+    easing: transition.easing as Transition['easing'],
+    crossfadeAudio: true,
+  };
+}
 
 /** A planned item's blend mode, falling back to `normal` for anything unknown. */
 function asBlendMode(value: string | undefined): BlendMode {

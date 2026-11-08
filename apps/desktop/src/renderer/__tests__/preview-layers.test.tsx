@@ -163,3 +163,85 @@ describe('PreviewPane layers', () => {
     expect(Number(layerNodes()[0]!.style.opacity)).toBeCloseTo(0.5, 2);
   });
 });
+
+describe('PreviewPane transitions', () => {
+  /** Two clips back to back on the main track, the second crossfading in. */
+  function twoClips(transition: Record<string, unknown>) {
+    const base = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+    const track = base.tracks.find((entry) => entry.role === 'main')!;
+    const items = {
+      a: {
+        id: 'a', trackId: track.id, type: 'video' as const, mediaId: 'm-a',
+        startUs: 0, durationUs: 1_000_000, sourceInUs: 0, transform: {}, crop: {},
+      },
+      b: {
+        id: 'b', trackId: track.id, type: 'video' as const, mediaId: 'm-b',
+        startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, transform: {}, crop: {},
+        transitionIn: {
+          id: 'tr', type: 'crossfade', durationUs: 400_000, alignment: 'center',
+          params: {}, easing: 'linear', crossfadeAudio: true, ...transition,
+        },
+      },
+    };
+    return {
+      ...base,
+      tracks: base.tracks.map((entry) =>
+        entry.id === track.id ? { ...entry, itemIds: ['a', 'b'] } : entry,
+      ),
+      items,
+    } as unknown as TimelineState;
+  }
+
+  it('draws both clips during a crossfade', () => {
+    // The bug this pins: before transitions were evaluated, clip `a` ended at 1s
+    // and clip `b` started at 1s, so at 1s exactly one of them existed and the cut
+    // was hard no matter what the project file said.
+    render(<PreviewPane state={twoClips({})} fps={30} />);
+    act(() => playheadStore.set(1_000_000));
+    expect(layerNodes().map((node) => node.dataset.layerId).sort()).toEqual(['a', 'b']);
+  });
+
+  it('keeps the outgoing clip out before the transition window opens', () => {
+    render(<PreviewPane state={twoClips({})} fps={30} />);
+    act(() => playheadStore.set(600_000));
+    expect(layerNodes().map((node) => node.dataset.layerId)).toEqual(['a']);
+  });
+
+  it('fades the outgoing clip out and the incoming clip in', () => {
+    render(<PreviewPane state={twoClips({})} fps={30} />);
+    act(() => playheadStore.set(850_000));
+    const byId = new Map(layerNodes().map((node) => [node.dataset.layerId, node]));
+    // 850ms is 1/8 of the way into [800ms, 1200ms).
+    expect(Number(byId.get('a')!.style.opacity)).toBeCloseTo(0.875, 2);
+    expect(Number(byId.get('b')!.style.opacity)).toBeCloseTo(0.125, 2);
+  });
+
+  it('leaves only the incoming clip after the window closes', () => {
+    render(<PreviewPane state={twoClips({})} fps={30} />);
+    act(() => playheadStore.set(1_400_000));
+    expect(layerNodes().map((node) => node.dataset.layerId)).toEqual(['b']);
+  });
+
+  it('slides both clips during a slide transition', () => {
+    render(<PreviewPane state={twoClips({ type: 'slide', params: { direction: 'left' } })} fps={30} />);
+    act(() => playheadStore.set(1_000_000));
+    const byId = new Map(layerNodes().map((node) => [node.dataset.layerId, node]));
+    // Halfway: the outgoing clip has moved half a frame left, the incoming one is
+    // half a frame right of centre.
+    expect(byId.get('a')!.style.transform).toContain('-50%');
+    expect(byId.get('b')!.style.transform).toContain('50%');
+  });
+
+  it('does not draw the incoming clip in the first half of a fade-to-black', () => {
+    render(<PreviewPane state={twoClips({ type: 'fade-black' })} fps={30} />);
+    act(() => playheadStore.set(900_000));
+    expect(layerNodes().map((node) => node.dataset.layerId)).toEqual(['a']);
+  });
+
+  it('fades the incoming clip in over the second half of a fade-to-black', () => {
+    render(<PreviewPane state={twoClips({ type: 'fade-black' })} fps={30} />);
+    act(() => playheadStore.set(1_100_000));
+    const byId = new Map(layerNodes().map((node) => [node.dataset.layerId, node]));
+    expect(Number(byId.get('b')!.style.opacity)).toBeCloseTo(0.5, 2);
+  });
+});

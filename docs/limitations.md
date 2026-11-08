@@ -36,7 +36,7 @@ This document tracks architectural scope boundaries and honest limitations per `
 1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes the audio device position the master clock whenever audio plays. This slice advances the playhead from `performance.now()` and lets the `<video>` element follow it, so a long playback can drift from the audio by a frame. Audio-mastered playback lands with the audio tools.
 2. **Preview uses the original media and seeks the `<video>` element.** Proxies are generated during import but the preview does not yet switch to them, so scrubbing a 4K source is slower than the "use proxies by default" requirement.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
-4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. **Not implemented yet:** linked audio detach/unlink, transitions, markers in the ruler, context menus, in-editor import.
+4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions **render and export**, but there is no timeline handle or inspector control to create one: `addTransition`/`updateTransition`/`removeTransition` exist as store commands and IPC endpoints, so a transition round-trips through a project file and plays correctly, yet the only way to make one today is to call the command. **Not implemented yet:** linked audio detach/unlink, a transition UI, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
 6. **The inspector edits by number, not on the canvas.** Opacity, volume, pan,
    speed, crop edges, scale and rotation are all editable and undoable, and the
@@ -63,9 +63,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    exports framed. Layering is composited too: every visible picture layer is
    decoded, blended bottom-first at its own opacity and blend mode, and the result
    is written — so an overlay track, a faded clip and a `multiply` layer all reach
-   the file. What is still missing is the rest of the *video* compositor: effects,
-   transitions, masks and the `rotationJitterDeg` per-caption tilt are **not
-   rendered**. Where nothing is on the timeline you get the canvas colour. The
+   the file. Transitions render too: the two clips either side of a cut are both
+   drawn across the overlap and faded, slid or zoomed per the transition's type and
+   easing. What is still missing is the rest of the *video* compositor: effects,
+   masks and the `rotationJitterDeg` per-caption tilt are **not rendered**. Where nothing is on the timeline you get the canvas colour. The
    export dialog says so before you press Export.
 2. **Keyframed geometry exports as steps, not ramps.** ffmpeg 4.1 evaluates
    `scale`/`crop` expressions once, at configuration time — there is no `t` in

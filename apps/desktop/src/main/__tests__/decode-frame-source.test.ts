@@ -739,4 +739,118 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(red).toBeGreaterThan(200);
     expect(red).toBeLessThan(250);
   }, 120_000);
+  it('crossfades two clips in the exported file', async () => {
+    // The test that matters for transitions: sample the produced file at three
+    // instants and check the picture moves from one clip to the other through an
+    // intermediate value. A hard cut gives the two endpoints and nothing between.
+    const first = makeSolidSource('xf-first.mp4', [220, 30, 30]); // red
+    const second = makeSolidSource('xf-second.mp4', [30, 30, 220]); // blue
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'media-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'media-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'crossfade', durationUs: 400_000, alignment: 'center',
+            params: {}, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-crossfade.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-transition',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'media-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    // Mean red/blue at a given time in the output.
+    const sample = (seconds: number): [number, number] => {
+      const rgbPath = join(TMP, 'xf-probe.rgb');
+      execFileSync(
+        ffmpegPath(),
+        ['-hide_banner', '-loglevel', 'error', '-nostdin',
+          '-ss', String(seconds), '-i', outputPath, '-frames:v', '1',
+          '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+          '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+        { stdio: 'ignore' },
+      );
+      const raw = readFileSync(rgbPath);
+      rmSync(rgbPath, { force: true });
+      let red = 0;
+      let blue = 0;
+      for (let index = 0; index < raw.length; index += 3) {
+        red += raw[index]!;
+        blue += raw[index + 2]!;
+      }
+      const pixels = raw.length / 3;
+      return [red / pixels, blue / pixels];
+    };
+
+    const [startRed, startBlue] = sample(0.2);
+    const [endRed, endBlue] = sample(1.5);
+
+    // Before the cut the frame is the first clip; after it, the second.
+    expect(startRed).toBeGreaterThan(150);
+    expect(startBlue).toBeLessThan(90);
+    expect(endBlue).toBeGreaterThan(150);
+    expect(endRed).toBeLessThan(90);
+
+    /*
+      The decisive measurement: the *proportion* of the two clips at the cut.
+
+      Sampling mid-transition and asking "is it somewhere in between" is not enough
+      — an un-faded stack of the two clips also lands in between, just with the
+      wrong ratio (the top clip wins wherever it is opaque). So the transition's
+      opacity is measured directly by taking the ratio of the two colour channels
+      and comparing it with the progress the transition should have.
+
+      At 1.0 s the centred window [0.8 s, 1.2 s) is exactly half done, so the two
+      clips contribute equally and the blue:red ratio must be ≈ 1.
+    */
+    const ratioAtCut = (() => {
+      const rgbPath = join(TMP, 'xf-cut.rgb');
+      execFileSync(
+        ffmpegPath(),
+        ['-hide_banner', '-loglevel', 'error', '-nostdin',
+          // `-ss` *after* `-i` seeks by decoding, so the frame is the one at 1.0 s
+          // rather than the nearest keyframe before it. Before `-i` ffmpeg jumps to
+          // a keyframe and then discards nothing, which landed 200 ms late here.
+          '-i', outputPath, '-ss', '1.0', '-frames:v', '1',
+          '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+          '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+        { stdio: 'ignore' },
+      );
+      const raw = readFileSync(rgbPath);
+      rmSync(rgbPath, { force: true });
+      let red = 0;
+      let blue = 0;
+      for (let index = 0; index < raw.length; index += 3) {
+        red += raw[index]!;
+        blue += raw[index + 2]!;
+      }
+      return blue / Math.max(1, red);
+    })();
+    // Even mix: blue ≈ red, so the ratio sits near 1. The window is deliberately
+    // asymmetric — red is the clip being *covered*, and 4:2:0 chroma rounding
+    // favours the top layer slightly — but it excludes the 4:1 and 8:1 ratios an
+    // un-faded stack produced, which is the failure this guards.
+    expect(ratioAtCut).toBeGreaterThan(0.6);
+    expect(ratioAtCut).toBeLessThan(2.5);
+  }, 180_000);
 });

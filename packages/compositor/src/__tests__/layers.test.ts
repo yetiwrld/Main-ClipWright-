@@ -192,3 +192,95 @@ describe('layerBlendFilter', () => {
     expect(layerBlendFilter('overlay', 0.333333)).toBe(layerBlendFilter('overlay', 0.333333));
   });
 });
+
+describe('visibleLayers with an incoming transition', () => {
+  const transition = (overrides: Record<string, unknown> = {}) => ({
+    id: 'tr-1',
+    type: 'crossfade' as const,
+    durationUs: 400_000,
+    alignment: 'center' as const,
+    params: {},
+    easing: 'linear' as const,
+    crossfadeAudio: true,
+    ...overrides,
+  });
+
+  it('draws an item before its start while a centred transition runs', () => {
+    // The window is [800ms, 1200ms) around a 1s cut. At 900ms the item has not
+    // started, yet the preview must show it fading in — dropping it here is what
+    // makes a crossfade look like a hard cut.
+    const withTransition = item({ id: 'in', startUs: 1_000_000, transitionIn: transition() });
+    expect(visibleLayers([withTransition], 900_000).map((layer) => layer.id)).toEqual(['in']);
+  });
+
+  it('drops it before the transition window opens', () => {
+    const withTransition = item({ id: 'in', startUs: 1_000_000, transitionIn: transition() });
+    expect(visibleLayers([withTransition], 700_000)).toHaveLength(0);
+  });
+
+  it('reports the progress through the transition', () => {
+    const withTransition = item({ id: 'in', startUs: 1_000_000, transitionIn: transition() });
+    const [layer] = visibleLayers([withTransition], 1_000_000);
+    expect(layer!.transitionProgress).toBeCloseTo(0.5, 6);
+  });
+
+  it('leaves progress undefined when no transition covers the instant', () => {
+    const withTransition = item({ id: 'in', startUs: 1_000_000, transitionIn: transition() });
+    // 1.5s is past the window; the item is drawn normally.
+    const [layer] = visibleLayers([withTransition], 1_500_000);
+    expect(layer!.transitionProgress).toBeUndefined();
+  });
+
+  it('keeps the incoming item hidden through the first half of fade-black', () => {
+    // A fade-to-black must show the outgoing clip alone until the midpoint; if the
+    // incoming one were visible early the frame would never reach black.
+    const withTransition = item({
+      id: 'in',
+      startUs: 1_000_000,
+      transitionIn: transition({ type: 'fade-black' }),
+    });
+    expect(visibleLayers([withTransition], 900_000)).toHaveLength(0);
+  });
+
+  it('fades the incoming item in over the second half of fade-black', () => {
+    const withTransition = item({
+      id: 'in',
+      startUs: 1_000_000,
+      transitionIn: transition({ type: 'fade-black' }),
+    });
+    const [layer] = visibleLayers([withTransition], 1_100_000);
+    // Progress 0.75 → opacity (0.75 − 0.5) × 2 = 0.5.
+    expect(layer!.opacity).toBeCloseTo(0.5, 6);
+  });
+
+  it('does not fade a crossfade here, because the renderer owns both sides', () => {
+    // Applying the fade in both places would square it: 0.5 × 0.5 = 0.25.
+    const withTransition = item({ id: 'in', startUs: 1_000_000, transitionIn: transition() });
+    const [layer] = visibleLayers([withTransition], 1_000_000);
+    expect(layer!.opacity).toBe(1);
+  });
+
+  it('honours an end-aligned transition after the cut only', () => {
+    const withTransition = item({
+      id: 'in',
+      startUs: 1_000_000,
+      transitionIn: transition({ alignment: 'end' }),
+    });
+    // Before the cut the item is genuinely absent.
+    expect(visibleLayers([withTransition], 950_000)).toHaveLength(0);
+    expect(visibleLayers([withTransition], 1_100_000).map((l) => l.id)).toEqual(['in']);
+  });
+
+  it('applies a keyframed opacity on top of the transition', () => {
+    const withTransition = item({
+      id: 'in',
+      startUs: 1_000_000,
+      opacity: 1,
+      transitionIn: transition({ type: 'fade-black' }),
+      keyframes: { opacity: keys([[1_000_000, 1], [1_300_000, 1]]) },
+    });
+    const [layer] = visibleLayers([withTransition], 1_100_000);
+    // Keyframed 1 × transition 0.5.
+    expect(layer!.opacity).toBeCloseTo(0.5, 6);
+  });
+});

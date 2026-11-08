@@ -4,7 +4,13 @@ import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
-import { itemGeometry, visibleLayers, type ItemGeometry, type VisibleLayer } from '@clipwright/compositor';
+import {
+  itemGeometry,
+  transitionAt,
+  visibleLayers,
+  type ItemGeometry,
+  type VisibleLayer,
+} from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
 
@@ -87,33 +93,61 @@ export function PreviewPane({
 
 
   /**
-   * Every picture layer at the playhead, bottom first (SPEC 10 §2/§6).
+   * Every picture layer at the playhead, bottom first (SPEC 10 §2/§6) including
+   * the two sides of a running transition (SPEC 12 §4).
    *
    * The preview used to draw exactly one item — the one that started last — so an
    * overlay clip was invisible and the main video showed through it. Layering is
    * resolved by the same `visibleLayers` the export uses, which is what stops the
    * two from disagreeing about which clip is on top.
+   *
+   * A transition is the one case where an item is drawn outside its own time range:
+   * during a centred crossfade the *outgoing* clip has already ended and the
+   * *incoming* one has not started, yet both are on screen. `visibleLayers` already
+   * widens the incoming side; the outgoing side is widened here by looking forward
+   * for the next item on the same track.
    */
-  const layers = useMemo(
-    () =>
-      visibleLayers(
-        Object.values(state.items)
-          .filter((entry) => (entry.type === 'video' || entry.type === 'image') && entry.mediaId)
-          .map((entry) => ({
-            id: entry.id,
-            startUs: entry.startUs,
-            durationUs: entry.durationUs,
-            trackOrder: state.tracks.find((track) => track.id === entry.trackId)?.order ?? 0,
-            opacity: entry.opacity,
-            blendMode: entry.blendMode,
-            keyframes: entry.keyframes,
-            disabled: entry.disabled,
-            hiddenTrack: Boolean(state.tracks.find((track) => track.id === entry.trackId)?.hidden),
-          })),
-        playheadUs,
-      ),
-    [state, playheadUs],
-  );
+  const layers = useMemo(() => {
+    const pictures = Object.values(state.items).filter(
+      (entry) => (entry.type === 'video' || entry.type === 'image') && entry.mediaId,
+    );
+    const orderOf = (trackId: string) =>
+      state.tracks.find((track) => track.id === trackId)?.order ?? 0;
+
+    return visibleLayers(
+      pictures.map((entry) => {
+        // An item whose successor starts inside a transition window stays drawable
+        // across that window: it is the outgoing half of the transition.
+        const successor = pictures
+          .filter((other) => other.trackId === entry.trackId && other.startUs > entry.startUs)
+          .sort((a, b) => a.startUs - b.startUs)[0];
+        // How far the successor's transition reaches back before its own start:
+        // the whole duration for a `start`-aligned window, half of it for a centred
+        // one, and not at all for an `end`-aligned one.
+        const transitionIn = successor?.transitionIn;
+        const extensionUs = !transitionIn
+          ? 0
+          : transitionIn.alignment === 'start'
+            ? transitionIn.durationUs
+            : transitionIn.alignment === 'center'
+              ? Math.round(transitionIn.durationUs / 2)
+              : 0;
+        return {
+          id: entry.id,
+          startUs: entry.startUs,
+          durationUs: entry.durationUs + extensionUs,
+          trackOrder: orderOf(entry.trackId),
+          opacity: entry.opacity,
+          blendMode: entry.blendMode,
+          keyframes: entry.keyframes,
+          disabled: entry.disabled,
+          hiddenTrack: Boolean(state.tracks.find((track) => track.id === entry.trackId)?.hidden),
+          transitionIn: entry.transitionIn,
+        };
+      }),
+      playheadUs,
+    );
+  }, [state, playheadUs]);
 
   // Sound comes from the bottom picture layer only — the one `videoRef` points at.
   // Each layer seeks itself; this function must not seek or the two would fight
@@ -191,13 +225,17 @@ export function PreviewPane({
           }}
         >
           {layers.length > 0 ? (
-            layers.map((layer: VisibleLayer, index: number) => (
+            layers.map((layer: VisibleLayer, index: number) => {
+              const transition = transitionFor(layer, state, playheadUs);
+              return (
               <PreviewLayer
                 key={layer.id}
                 item={state.items[layer.id]!}
                 geometry={itemGeometry({ ...state.items[layer.id]!, timeUs: playheadUs })}
-                opacity={layer.opacity}
+                opacity={layer.opacity * (transition?.fromOpacity ?? 1)}
                 blendMode={layer.blendMode}
+                transitionOffsetX={transition?.offsetX ?? 0}
+                transitionScale={transition?.scale ?? 1}
                 initialAspect={canvas.width / canvas.height}
                 muted={muted}
                 playing={playing}
@@ -207,7 +245,8 @@ export function PreviewPane({
                 audio={index === 0}
                 reffed={index === 0 ? videoRef : undefined}
               />
-            ))
+              );
+            })
           ) : (
             <div
               style={{
@@ -301,6 +340,53 @@ function TransportTimecode({ fps, durationUs }: { fps: 30 | 60; durationUs: numb
 
 
 /**
+ * What a running transition asks of one layer (SPEC 12 §4).
+ *
+ * A layer can be on either side of the cut, and the two sides want opposite halves
+ * of the same `TransitionState` — so this picks the half. The incoming item is the
+ * one that carries `transitionIn`; the outgoing one is whichever layer's successor
+ * does. Offsets are returned in frame widths, the unit the transform uses.
+ */
+function transitionFor(
+  layer: VisibleLayer,
+  state: TimelineState,
+  timeUs: number,
+): { fromOpacity: number; offsetX: number; scale: number } | null {
+  const item = state.items[layer.id];
+  if (!item) return null;
+
+  if (item.transitionIn) {
+    const at = transitionAt(item.startUs, item.transitionIn, timeUs);
+    if (!at) return null;
+    // `visibleLayers` already multiplies in the two fade shapes' contribution
+    // (`fade-black`, `dip-color`), because those are the only ones where the
+    // incoming item is *absent* rather than transparent. Applying `toOpacity` again
+    // here would square the fade — a 0.5 became 0.25.
+    const fadedByLayers =
+      item.transitionIn.type === 'fade-black' || item.transitionIn.type === 'dip-color';
+    return {
+      fromOpacity: fadedByLayers ? 1 : at.state.toOpacity,
+      offsetX: at.state.toOffsetX,
+      scale: at.state.toScale,
+    };
+  }
+
+  // Outgoing side: find the next item on this track and ask its transition.
+  const pictures = Object.values(state.items).filter(
+    (entry) => entry.trackId === item.trackId && entry.startUs > item.startUs,
+  );
+  const successor = pictures.sort((a, b) => a.startUs - b.startUs)[0];
+  if (!successor?.transitionIn) return null;
+  const at = transitionAt(successor.startUs, successor.transitionIn, timeUs);
+  if (!at) return null;
+  return {
+    fromOpacity: at.state.fromOpacity,
+    offsetX: at.state.fromOffsetX,
+    scale: at.state.fromScale,
+  };
+}
+
+/**
  * One picture layer of the preview (SPEC 10 §2/§6).
  *
  * Extracted from the canvas so the frame can hold more than one. The crop,
@@ -320,6 +406,8 @@ const PreviewLayer = memo(function PreviewLayer({
   opacity,
   blendMode,
   initialAspect,
+  transitionOffsetX,
+  transitionScale,
   muted,
   playing,
   onPlayRejected,
@@ -332,6 +420,10 @@ const PreviewLayer = memo(function PreviewLayer({
   blendMode: string;
   /** Canvas aspect, used until the source reports its own. */
   initialAspect: number;
+  /** Horizontal slide from a running transition, in frame widths. */
+  transitionOffsetX: number;
+  /** Scale from a running `zoom` transition. */
+  transitionScale: number;
   muted: boolean;
   playing: boolean;
   onPlayRejected: () => void;
@@ -386,7 +478,11 @@ const PreviewLayer = memo(function PreviewLayer({
         inset: 0,
         opacity,
         mixBlendMode: CSS_BLEND_MODE[blendMode] ?? 'normal',
-        transform: `translate(${geometry.offsetX * 100}%, ${geometry.offsetY * 100}%)`,
+        // The transition's slide adds to the item's own offset: both are frame
+        // fractions, so they compose without conversion.
+        transform: `translate(${(geometry.offsetX + transitionOffsetX) * 100}%, ${
+          geometry.offsetY * 100
+        }%)`,
       }}
     >
       <div
@@ -397,8 +493,10 @@ const PreviewLayer = memo(function PreviewLayer({
           top: '50%',
           left: '50%',
           transform: `translate(-50%, -50%) scale(${
-            geometry.scaleX * (geometry.flipH ? -1 : 1)
-          }, ${geometry.scaleY * (geometry.flipV ? -1 : 1)}) rotate(${geometry.rotation}deg)`,
+            geometry.scaleX * (geometry.flipH ? -1 : 1) * transitionScale
+          }, ${geometry.scaleY * (geometry.flipV ? -1 : 1) * transitionScale}) rotate(${
+            geometry.rotation
+          }deg)`,
           maxWidth: '100%',
           maxHeight: '100%',
           aspectRatio: `${geometry.source.width * sourceAspect} / ${geometry.source.height}`,

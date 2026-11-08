@@ -83,8 +83,9 @@ each clip's static crop, scale, rotation, flip and offset are applied to its
 decoded frames, and layers are composited: every visible picture layer is decoded,
 blended bottom-first at its own opacity and blend mode, and written out. The
 preview and the export resolve the layer stack through the same function, so they
-agree about which clip is on top. What is still missing is effects, transitions and
-masks — those are **not rendered into the exported file**.
+agree about which clip is on top, and transitions draw both clips across the
+overlap in the preview and dissolve, slide or zoom them in the file. What is still
+missing is effects and masks — those are **not rendered into the exported file**.
 Keyframed geometry *is* rendered, but as steps: ffmpeg 4.1 evaluates `scale`
 and `crop` once, so an animated item is split into one segment per keyframe and
 each segment is baked at its start value.
@@ -135,7 +136,7 @@ Captions themselves are done:
 engine, frame builder, preview, list, word editor, burn-in.
 
 **3. Make the export render the rest of the timeline** — the video compositor:
-effects, transitions and masks. Captions, keyframed geometry and layer blending
+effects and masks. Captions, keyframed geometry, layer blending and transitions
 already render; this is what remains, and it is what stops the editor offering
 things the export cannot show.
 

@@ -85,6 +85,18 @@ export interface PlannedItem {
   /** Blend mode against the layers below (SPEC 10 §6). Absent means `normal`. */
   blendMode?: string;
   /**
+   * The transition entering this item (SPEC 12 §4). Carried so the export can widen
+   * the item's drawable span across the overlap and fade the two clips together,
+   * rather than cutting hard while the preview crossfades.
+   */
+  transitionIn?: {
+    type: string;
+    durationUs: number;
+    alignment: 'center' | 'start' | 'end';
+    params: Record<string, number | boolean | string>;
+    easing: string;
+  };
+  /**
    * Track stacking order, larger is nearer the viewer. Needed to composite: two
    * visible items are otherwise an unordered set, and the export would have to
    * guess which one is on top.
@@ -233,6 +245,8 @@ export interface ExportSettings {
     opacity?: number;
     /** Blend mode against the layers below (SPEC 10 §6). */
     blendMode?: string;
+    /** The transition entering this item (SPEC 12 §4). */
+    transitionIn?: PlannedItem['transitionIn'];
     /** Stacking order of the item's track; larger is nearer the viewer. */
     trackOrder?: number;
   }>;
@@ -310,6 +324,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         opacity: item.opacity,
         blendMode: item.blendMode,
         trackOrder: item.trackOrder,
+        transitionIn: item.transitionIn,
         captionSegment: item.captionSegment,
       };
     })

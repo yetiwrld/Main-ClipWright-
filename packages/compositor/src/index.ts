@@ -105,3 +105,22 @@ export {
   type RgbFrame,
   type YuvFrame,
 } from './composite.js';
+
+/**
+ * SPEC 12 §4 — transitions.
+ *
+ * The command layer could always create them; nothing evaluated them, so a
+ * crossfade existed in the project file and nowhere else. Both renderers read the
+ * timing from here so they cannot disagree about when a transition happens.
+ */
+export {
+  easeWithBezier,
+  transitionAt,
+  transitionBezier,
+  transitionProgress,
+  transitionState,
+  transitionWindow,
+  type TransitionAlignment,
+  type TransitionState,
+  type TransitionWindow,
+} from './transitions.js';
