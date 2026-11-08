@@ -8,7 +8,7 @@
  * be able to swap in a test.
  */
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -554,6 +554,92 @@ describe('downloading and installing', () => {
     await ordered.installAndRestart();
 
     expect(order).toEqual(['prepare', 'installer']);
+  });
+
+  it('resumes from a .part file left by a previous run (§11)', async () => {
+    // Half the installer is already on disk from an earlier attempt that was
+    // interrupted when the app closed.
+    const release = makeRelease();
+    const half = Math.floor(INSTALLER_BYTES.length / 2);
+    writeFileSync(join(cacheDir, `${release.name}.part`), INSTALLER_BYTES.subarray(0, half));
+
+    let requestedRange: string | undefined;
+    const base = fakeFetch({
+      manifest: release.manifestText,
+      signature: release.signature,
+      latest: release.latestYml,
+      installer: INSTALLER_BYTES.subarray(half),
+    });
+    const wrapped = ((url: string, init?: RequestInit) => {
+      if (url.includes('Setup')) {
+        requestedRange = (init?.headers as Record<string, string> | undefined)?.['range'];
+        return Promise.resolve({
+          ok: true,
+          status: 206,
+          url,
+          text: async () => '',
+          arrayBuffer: async () =>
+            INSTALLER_BYTES.subarray(half).buffer.slice(
+              INSTALLER_BYTES.subarray(half).byteOffset,
+              INSTALLER_BYTES.subarray(half).byteOffset + INSTALLER_BYTES.subarray(half).byteLength,
+            ),
+        } as never);
+      }
+      return (base as unknown as (u: string, i?: RequestInit) => Promise<never>)(url, init);
+    }) as FetchLike;
+
+    const service = makeService({ fetch: wrapped });
+    await service.check({ manual: true });
+    const result = await service.download();
+
+    expect(requestedRange).toBe(`bytes=${half}-`);
+    expect(result.ok).toBe(true);
+    // The reassembled file must be byte-identical, or the digest check fails.
+    expect(readFileSync(join(cacheDir, release.name))).toEqual(INSTALLER_BYTES);
+    expect(existsSync(join(cacheDir, `${release.name}.part`))).toBe(false);
+  });
+
+  it('discards the prefix when the server ignores the Range header', async () => {
+    // A CDN that does not honour Range answers 200 with the whole file. Using
+    // the prefix on top of that would produce a corrupt file.
+    const release = makeRelease();
+    writeFileSync(join(cacheDir, `${release.name}.part`), Buffer.from('stale prefix'));
+
+    const service = makeService({
+      fetch: fakeFetch({
+        manifest: release.manifestText,
+        signature: release.signature,
+        latest: release.latestYml,
+        installer: INSTALLER_BYTES, // full body, status 200
+      }),
+    });
+    await service.check({ manual: true });
+    const result = await service.download();
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(cacheDir, release.name))).toEqual(INSTALLER_BYTES);
+    expect(existsSync(join(cacheDir, `${release.name}.part`))).toBe(false);
+  });
+
+  it('ignores a .part file larger than the installer it is for', async () => {
+    // A leftover from a different version. Resuming from it would ask for a range
+    // past the end of the file.
+    const release = makeRelease();
+    writeFileSync(join(cacheDir, `${release.name}.part`), Buffer.alloc(INSTALLER_BYTES.length + 100));
+
+    const service = makeService({
+      fetch: fakeFetch({
+        manifest: release.manifestText,
+        signature: release.signature,
+        latest: release.latestYml,
+        installer: INSTALLER_BYTES,
+      }),
+    });
+    await service.check({ manual: true });
+    const result = await service.download();
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(cacheDir, release.name))).toEqual(INSTALLER_BYTES);
   });
 
   it('cancels a download that is in flight', async () => {

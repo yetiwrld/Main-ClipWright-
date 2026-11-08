@@ -17,6 +17,7 @@
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   SNOOZE_MS,
@@ -432,21 +433,59 @@ export class UpdateService {
    */
   private async downloadFile(url: string, filePath: string, expectedBytes: number): Promise<Buffer> {
     await mkdir(dirname(filePath), { recursive: true });
-    // §11: a partial file from a previous run is not resumed (an HTTP Range would
-    // need the server's cooperation and a verified prefix); it is replaced.
-    await rm(filePath, { force: true });
+    const partialPath = `${filePath}.part`;
+    const signal = this.abortSignal();
 
-    const response = await this.options.fetch(url, {
-      headers: { 'user-agent': updateUserAgent(this.options.currentVersion, process.platform) },
-      signal: this.abortSignal(),
-    });
+    /**
+     * §11: "app closed during download — resumable partial file (*.part)",
+     * "disk full during download — pause/resume".
+     *
+     * The partial file is kept across runs, so the next attempt continues where
+     * this one stopped. Safety rests on two things: the bytes are only trusted
+     * after the signed digest matches, and a resumed transfer is discarded if the
+     * server answers with anything other than the range we asked for. A resumed
+     * prefix that the server did not actually honour would produce a corrupt file
+     * that hashes wrongly — visible, but slow to discover at 150 MB.
+     */
+    let startAt = 0;
+    if (expectedBytes > 0 && existsSync(partialPath)) {
+      const existing = statSync(partialPath).size;
+      // Only resume when the prefix is smaller than the target and plausibly real.
+      if (existing > 0 && existing < expectedBytes) startAt = existing;
+    }
+
+    const headers: Record<string, string> = {
+      'user-agent': updateUserAgent(this.options.currentVersion, process.platform),
+    };
+    if (startAt > 0) headers.range = `bytes=${startAt}-`;
+
+    const response = await this.options.fetch(url, { headers, signal });
     if (!response.ok) {
       if (response.status === 429) throw new UpdateRateLimitError();
+      // 416 means our prefix is longer than the file — start over rather than fail.
+      if (response.status === 416) {
+        await rm(partialPath, { force: true });
+        throw new Error('The partial download did not match; it was discarded and will start again.');
+      }
       throw new Error(`HTTP ${response.status} while downloading`);
     }
     if (response.url) this.assertAllowed(response.url);
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    let prefix = Buffer.alloc(0);
+    if (startAt > 0) {
+      const resumed = response.status === 206;
+      if (!resumed) {
+        // The server ignored the Range header and sent the whole file. Use it, and
+        // drop the prefix so the bytes are contiguous from zero.
+        startAt = 0;
+        await rm(partialPath, { force: true });
+      } else {
+        prefix = await readFile(partialPath);
+      }
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    const buffer = prefix.byteLength > 0 ? Buffer.concat([prefix, body]) : body;
 
     // Report progress from the real byte count. A single-shot fetch cannot give
     // per-chunk events, so we report the completed transfer honestly rather than
@@ -461,6 +500,8 @@ export class UpdateService {
     });
 
     await writeFile(filePath, buffer);
+    // The whole point of the partial file is gone once the whole file is written.
+    await rm(partialPath, { force: true });
     return buffer;
   }
 

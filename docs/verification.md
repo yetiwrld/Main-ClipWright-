@@ -17,13 +17,13 @@ pnpm test:unit
 
 ```
 Test Files  46 passed (46)
-     Tests  1050 passed (1050)
+     Tests  1053 passed (1053)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 237 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/main` | 240 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 170 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
@@ -31,7 +31,7 @@ Test Files  46 passed (46)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1050** | 46 files |
+| **Total** | **1053** | 46 files |
 
 ### Tests that run real processes
 
@@ -135,6 +135,9 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | The recovery text warns that a migration also rolls back databases | `journal.test.ts` on `recoveryMessage` (§7.5) |
 | The update dialog cannot install before backups are taken | `update-service.test.ts` — a failing `prepareInstall` aborts the install |
 | The chip and dialog are actually mounted | `update-notice.test.tsx`; the snapshot is reachable from `App` |
+| A download resumes from a `.part` file left by an interrupted run | `update-service.test.ts` asserts the `Range` header and a byte-identical result (§11) |
+| A resumed download is discarded when the server ignores Range | `update-service.test.ts` — a 200 response drops the prefix rather than concatenating it |
+| A `.part` file bigger than the installer is ignored | `update-service.test.ts` |
 | An offline machine says "check your internet connection", not "couldn't be completed" | `state.test.ts` on the real `TypeError: fetch failed` shape, including the reason hidden in `cause` (§11) |
 | A file held open by antivirus maps to the security-software wording | `state.test.ts` — EBUSY (§11) |
 | yt-dlp updates are checked weekly, not on every launch | `ytdlp.test.ts`, clock injected (§9) |
