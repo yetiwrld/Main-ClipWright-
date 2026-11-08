@@ -156,7 +156,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 
 | Gap | Why |
 |---|---|
-| A packaged Windows installer has been produced | No installer exists: packaging needs Windows binaries this environment cannot download (see §5). The build that produces the app bundle is verified; the step after it is not |
+| A packaged Windows installer has been produced | No installer exists here: `electron-builder` needs the Electron binary and the Windows toolchain, and neither can be downloaded in this environment (`Cannot compute electron version from installed node modules`). The app bundle itself is built and verified; the packaging step after it never ran |
+| `electron-builder` has ever completed | **Never, in any environment.** It failed at the first step here for two reasons, both now fixed statically: Electron was declared only at the workspace root, and `electronVersion` was not pinned. Both would have failed the release job at its last step. `check-repo` now cross-checks the builder config against `package.json` so at least the configuration is not the thing that fails |
 | A real GitHub release, end to end | No published release exists yet; the tests use a fake network with real cryptography |
 | `electron-updater` driving an actual download | `electron-updater` is injected and faked in tests; the real library is exercised only in a packaged build |
 | Installing an update and relaunching | Needs Windows and a published release |

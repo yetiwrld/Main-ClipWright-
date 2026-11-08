@@ -335,7 +335,53 @@ for (const surface of UNSIGNED_SURFACES) {
 }
 
 /* ------------------------------------------------------------------ *
- * 9. File-name references in the package config must match package.json.
+ * 9. The packaging config must agree with package.json.
+ *
+ * `electron` was declared only at the workspace root, so electron-builder —
+ * which runs in apps/desktop — could not resolve a version at all:
+ *   "Cannot compute electron version from installed node modules"
+ * The release job would have failed at the last step, after the version was
+ * bumped and pushed. Packaging is the one thing that cannot be exercised on
+ * every commit, so it gets checked statically instead.
+ * ------------------------------------------------------------------ */
+const builderConfigPath = join(ROOT, 'apps', 'desktop', 'electron-builder.yml');
+if (existsSync(builderConfigPath)) {
+  const yaml = readFileSync(builderConfigPath, 'utf8');
+  const desktopManifest = JSON.parse(
+    readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'),
+  );
+
+  const declaredElectron =
+    desktopManifest.devDependencies?.electron ?? desktopManifest.dependencies?.electron ?? null;
+  if (!declaredElectron) {
+    fail(
+      'apps/desktop/package.json does not declare "electron". electron-builder runs in that ' +
+        'directory and cannot resolve a version from the workspace root alone.',
+    );
+  }
+
+  const pinned = /^electronVersion:\s*([\w.]+)/m.exec(yaml)?.[1];
+  if (!pinned) {
+    fail('apps/desktop/electron-builder.yml does not pin electronVersion.');
+  } else if (declaredElectron && !declaredElectron.includes(pinned)) {
+    fail(
+      `electron-builder.yml pins electron ${pinned} but package.json asks for ${declaredElectron}. ` +
+        `The release would ship a different Electron than the one that was tested.`,
+    );
+  }
+
+  // `files` must include what the main process actually loads. Matched by
+  // directory rather than by exact path, because the config globs a tree
+  // (`dist/main/**/*`) and demanding the literal filename would be a false alarm.
+  const mainEntry = (desktopManifest.main ?? './dist/main/index.cjs').replace(/^\.\//, '');
+  const mainDir = mainEntry.split('/').slice(0, -1).join('/');
+  if (!yaml.includes(mainDir)) {
+    fail(`electron-builder.yml does not package ${mainDir}/, which holds package.json's "main" (${mainEntry}).`);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 10. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';

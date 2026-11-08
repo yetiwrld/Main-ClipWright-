@@ -10,6 +10,12 @@
 #
 # Build: pnpm --filter @clipwright/desktop dist:win
 
+# Pinned here as well as in devDependencies so packaging does not depend on
+# node_modules resolution: electron-builder otherwise fails with "Cannot compute
+# electron version from installed node modules" when Electron lives only at the
+# workspace root, which is exactly how it was first configured.
+electronVersion: 34.2.0
+
 appId: com.clipwright.studio
 productName: Clipwright Studio
 copyright: Copyright © 2026 Clipwright Studio

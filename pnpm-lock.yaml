@@ -170,6 +170,10 @@ importers:
       zustand:
         specifier: ^5.0.3
         version: 5.1.0(@types/react@18.3.31)(immer@10.2.0)(react@18.3.1)
+    devDependencies:
+      electron:
+        specifier: ^34.2.0
+        version: 34.5.8(supports-color@7.2.0)
 
   packages/ai-core:
     dependencies:
