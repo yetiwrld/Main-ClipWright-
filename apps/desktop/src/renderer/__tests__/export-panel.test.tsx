@@ -37,11 +37,17 @@ describe('ExportPanel', () => {
       />,
     );
     const note = screen.getByTestId('export-limits-note').textContent ?? '';
+    // The note has to stay *true*, which means it changes as features land. It used
+    // to say transitions were not rendered, and this test used to assert that — so
+    // the test itself was holding a false claim in place. Each feature that lands
+    // moves a phrase from "not rendered" to "rendered".
     expect(note).toContain('captions');
     expect(note).toContain('transitions');
-    expect(note).toContain('not rendered yet');
-    // The old wording said text was missing; captions are now burnt in, so
-    // repeating it would be the same failure pointed the other way.
+    expect(note).toContain('keyframed');
+    expect(note).toContain('effects');
+    expect(note).not.toContain('not rendered yet');
+    // The old wording said text was missing; captions are burnt in, so repeating
+    // that would be the same failure pointed the other way.
     expect(note).not.toContain('Text, effects');
   });
 

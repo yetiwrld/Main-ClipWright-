@@ -138,7 +138,7 @@ BT.601 frames comes back within ±4 levels of the original colour.
 
 | Gap | Why, and what it needs |
 |---|---|
-| **The video compositor is not in the export path.** Effects, transitions, keyframed transforms, blend modes and masks are not rendered | Each video/image item is decoded and the topmost visible one is shown. Disclosed in the export dialog, `docs/limitations.md`, and locked by a renderer test. **Captions are now burnt in** — ffmpeg renders a generated ASS script, verified here by burning a Karaoke cue and reading back the frame. |
+| **Preview and export are not one renderer.** §10 §2.1 asks for a shared WebGL2 `renderFrame`; this build has a CPU compositor for the export and CSS for the preview | The *export* renders captions (generated ASS script), keyframed geometry (per-keyframe segments), layer opacity and blend modes (software blend in linear light), transitions (both clips across the overlap) and the nine required effects — each measured in the produced file by decoding it. The *preview* approximates the effects with CSS filters and names the three it cannot draw. Recorded as `docs/limitations.md` item 7. |
 | Frame blending | Not implemented; nearest-time selection is used and documented |
 | Hardware encoding on real GPUs | No GPU in this environment. The *validation* logic is tested with fakes; actual NVENC/QSV/AMF output is unverified |
 | 4K 60 fps performance | Not benchmarked here; the code path is tested at 320×180 |

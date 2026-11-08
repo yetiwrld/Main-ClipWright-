@@ -70,7 +70,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    and this build has no GL context anywhere. Effects are a CPU implementation
    (`packages/compositor/src/effects.ts`) that the export applies to every frame and
    the preview approximates with CSS filters. Four divergences follow, all visible in
-   item 7. What is still missing: masks, and the `rotationJitterDeg` per-caption tilt. Where nothing is on the timeline you get the canvas colour. The
+   item 7. The remaining compositor gap is the `rotationJitterDeg` per-caption tilt
+   (ASS has no per-event rotation, item 4). There is no mask feature in the spec —
+   "mask" appears only as the shape of two caption animations (§11) — so none is
+   withheld here. Where nothing is on the timeline you get the canvas colour. The
    export dialog says so before you press Export.
 2. **Keyframed geometry exports as steps, not ramps.** ffmpeg 4.1 evaluates
    `scale`/`crop` expressions once, at configuration time — there is no `t` in

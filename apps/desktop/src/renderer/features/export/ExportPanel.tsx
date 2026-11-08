@@ -230,9 +230,10 @@ export function ExportPanel({
           lineHeight: 'var(--lh-sm)',
         }}
       >
-        Video and audio are exported from your timeline, and burned-in captions
-        use the style you picked in the editor. Effects, transitions and keyframed
-        moves are not rendered yet — see Export limits in the docs.
+        Video and audio are exported from your timeline, with burned-in captions in
+        the style you picked in the editor, plus layer opacity and blend modes,
+        transitions, keyframed moves and the nine standard effects. Effects are
+        previewed approximately — see Export limits in the docs.
       </p>
 
       {/* Buttons */}

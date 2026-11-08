@@ -240,8 +240,11 @@ Raw ffmpeg output is never shown in the interface. It stays in the job log.
   bottom-first at its own opacity and blend mode, using the same layer resolution
   the preview uses; where nothing is on the timeline you get the canvas colour.
   Captions are burnt in from a generated ASS script, and keyframed geometry renders
-  as per-keyframe segments. Still to come: effects, transitions and masks from
-  `renderFrame` (§4.1, §4.3, §4.4).
+  as per-keyframe segments, transitions draw both clips across their overlap, and
+  the nine effects in §12 §3.2 are applied per layer in linear light. These run as
+  CPU code rather than through the spec's shared WebGL2 `renderFrame` (§10 §2.1,
+  §4.1), so the preview approximates the effects with CSS filters while the export
+  is authoritative — see `docs/limitations.md` item 7.
   Everything around it —
   the plan, the encoder arguments, the queue, the measurements and the verdict —
   is real and covered by tests that run the bundled ffmpeg on actual footage. See
