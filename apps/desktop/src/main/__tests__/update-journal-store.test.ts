@@ -8,7 +8,7 @@
  * it is supposed to keep.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { JOURNAL_FILE, UpdateJournalStore } from '../updater/update-journal-store.js';
 
@@ -91,7 +91,14 @@ describe('backupBeforeInstall (§7.1)', () => {
     const store = makeStore();
     const result = await store.backupBeforeInstall('1.2.0', '2026-11-07T10:00:00.000Z');
     expect(result.folder).toContain(join('Updates', 'backup-1.2.0-'));
-    expect(result.folder).not.toContain(':');
+    // The *folder name* must be path-safe; the absolute path necessarily contains
+    // a colon on Windows, in the drive letter (`D:\a\...`). Asserting on the
+    // whole path made this test pass on Linux and fail on CI for a reason that
+    // has nothing to do with the code — the earlier version proved only that
+    // this machine has no drive letters.
+    const folderName = result.folder.slice(result.folder.lastIndexOf(sep) + 1);
+    expect(folderName).not.toContain(':');
+    expect(folderName).toMatch(/^backup-1\.2\.0-[0-9TZ-]+$/);
   });
 
   it('copies secrets.bin when it exists', async () => {
