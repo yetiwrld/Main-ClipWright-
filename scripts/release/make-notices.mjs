@@ -176,7 +176,14 @@ lines.push('');
 const text = lines.join('\n');
 
 if (check) {
-  const current = await readFile(OUT, 'utf8').catch(() => '');
+  // Compare with line endings normalised.
+  //
+  // There is no `.gitattributes` in this repository, so Git's `core.autocrlf`
+  // applies: on the Windows CI runner the file is checked out with `CRLF`, while
+  // this generator writes `LF`. Comparing raw text made every single line differ
+  // on Windows and none on Linux — a failure that looked like nine wrong versions
+  // and was really one wrong assumption about the checkout.
+  const current = (await readFile(OUT, 'utf8').catch(() => '')).replaceAll('\r\n', '\n');
   if (current !== text) {
     // Name what differs. "The file is out of date" is unactionable when the
     // difference is one platform-specific package, which is exactly what happens
