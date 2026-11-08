@@ -104,7 +104,11 @@ jobs:
           # --redact so a real finding is not printed into a public log; the file
           # and rule are still reported, which is what a fix needs.
           set +e
+          # `.gitleaks.toml` allowlists exactly one path: the redaction test
+          # corpus, whose strings are synthetic by construction. Everything else
+          # that trips a rule is a finding.
           ./gitleaks.exe detect --source . --redact --exit-code 1 \
+            --config .gitleaks.toml \
             --report-format json --report-path gitleaks-report.json
           code=$?
           set -e

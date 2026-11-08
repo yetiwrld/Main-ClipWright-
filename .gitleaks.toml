@@ -1,0 +1,20 @@
+# gitleaks configuration — SPEC 15 §12.12 ("no secret in the repository").
+#
+# The only allowance is one test file, by path. It is the corpus that proves the
+# redactor works: it contains synthetic strings built to look like every provider
+# key the app might be handed (an `sk-proj-…` that ends in "DoNotLeak", a
+# `ghp_ABCDEF…`, an `AIzaSy…`), because stripping those is the feature under test.
+# gitleaks flags them by design — it matches shapes, not provenance.
+#
+# Allowing by file path rather than by pattern is deliberate. A pattern allowlist
+# would quietly exempt *real* keys that happen to look similar, which is the one
+# thing this scan exists to prevent; a path says "this file is fixtures" and
+# nothing else. The file is named `__tests__` for the same reason — so the
+# exemption stays obvious to anyone reading it.
+#
+# Anything outside this file that trips a rule is a finding and must be fixed, not
+# added here.
+
+[allowlist]
+description = "Synthetic credentials used to test the redaction function"
+paths = ['''packages/project-schema/src/__tests__/schema-and-storage\.test\.ts''']
