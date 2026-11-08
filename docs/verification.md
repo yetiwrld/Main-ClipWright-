@@ -17,13 +17,13 @@ pnpm test:unit
 
 ```
 Test Files  48 passed (48)
-     Tests  1082 passed (1082)
+     Tests  1090 passed (1090)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 262 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 177 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
@@ -31,7 +31,7 @@ Test Files  48 passed (48)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1082** | 48 files |
+| **Total** | **1090** | 48 files |
 
 ### Tests that run real processes
 
@@ -178,6 +178,7 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | `assets/icon.ico` has 16/24/32/48/64/128/256 px frames | Verified by parsing the ICO header |
 | Every script a workflow runs is tracked by git | `scripts/check-repo.mjs`, in `pnpm lint` — written after nine release scripts turned out to be outside the repository |
 | Ignore rules cannot swallow source | Same check: an unanchored `release/` pattern is rejected by name |
+| In-window navigation is decided by URL origin, not by prefix | `security.test.ts` — `http://localhost:5173@evil.example/` is blocked; the dev origin is accepted only in a development build (§12.12) |
 | A packaged build trusts only its embedded key, whatever the environment says | `update-config.test.ts` — the override is honoured for tests and local builds, ignored when `app.isPackaged` (§5) |
 | A build with no embedded key refuses every update | `update-config.test.ts` — `hasUsableKeys` is false for the shipped placeholder |
 | A redirect to a look-alike host is refused | `update-config.test.ts` — `github.com.evil.example` is rejected; the check compares hostnames, not substrings |

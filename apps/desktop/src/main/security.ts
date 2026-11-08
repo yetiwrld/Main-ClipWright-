@@ -83,6 +83,39 @@ export function buildSecureWindowConfig(
   };
 }
 
+export const DEV_SERVER_ORIGIN = 'http://localhost:5173';
+
+/**
+ * Decides what happens to an in-window navigation (SPEC 15 §12.12).
+ *
+ * `allow` loads the URL in the window; `external` opens it in the system
+ * browser; `block` drops it silently. Everything here runs against a window that
+ * has a preload bridge into the main process, so the default is `block`.
+ *
+ * The dev-server origin is compared by `origin`, never by prefix. A prefix test
+ * accepts `http://localhost:5173@evil.example/`, where everything before the `@`
+ * is userinfo and the actual host is `evil.example` — the URL loads in-window and
+ * the renderer's IPC bridge is then reachable from remote content. The same
+ * comparison is why the dev origin is only honoured in a development build: a
+ * packaged app has no dev server to talk to, so nothing legitimate is lost.
+ */
+export function resolveNavigation(
+  rawUrl: string,
+  { isDev }: { isDev: boolean }
+): 'allow' | 'external' | 'block' {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return 'block';
+  }
+
+  if (parsed.protocol === 'file:') return 'allow';
+  if (isDev && parsed.origin === DEV_SERVER_ORIGIN) return 'allow';
+  if (parsed.protocol === 'https:') return 'external';
+  return 'block';
+}
+
 export function isAllowedExternalUrl(rawUrl: string): boolean {
   try {
     const parsed = new URL(rawUrl);

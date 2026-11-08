@@ -6,7 +6,9 @@ import {
   buildSecureWindowConfig,
   CONTENT_SECURITY_POLICY,
   DEV_CONTENT_SECURITY_POLICY,
+  DEV_SERVER_ORIGIN,
   isAllowedExternalUrl,
+  resolveNavigation,
 } from './security.js';
 import { StorageService } from './storage/storage-service.js';
 import { Logger } from './storage/logger.js';
@@ -107,10 +109,10 @@ function createWindow(): BrowserWindow {
 
   // Navigation guard — only local app content may load in-window
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://') && !url.startsWith('app://') && !url.startsWith('http://localhost:5173')) {
-      event.preventDefault();
-      if (isAllowedExternalUrl(url)) shell.openExternal(url);
-    }
+    const decision = resolveNavigation(url, { isDev });
+    if (decision === 'allow') return;
+    event.preventDefault();
+    if (decision === 'external') shell.openExternal(url);
   });
 
   // External links open in the system browser
@@ -122,7 +124,7 @@ function createWindow(): BrowserWindow {
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
 
   if (isDev) {
-    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+    const devUrl = process.env.VITE_DEV_SERVER_URL || DEV_SERVER_ORIGIN;
     void win.loadURL(devUrl);
     if (config.webPreferences.devTools) win.webContents.openDevTools({ mode: 'detach' });
   } else {
