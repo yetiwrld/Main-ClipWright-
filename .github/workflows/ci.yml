@@ -80,7 +80,9 @@ jobs:
           ASSET="gitleaks_${VERSION}_windows_x64.zip"
           BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
 
-          curl -sSfL -o "$ASSET" "${BASE}/${ASSET}"
+          echo "Downloading ${ASSET}"
+          curl -sSfL -o "$ASSET" "${BASE}/${ASSET}" || { echo "::error::curl failed for ${BASE}/${ASSET}"; exit 1; }
+          ls -l "$ASSET"
           # The published checksums, checked before the binary is run: fetching an
           # scanner over the network and executing it is a supply-chain step, and
           # an unpinned one would be a poor example for this repository.
@@ -98,5 +100,15 @@ jobs:
           echo "Checksum verified: $actual"
 
           powershell -Command "Expand-Archive -Path '$ASSET' -DestinationPath . -Force"
+          ./gitleaks.exe version
+          # --redact so a real finding is not printed into a public log; the file
+          # and rule are still reported, which is what a fix needs.
+          set +e
           ./gitleaks.exe detect --source . --verbose --redact --exit-code 1
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::error::gitleaks exited ${code} — see the Secret scan step output"
+            exit "$code"
+          fi
 
