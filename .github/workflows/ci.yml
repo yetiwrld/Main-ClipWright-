@@ -41,21 +41,22 @@ jobs:
           # Surface the failure as a check annotation. Run logs are not always
           # retrievable, and "exit code 1" with no reason is not something anyone
           # can act on from the pull request page.
+          #
+          # Annotations truncate, so this emits a few targeted annotations rather
+          # than one blob: the test summary always, then the failures if any line
+          # is recognisable. An earlier version grepped for "FAIL " alone and
+          # emitted nothing at all, which is worse than emitting too much.
           set -o pipefail
           pnpm verify 2>&1 | tee verify.log || {
             status=$?
-            # Annotations truncate, so the useful line is the one naming the
-            # failure: the summary counts, and every line starting "FAIL".
-            summary=$(grep -E '^ *(Test Files|Tests) ' verify.log | tail -2 | tr '\n' ' ')
-            echo "::error title=pnpm verify failed::${summary}"
-            grep -E 'FAIL |AssertionError' verify.log | sed 's/\x1b\[[0-9;]*m//g' > failures.txt || true
-            # One annotation per failing file, so nothing is cut off.
-            c=0
-            while IFS= read -r line; do
-              c=$((c+1))
-              [ $c -gt 6 ] && break
-              echo "::error title=failure $c::$(echo "$line" | cut -c1-900 | sed 's/%/%25/g')"
-            done < failures.txt
+            clean=$(sed 's/\x1b\[[0-9;]*m//g' verify.log)
+            esc() { sed 's/%/%25/g' | sed 's/\r//g'; }
+            echo "::error title=pnpm verify failed::$(echo "$clean" | grep -E '^ *(Test Files|Tests) ' | tail -2 | tr '\n' ' ' | esc | cut -c1-800)"
+            # The last 12 lines describe the final failure even without a marker.
+            echo "$clean" | grep -vE '^\s*$' | tail -12 | cut -c1-900 | while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              echo "::error title=tail::$(echo "$line" | esc)"
+            done
             exit $status
           }
 
