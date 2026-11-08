@@ -24,15 +24,29 @@ jobs:
       - name: Enable Corepack & pnpm
         run: corepack enable
 
+      # The lockfile is committed; installing against it is what makes "passes
+      # locally" mean something in CI. Without --frozen-lockfile, CI resolves
+      # versions the developer never ran, and a red build says nothing about the
+      # code that was pushed.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile
 
       # The same script a developer runs locally — lint, typecheck, tests, build
       # and the repository check, in that order. Keeping one definition means CI
       # cannot drift from what was actually verified, and the build step cannot
       # be the one everybody forgets: it was, and it was broken for a while.
       - name: Lint, typecheck, test, build, verify repository
-        run: pnpm verify
+        shell: bash
+        run: |
+          # Surface the failure as a check annotation. Run logs are not always
+          # retrievable, and "exit code 1" with no reason is not something anyone
+          # can act on from the pull request page.
+          set -o pipefail
+          pnpm verify 2>&1 | tee verify.log || {
+            status=$?
+            echo "::error title=pnpm verify failed::$(tail -30 verify.log | tr '\n' ' ' | sed 's/%/%25/g')"
+            exit $status
+          }
 
       # SPEC 15 §6.2: the shipped notices must match what is actually installed,
       # and no dependency may have an unrecognised licence.
