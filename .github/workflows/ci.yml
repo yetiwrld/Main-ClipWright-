@@ -64,8 +64,39 @@ jobs:
         run: |
           node -e "const p=require('./apps/desktop/package.json');const fs=require('fs');const m=p.main;if(!fs.existsSync('apps/desktop/'+m)){console.error('Missing main entry: '+m);process.exit(1)}console.log('main entry present: '+m)"
 
+      # SPEC 15 §12.12 — no secret may appear in the repository.
+      #
+      # gitleaks is installed directly rather than through gitleaks-action. The
+      # action builds its download URL as `.tar.gz`, but gitleaks has only ever
+      # published `.zip` for Windows, so on a windows-latest runner it fails with
+      # a 404 before scanning anything — and because it runs last, that failure
+      # looked like a secret being found. Doing the three steps by hand keeps the
+      # download visible and the version pinned in one place.
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: false
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=8.24.3
+          ASSET="gitleaks_${VERSION}_windows_x64.zip"
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+
+          curl -sSfL -o "$ASSET" "${BASE}/${ASSET}"
+          # The published checksums, checked before the binary is run: fetching an
+          # scanner over the network and executing it is a supply-chain step, and
+          # an unpinned one would be a poor example for this repository.
+          curl -sSfL -o checksums.txt "${BASE}/gitleaks_${VERSION}_checksums.txt"
+          expected=$(grep " ${ASSET}$" checksums.txt | cut -d' ' -f1)
+          if [ -z "$expected" ]; then
+            echo "::error::no checksum published for ${ASSET}"
+            exit 1
+          fi
+          actual=$(sha256sum "$ASSET" | cut -d' ' -f1)
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::checksum mismatch for ${ASSET}: expected $expected, got $actual"
+            exit 1
+          fi
+          echo "Checksum verified: $actual"
+
+          powershell -Command "Expand-Archive -Path '$ASSET' -DestinationPath . -Force"
+          ./gitleaks.exe detect --source . --verbose --redact --exit-code 1
+
