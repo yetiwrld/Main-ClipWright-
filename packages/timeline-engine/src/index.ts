@@ -69,6 +69,13 @@ export {
   splitCaptionSegment,
   mergeCaptionSegments,
   trimCaptionSegment,
+  applyCaptionStyle,
+  editCaptionText,
+  regenerateCaptions,
+  retimeCaption,
+  setWordEmphasis,
+  syncCaptionsWithTranscript,
+  trimCaptionWordsToRange,
   applyEffect,
   removeEffect,
   toggleEffectEnabled,
@@ -87,4 +94,4 @@ export {
 
 export { TimelineHistory, type HistoryStep, type UndoResult } from './history';
 export { checkInvariants } from './invariants';
-export { createDefaultTimeline, createMediaItem } from './factory';
+export { createCaptionItem, createDefaultTimeline, createMediaItem, type CreateCaptionItemParams } from './factory';

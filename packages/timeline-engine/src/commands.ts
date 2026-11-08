@@ -9,9 +9,18 @@ import { current, enablePatches, produceWithPatches, type Patch } from 'immer';
 enablePatches();
 import type { CompositionPayload, TimelineItem } from '@clipwright/project-schema';
 import type { Keyframe } from '@clipwright/project-schema/schemas';
-import type { Marker } from '@clipwright/project-schema/schemas';
+import type { CaptionSegment, Marker } from '@clipwright/project-schema/schemas';
+
+/**
+ * One word inside a caption segment. The schema names it `wordId` +
+ * `textOverride` because the text normally lives in the transcript: a caption
+ * stores *which* words it shows, not a second copy of them. `textOverride` is
+ * present only when a word was edited for this caption alone.
+ */
+type CaptionWordRef = CaptionSegment['wordRefs'][number];
 import { frameDurationUs, quantizeUs, type Fps } from './time';
 import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
+import { createCaptionItem } from './factory';
 
 export type TimelineState = CompositionPayload;
 export type EditMode = 'normal' | 'insert' | 'overwrite';
@@ -2316,5 +2325,467 @@ export function renameTrack(
     inverse,
     affectedItemIds: [],
     notes: ['Track renamed.'],
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Caption editing (SPEC 11 §2.5, §8)
+ *
+ * Every caption edit is a command here, never in a component. The reason is in
+ * §2.5: "UI components contain no caption logic". A caption has three coupled
+ * representations — the words, the displayed lines, and the start/end times — and
+ * letting a component update one of them produces captions whose text and timing
+ * disagree, which is invisible until export.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The text a caption actually shows: the words whose midpoint lies inside its
+ * range (SPEC 11 §3). Derived every time rather than stored, so trimming and
+ * extending cannot leave the two disagreeing.
+ */
+function visibleCaptionText(segment: Pick<CaptionSegment, 'startUs' | 'endUs' | 'wordRefs'>): string {
+  return segment.wordRefs
+    .filter((word) => {
+      const midpoint = (word.startUs + word.endUs) / 2;
+      return midpoint >= segment.startUs && midpoint <= segment.endUs;
+    })
+    .map((word) => word.textOverride ?? '')
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Gives edited text timings, keeping the old ones where the word count matches.
+ *
+ * Editing a typo must not move anything, so with equal counts each new word
+ * inherits the old word's interval regardless of how different the characters
+ * are. With a different count the segment's own range is divided proportionally
+ * by character length, which keeps relative spoken pace roughly intact and never
+ * runs outside the caption.
+ */
+function retimeWords(
+  texts: string[],
+  previous: CaptionWordRef[],
+  startUs: number,
+  endUs: number,
+): CaptionWordRef[] {
+  if (texts.length === previous.length) {
+    return texts.map((text, index) => ({ ...previous[index]!, textOverride: text }));
+  }
+
+  const totalChars = texts.reduce((sum, text) => sum + Math.max(1, text.length), 0);
+  const span = Math.max(1, endUs - startUs);
+  let cursor = startUs;
+  return texts.map((text, index) => {
+    const share = (Math.max(1, text.length) / totalChars) * span;
+    const wordStart = Math.round(cursor);
+    cursor += share;
+    // The last word ends exactly at the segment end, so accumulated rounding
+    // cannot leave a gap or overrun.
+    const wordEnd = index === texts.length - 1 ? endUs : Math.round(cursor);
+    return {
+      wordId: `${previous[0]?.wordId ?? 'w'}-edit-${index}`,
+      startUs: wordStart,
+      endUs: Math.max(wordStart + 1, wordEnd),
+      textOverride: text,
+    };
+  });
+}
+
+/** Context needed by commands that re-derive line breaks from a style. */
+export interface CaptionLayoutContext {
+  /** Renders text into display lines. Injected so the engine holds no layout code. */
+  wrap(text: string, maxCharsPerLine: number, maxLines: number): string[];
+}
+
+/**
+ * SPEC 11 §8 — change a caption's text.
+ *
+ * The words are rebuilt from the new text but keep the *count* of word timings:
+ * a user fixing a typo should not lose the timing, and a user replacing a word
+ * should have the new word take the old word's slot. If the word count changes,
+ * the remaining time is redistributed proportionally to character count, and the
+ * segment is marked `manualText` so `regenerateCaptions` will not overwrite it.
+ */
+export function editCaptionText(
+  state: TimelineState,
+  params: { itemId: string; text: string; layout?: CaptionLayoutContext; maxCharsPerLine?: number; maxLines?: number },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (item.type !== 'caption' || !item.captionSegment) {
+    return fail('invalid', 'That item is not a caption.');
+  }
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const text = params.text.replace(/\s+/g, ' ').trim();
+  if (text.length === 0) return fail('invalid', 'A caption cannot be empty. Use delete instead.');
+
+  const segment = item.captionSegment;
+  const newWords = text.split(' ').filter((word) => word.length > 0);
+  const oldRefs = segment.wordRefs;
+
+  const refs = retimeWords(newWords, oldRefs, segment.startUs, segment.endUs);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId]!;
+    const draftSegment = target.captionSegment!;
+    draftSegment.text = text;
+    draftSegment.lines = params.layout
+      ? params.layout.wrap(text, params.maxCharsPerLine ?? 24, params.maxLines ?? 2)
+      : newWords.reduce<string[]>((lines, word) => {
+          const last = lines[lines.length - 1];
+          const limit = params.maxCharsPerLine ?? 24;
+          if (last !== undefined && (last + ' ' + word).length <= limit) {
+            lines[lines.length - 1] = `${last} ${word}`;
+          } else lines.push(word);
+          return lines;
+        }, []).slice(0, params.maxLines ?? 2);
+    draftSegment.wordRefs = refs;
+    draftSegment.manualText = true;
+    draftSegment.transcriptChanged = false;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: oldRefs.length === newWords.length ? ['Caption text edited.'] : ['Caption text edited; word timings were redistributed.'],
+  };
+}
+
+/**
+ * SPEC 11 §8 — retime a caption by dragging its edges.
+ *
+ * Trimming never rewrites word text: words outside the new range stay in the
+ * model but stop being displayed, so extending the caption restores them. That is
+ * §3's rule and the reason this is not simply a duration change.
+ */
+export function retimeCaption(
+  state: TimelineState,
+  params: { itemId: string; startUs?: number; endUs?: number; fps: Fps },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (item.type !== 'caption' || !item.captionSegment) {
+    return fail('invalid', 'That item is not a caption.');
+  }
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const segment = item.captionSegment;
+  const startUs = quantizeUs(params.startUs ?? segment.startUs, params.fps);
+  const endUs = quantizeUs(params.endUs ?? item.startUs + item.durationUs, params.fps);
+
+  if (startUs < 0) return fail('invalid', 'A caption cannot start before zero.');
+  if (endUs - startUs < frameDurationUs(params.fps)) {
+    return fail('too_short', 'A caption must be at least one frame long.');
+  }
+  if (startUs === segment.startUs && endUs === segment.endUs) {
+    // Nothing changed; still a valid no-op so a drag that ends where it began is
+    // not reported as an error.
+    return { ok: true, state, patches: [], inverse: [], affectedItemIds: [], notes: [] };
+  }
+
+  const durationUs = endUs - startUs;
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId]!;
+    target.startUs = startUs;
+    target.durationUs = durationUs;
+    target.captionSegment!.startUs = startUs;
+    target.captionSegment!.endUs = endUs;
+    target.captionSegment!.manualTiming = true;
+    // Visible text is derived, never stored: §3 says the visible text always
+    // equals the words whose midpoint lies inside the range.
+    target.captionSegment!.text = visibleCaptionText(target.captionSegment!);
+    target.captionSegment!.lines = [
+      target.captionSegment!.text.length > 0 ? target.captionSegment!.text : '',
+    ].filter(Boolean);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Caption retimed; words outside the range are hidden, not removed.'],
+  };
+}
+
+/**
+ * SPEC 11 §8 — *Trim words to range*.
+ *
+ * The explicit counterpart to `retimeCaption`: the words outside the range are
+ * removed from the model rather than hidden. Only this command drops words, and
+ * only when the user asks for it.
+ */
+export function trimCaptionWordsToRange(state: TimelineState, params: { itemId: string }): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (!item.captionSegment) return fail('invalid', 'That item is not a caption.');
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const segment = item.captionSegment;
+  const kept = segment.wordRefs.filter((word) => {
+    const midpoint = (word.startUs + word.endUs) / 2;
+    return midpoint >= segment.startUs && midpoint <= segment.endUs;
+  });
+  if (kept.length === segment.wordRefs.length) {
+    return { ok: true, state, patches: [], inverse: [], affectedItemIds: [], notes: ['No words were outside the range.'] };
+  }
+
+  const removedCount = segment.wordRefs.length - kept.length;
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId]!;
+    target.captionSegment!.wordRefs = kept;
+    target.captionSegment!.text = kept.map((word) => word.textOverride ?? '').filter(Boolean).join(' ');
+    target.captionSegment!.manualText = true;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: [`Removed ${removedCount} word${removedCount === 1 ? '' : 's'} outside the caption range.`],
+  };
+}
+
+/**
+ * SPEC 11 §8 — apply a style to captions.
+ *
+ * Records the style id and *updates the project-local copy* the caller passes, so
+ * a preset changing in a future release cannot alter a finished project (§2.2).
+ * Overrides are cleared unless the caller asks to keep them, because "apply this
+ * style" means exactly that; the inspector's per-item overrides are re-applied by
+ * the caller when it wants them preserved.
+ */
+export function applyCaptionStyle(
+  state: TimelineState,
+  params: { itemIds: string[]; styleId: string; keepOverrides?: boolean; overrides?: Record<string, unknown> },
+): CommandResult {
+  const targets = params.itemIds.filter((id) => state.items[id]?.type === 'caption');
+  if (targets.length === 0) return fail('not_found', 'No captions were selected.');
+
+  const lockedTrack = state.tracks.find(
+    (track) => track.locked && targets.some((id) => state.items[id]!.trackId === track.id),
+  );
+  if (lockedTrack) return fail('locked', `"${lockedTrack.name}" is locked.`);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of targets) {
+      const target = draft.items[id]!;
+      target.captionStyleId = params.styleId;
+      if (!params.keepOverrides) target.styleOverrides = params.overrides ?? undefined;
+      else if (params.overrides) {
+        target.styleOverrides = { ...(target.styleOverrides ?? {}), ...params.overrides };
+      }
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: targets,
+    notes: [`Style applied to ${targets.length} caption${targets.length === 1 ? '' : 's'}.`],
+  };
+}
+
+/**
+ * SPEC 11 §8 — toggle emphasis on individual words.
+ *
+ * Stored per word rather than baked into the style, so swapping styles keeps the
+ * user's emphasis (§7). An emphasis toggle on the same word twice returns it to
+ * the style's default rather than storing `emphasis: false`.
+ */
+export function setWordEmphasis(
+  state: TimelineState,
+  params: { itemId: string; wordIndex: number; emphasis: boolean; color?: string; scale?: number },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  if (!item.captionSegment) return fail('invalid', 'That item is not a caption.');
+
+  const segment = item.captionSegment;
+  const word = segment.wordRefs[params.wordIndex];
+  if (!word) return fail('invalid', 'That word is not part of this caption.');
+
+  const current = segment.wordOverrides?.[word.wordId] ?? {};
+  const next = params.emphasis
+    ? { ...current, emphasis: true, ...(params.color ? { color: params.color } : {}), ...(params.scale !== undefined ? { scale: params.scale } : {}) }
+    : (() => {
+        const cleaned = { ...current };
+        delete (cleaned as { emphasis?: boolean }).emphasis;
+        if (!params.color) delete (cleaned as { color?: string }).color;
+        if (params.scale === undefined) delete (cleaned as { scale?: number }).scale;
+        return cleaned;
+      })();
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId]!;
+    const overrides = { ...(target.captionSegment!.wordOverrides ?? {}) };
+    if (Object.keys(next).length === 0) delete overrides[word.wordId];
+    else overrides[word.wordId] = next as { emphasis?: boolean; color?: string; scale?: number };
+    target.captionSegment!.wordOverrides = overrides;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: [params.emphasis ? 'Word emphasised.' : 'Emphasis removed.'],
+  };
+}
+
+/**
+ * SPEC 11 §9 — regenerate captions from the transcript, leaving hand-edited ones
+ * alone.
+ *
+ * `manualText` is the marker: a caption the user typed is never overwritten by a
+ * regeneration, because losing a hand fix is worse than keeping a stale one.
+ * `force` exists for the explicit "Regenerate all" that §4 describes.
+ */
+export function regenerateCaptions(
+  state: TimelineState,
+  params: { trackId: string; segments: Array<{ startUs: number; endUs: number; text: string; words: Array<{ id: string; text: string; startUs: number; endUs: number; confidence?: number }> }>; force?: boolean },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That caption track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+  if (track.kind !== 'caption') return fail('invalid', `"${track.name}" cannot hold captions.`);
+
+  const existing = sortedItemsOfTrack(state, params.trackId).filter((item) => item.type === 'caption');
+  const preserved = existing.filter((item) => item.captionSegment?.manualText === true && params.force !== true);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    // Remove the captions this regeneration will replace, keep the hand-edited.
+    for (const item of existing) {
+      if (preserved.some((kept) => kept.id === item.id)) continue;
+      delete draft.items[item.id];
+    }
+
+    let index = 0;
+    for (const segment of params.segments) {
+      // Skip a generated segment that would collide with a preserved caption;
+      // overlapping captions on one track are an invariant violation (§3).
+      const clashes = preserved.some(
+        (kept) => segment.startUs < kept.startUs + kept.durationUs && segment.endUs > kept.startUs,
+      );
+      if (clashes) continue;
+
+      const id = `${params.trackId}-cap-regen-${index++}`;
+      draft.items[id] = createCaptionItem({
+        id,
+        trackId: params.trackId,
+        startUs: segment.startUs,
+        durationUs: segment.endUs - segment.startUs,
+        words: segment.words.map((word, wordIndex) => ({
+          wordId: word.id || `${id}-w${wordIndex}`,
+          startUs: word.startUs,
+          endUs: word.endUs,
+          textOverride: word.text,
+        })),
+        fallbackText: segment.text,
+      });
+    }
+  });
+
+  const replaced = existing.length - preserved.length;
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: Object.keys(params.segments).length > 0 ? [params.trackId] : [],
+    notes: [
+      `Regenerated ${params.segments.length} caption${params.segments.length === 1 ? '' : 's'}` +
+        (preserved.length > 0 ? `; kept ${preserved.length} you had edited.` : '.'),
+      ...(replaced > 0 && preserved.length > 0 ? ['Hand-edited captions were left untouched.'] : []),
+    ],
+  };
+}
+
+/**
+ * SPEC 11 §9 — realign captions after the transcript changed under them.
+ *
+ * Matches each caption's words to the new transcript by text, keeping the
+ * caption's own boundaries when a match is found and flagging the rest as
+ * `transcriptChanged` so the panel can offer a review. Nothing is deleted.
+ */
+export function syncCaptionsWithTranscript(
+  state: TimelineState,
+  params: { trackId: string; words: Array<{ text: string; startUs: number; endUs: number }> },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That caption track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const captions = sortedItemsOfTrack(state, params.trackId).filter((item) => item.type === 'caption');
+  if (captions.length === 0) return fail('not_found', 'That track has no captions to sync.');
+
+  const normalise = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').trim();
+  const transcript = params.words.map((word) => ({ ...word, key: normalise(word.text) }));
+
+  let matched = 0;
+  let changed = 0;
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const caption of captions) {
+      const target = draft.items[caption.id]!;
+      if (target.captionSegment?.manualText === true) continue;
+
+      const captionWords = target.captionSegment!.wordRefs;
+      if (captionWords.length === 0) continue;
+
+      const captionText = captionWords.map((word) => word.textOverride ?? '');
+      const firstKey = normalise(captionText[0] ?? '');
+      const startIndex = firstKey ? transcript.findIndex((word) => word.key === firstKey) : -1;
+      const window = startIndex === -1 ? [] : transcript.slice(startIndex, startIndex + captionWords.length);
+      const aligned =
+        window.length === captionWords.length &&
+        window.every((word, index) => word.key === normalise(captionText[index] ?? ''));
+
+      if (aligned) {
+        matched += 1;
+        target.captionSegment!.wordRefs = window.map((word, index) => ({
+          ...captionWords[index]!,
+          startUs: word.startUs,
+          endUs: word.endUs,
+        }));
+        target.captionSegment!.startUs = window[0]!.startUs;
+        target.captionSegment!.endUs = window[window.length - 1]!.endUs;
+        target.startUs = window[0]!.startUs;
+        target.durationUs = window[window.length - 1]!.endUs - window[0]!.startUs;
+        target.captionSegment!.transcriptChanged = false;
+      } else {
+        changed += 1;
+        target.captionSegment!.transcriptChanged = true;
+      }
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: captions.map((caption) => caption.id),
+    notes: [
+      `Realigned ${matched} caption${matched === 1 ? '' : 's'} with the transcript.`,
+      ...(changed > 0 ? [`${changed} no longer match and are flagged for review.`] : []),
+    ],
   };
 }

@@ -127,3 +127,63 @@ export function createMediaItem(params: CreateMediaItemParams): TimelineItem {
     effects: [],
   }) as TimelineItem;
 }
+
+/**
+ * A caption item (SPEC 11 §2.2): `ItemBase` of `type:'caption'` carrying the
+ * segment, the style reference and any per-item overrides.
+ *
+ * The segment stores `wordId` + `textOverride` rather than a copy of the text:
+ * the words belong to the transcript, and a caption records which of them it
+ * shows. The derived `text` and `lines` are rebuilt here so they cannot disagree
+ * with `wordRefs` — a caption whose stored text and words differ renders one
+ * thing and exports another, and nothing in the UI would show the difference.
+ */
+export interface CreateCaptionItemParams {
+  id?: string;
+  trackId: string;
+  startUs: number;
+  durationUs: number;
+  words: Array<{ wordId: string; startUs: number; endUs: number; textOverride?: string }>;
+  /** Used only when `words` is empty, e.g. a caption typed from scratch. */
+  fallbackText?: string;
+  styleId?: string;
+  lines?: string[];
+  speaker?: string;
+  manualText?: boolean;
+  manualTiming?: boolean;
+}
+
+export function createCaptionItem(params: CreateCaptionItemParams): TimelineItem {
+  const text = params.words.length > 0
+    ? params.words.map((word) => word.textOverride ?? '').filter(Boolean).join(' ')
+    : (params.fallbackText ?? '');
+
+  return TimelineItemSchema.parse({
+    id: params.id ?? nextId('cap'),
+    trackId: params.trackId,
+    type: 'caption',
+    startUs: params.startUs,
+    durationUs: params.durationUs,
+    label: text.substring(0, 60),
+    disabled: false,
+    opacity: 1,
+    blendMode: 'normal',
+    transform: { x: 0, y: 0, scale: 1 },
+    crop: {},
+    keyframes: {},
+    effects: [],
+    captionStyleId: params.styleId,
+    captionSegment: {
+      id: `seg-${params.id ?? nextId('cap')}`,
+      wordRefs: params.words,
+      startUs: params.startUs,
+      endUs: params.startUs + params.durationUs,
+      text,
+      lines: params.lines ?? (text.length > 0 ? [text] : []),
+      speaker: params.speaker,
+      manualTiming: params.manualTiming ?? false,
+      manualText: params.manualText ?? false,
+      wordOverrides: {},
+    },
+  }) as TimelineItem;
+}
