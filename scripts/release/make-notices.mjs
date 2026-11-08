@@ -199,7 +199,22 @@ if (check) {
     if (added.length > 0) console.error(`  installed but not listed: ${added.join(', ')}`);
     if (removed.length > 0) console.error(`  listed but not installed: ${removed.join(', ')}`);
     if (added.length === 0 && removed.length === 0) {
-      console.error('  The same packages are present; a version or repository URL changed.');
+      // Diff the package lines directly. "A version or URL changed" names a class
+      // of problem, not the problem, and this check runs on two platforms whose
+      // installs can legitimately differ in version resolution.
+      const currentLines = new Set(
+        current.slice(current.indexOf('JavaScript packages')).split('\n'),
+      );
+      const changes = text
+        .slice(text.indexOf('JavaScript packages'))
+        .split('\n')
+        .filter((line) => /@/.test(line) && /—/.test(line) && !currentLines.has(line));
+      if (changes.length > 0) {
+        console.error(`  ${changes.length} package line(s) differ, expected:`);
+        for (const line of changes.slice(0, 10)) console.error(`    ${line}`);
+      } else {
+        console.error('  The package lines match; the difference is in the prose above them.');
+      }
     }
     console.error('Run `node scripts/release/make-notices.mjs` and commit the result.\n');
     // Also emit a check annotation: this step fails on the Windows CI runner while
@@ -210,7 +225,16 @@ if (check) {
     if (added.length > 0) announce(`installed but not listed: ${added.join(', ')}`);
     if (removed.length > 0) announce(`listed but not installed: ${removed.join(', ')}`);
     if (added.length === 0 && removed.length === 0) {
-      announce('Same packages; a version or repository URL changed.');
+      const currentLines = new Set(current.slice(current.indexOf('JavaScript packages')).split('\n'));
+      const changes = text
+        .slice(text.indexOf('JavaScript packages'))
+        .split('\n')
+        .filter((line) => /@/.test(line) && /—/.test(line) && !currentLines.has(line));
+      announce(
+        changes.length > 0
+          ? `expected: ${changes.slice(0, 6).join(' | ')}`
+          : 'Same packages and lines; the prose differs.',
+      );
     }
     process.exit(1);
   }
