@@ -101,6 +101,12 @@ export interface UpdateServiceOptions {
    * Returns false when the caller decided not to proceed.
    */
   prepareInstall?: () => Promise<{ ok: boolean; error?: UpdateError }>;
+  /**
+   * §6.3: a portable build can check and download an update but never
+   * self-replaces — there is no installer to run, only a file to swap. When this
+   * returns true, `installAndRestart` refuses and explains.
+   */
+  isPortable?: () => boolean;
 }
 
 export type CheckResult =
@@ -524,6 +530,15 @@ export class UpdateService {
   async installAndRestart(): Promise<{ ok: boolean; error?: UpdateError }> {
     if (this.state.status !== 'ready') {
       return { ok: false, error: createUpdateError('unknown', 'The update is not ready yet.') };
+    }
+
+    // §6.3: a portable copy has no installer to run. Refuse *before* preparing —
+    // preparing writes a journal entry that would claim an install had started,
+    // and that journal is what the next launch reads.
+    if (this.options.isPortable?.()) {
+      const error = createUpdateError('portable-self-update');
+      this.apply({ type: 'install-failed', error });
+      return { ok: false, error };
     }
 
     // §7.1: the backups and the journal must be in place *before* the installer

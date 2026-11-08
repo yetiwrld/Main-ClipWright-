@@ -642,6 +642,36 @@ describe('downloading and installing', () => {
     expect(readFileSync(join(cacheDir, release.name))).toEqual(INSTALLER_BYTES);
   });
 
+  it('refuses to install itself in a portable build, and says what to do (§6.3)', async () => {
+    // There is no installer in a portable copy, only a file to swap. Preparing
+    // first would leave a journal claiming an install had started.
+    const { service } = await readyService();
+    let prepared = false;
+    // Its own updater handle: the shared fake belongs to the service above, and
+    // asserting on it would prove nothing about this one.
+    const portableUpdater = fakeUpdater('1.3.0');
+    const portable = new UpdateService({
+      ...service['options'],
+      getUpdater: () => portableUpdater,
+      isPortable: () => true,
+      prepareInstall: async () => {
+        prepared = true;
+        return { ok: true };
+      },
+    } as never);
+    await portable.check({ manual: true });
+    await portable.download();
+
+    const result = await portable.installAndRestart();
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('portable version');
+    expect(result.error?.message).toContain('replace the .exe');
+    expect(result.error?.kind).toBe('portable-self-update');
+    expect(portableUpdater.installed).toBe(false);
+    // Nothing was prepared, because nothing could be installed.
+    expect(prepared).toBe(false);
+  });
+
   it('cancels a download that is in flight', async () => {
     const { service } = await readyService();
     service.cancelDownload();

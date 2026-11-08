@@ -406,6 +406,35 @@ describe.skipIf(!HAS_FFMPEG)('ExportService audio', () => {
   }, 180_000);
 });
 
+describe.skipIf(!HAS_FFMPEG)('ExportService idle contract', () => {
+  it('whenIdle() resolves only after every finished job was recorded', async () => {
+    // Regression guard for a real race: the history row was written by an
+    // un-awaited async call, so whenIdle() could resolve first and a caller
+    // reading the history straight after an export would intermittently not find
+    // it. The queue panel does exactly that.
+    //
+    // Two jobs rather than one, so the assertion covers "all", and the check is
+    // made immediately after whenIdle() with no further waiting.
+    const storage = makeStorage();
+    const service = new ExportService({ storage });
+
+    for (const index of [0, 1]) {
+      const outcome = await service.start({
+        jobId: `idle-contract-${index}`,
+        name: `Idle contract ${index}`,
+        settings: makeSettings(),
+        outputDir: join(TMP, 'idle-contract'),
+        createFrameSource: () => solidColourFrameSource({ width: 320, height: 180, luma: 40 + index * 20 }),
+        fullDecode: false,
+      });
+      expect(outcome.ok).toBe(true);
+      await service.whenIdle();
+      // Read straight away: no polling, no extra tick.
+      expect(storage.history, `after job ${index}`).toHaveLength(index + 1);
+    }
+  }, 120_000);
+});
+
 describe.skipIf(!HAS_FFMPEG)('ExportService output paths', () => {
   let counter = 0;
   const jobId = () => `svc-${counter++}-${Date.now().toString(36)}`;

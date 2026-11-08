@@ -25,6 +25,7 @@ import { isSmokeTest, runSmokeTestAndExit } from './smoke-test.js';
 import { summariseIntegrity, verifyBundledTools } from './bin-integrity.js';
 import { UpdateJournalStore, scheduleBootConfirmation } from './updater/update-journal-store.js';
 import { YtDlpService } from './updater/ytdlp-service.js';
+import { detectPortableMode, executableDir, portableUpdateFolder } from './portable.js';
 import {
   BOOT_CONFIRM_MS,
   backupFolderName,
@@ -182,6 +183,9 @@ let recoveryContext: RecoveryView | null = null;
 
 /** SPEC 15 §7 — the update journal for this app run. */
 let journalStore: UpdateJournalStore | null = null;
+
+/** SPEC 15 §6.3 — whether this is a portable copy, and where its data lives. */
+let portableMode: ReturnType<typeof detectPortableMode> | null = null;
 
 /** SPEC 15 §9 — the yt-dlp updater, separate from app updates. */
 let ytDlpService: YtDlpService | null = null;
@@ -987,6 +991,16 @@ app.whenReady().then(async () => {
     await runSmokeTestAndExit({ binDir: resourcesBin, rendererIndexPath: rendererIndex });
   }
 
+  // SPEC 15 §6.3: a portable build with `portable.flag` beside the exe keeps its
+  // data next to the exe. Without the flag it behaves exactly like an installed
+  // copy and uses %APPDATA%, which is the safer default: moving the exe does not
+  // orphan the workspace. This has to run before anything reads a path.
+  portableMode = detectPortableMode(executableDir(process.execPath));
+  if (portableMode.usesLocalData && portableMode.dataDir) {
+    app.setPath('userData', portableMode.dataDir);
+    isDev && console.log(`Portable mode: app data in ${portableMode.dataDir}`);
+  }
+
   const defaultWorkspace = resolve(app.getPath('documents'), 'Clipwright Studio');
   const userData = app.getPath('userData');
 
@@ -1148,6 +1162,8 @@ app.whenReady().then(async () => {
       isInstallerSigned: () => Boolean(process.env.CSC_LINK),
       // §7.1: backups, the cached installer and the journal before anything runs.
       prepareInstall: () => updatePrepareInstall?.() ?? Promise.resolve({ ok: true }),
+      // §6.3: a portable copy cannot replace itself.
+      isPortable: () => portableMode?.isPortable ?? false,
     });
     startAutomaticUpdateChecks(storage, log);
   }

@@ -17,13 +17,13 @@ pnpm test:unit
 
 ```
 Test Files  46 passed (46)
-     Tests  1054 passed (1054)
+     Tests  1056 passed (1056)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 241 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/main` | 243 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 170 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
@@ -31,7 +31,7 @@ Test Files  46 passed (46)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1054** | 46 files |
+| **Total** | **1056** | 46 files |
 
 ### Tests that run real processes
 
@@ -135,6 +135,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | The recovery text warns that a migration also rolls back databases | `journal.test.ts` on `recoveryMessage` (§7.5) |
 | The update dialog cannot install before backups are taken | `update-service.test.ts` — a failing `prepareInstall` aborts the install |
 | The chip and dialog are actually mounted | `update-notice.test.tsx`; the snapshot is reachable from `App` |
+| An export's history row is written before `whenIdle()` resolves | `export-service.test.ts` — a race that made history intermittently miss the export that had just finished |
+| A portable build refuses to install its own update, and says to swap the file | `update-service.test.ts` (§6.3); the guard sits before preparation so no journal entry claims an install started |
 | A download resumes from a `.part` file left by an interrupted run | `update-service.test.ts` asserts the `Range` header and a byte-identical result (§11) |
 | A resumed download is discarded when the server ignores Range | `update-service.test.ts` — a 200 response drops the prefix rather than concatenating it |
 | A `.part` file bigger than the installer is ignored | `update-service.test.ts` |

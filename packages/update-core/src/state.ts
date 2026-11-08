@@ -87,6 +87,8 @@ export type UpdateErrorKind =
   | 'not-enough-space'
   | 'quarantined'
   | 'no-signature'
+  /** §6.3: the portable build cannot replace itself; the user swaps the file. */
+  | 'portable-self-update'
   | 'unknown';
 
 export interface UpdateError {
@@ -120,6 +122,14 @@ const ERROR_TEXT: Record<UpdateErrorKind, { message: string; retryable: boolean 
     message: 'There is not enough free space to download this update.',
     retryable: true,
   },
+  'portable-self-update': {
+    // §6.3: actionable rather than apologetic — the user's next step is a file
+    // swap, and saying so is the whole value of this error.
+    message:
+      'This is the portable version, so it cannot install updates itself. ' +
+      'Download the new version, close Clipwright Studio, and replace the .exe.',
+    retryable: false,
+  },
   quarantined: {
     message: 'The downloaded file was removed by your security software.',
     retryable: false,
@@ -136,7 +146,13 @@ const ERROR_TEXT: Record<UpdateErrorKind, { message: string; retryable: boolean 
 
 /** Build a user-facing error with the standard wording for its kind. */
 export function createUpdateError(kind: UpdateErrorKind, detail?: string): UpdateError {
-  const { message, retryable } = ERROR_TEXT[kind];
+  const entry = ERROR_TEXT[kind];
+  if (!entry) {
+    // An unknown kind must still produce something renderable rather than crash
+    // while the app is already telling the user about a failure.
+    return { kind: 'unknown', message: ERROR_TEXT.unknown.message, retryable: true };
+  }
+  const { message, retryable } = entry;
   return detail ? { kind, message, retryable, detail } : { kind, message, retryable };
 }
 

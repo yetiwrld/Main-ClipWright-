@@ -79,6 +79,13 @@ export class ExportService {
   private readonly queue: ExportQueue;
   private readonly storage: ExportStorageLike;
   private readonly onProgress: (progress: unknown) => void;
+  /**
+   * `record()` is async and was fire-and-forgotten, so `whenIdle()` could resolve
+   * while the history row was still being written. A caller that reads the
+   * history straight after an export — the queue panel does exactly that — would
+   * intermittently not see the export that just finished.
+   */
+  private readonly pendingRecords = new Set<Promise<void>>();
 
   constructor(options: {
     storage: ExportStorageLike;
@@ -90,7 +97,12 @@ export class ExportService {
     this.queue = new ExportQueue({
       maxConcurrent: options.maxConcurrent ?? 1,
       onProgress: (progress) => this.onProgress(progress),
-      onFinished: (result) => void this.record(result),
+      onFinished: (result) => {
+        const recording = this.record(result).finally(() => {
+          this.pendingRecords.delete(recording);
+        });
+        this.pendingRecords.add(recording);
+      },
     });
   }
 
@@ -215,8 +227,15 @@ export class ExportService {
     this.queue.markInterrupted();
   }
 
+  /**
+   * Resolve once the queue is empty *and* every finished job's history row has
+   * been written. Without the second half this returned early under load.
+   */
   async whenIdle(): Promise<void> {
     await this.queue.whenIdle();
+    while (this.pendingRecords.size > 0) {
+      await Promise.all([...this.pendingRecords]);
+    }
   }
 
   listHistory(projectId?: string): ExportHistoryRecord[] {
