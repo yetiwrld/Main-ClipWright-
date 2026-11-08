@@ -16,14 +16,14 @@ pnpm test:unit
 ```
 
 ```
-Test Files  47 passed (47)
-     Tests  1063 passed (1063)
+Test Files  48 passed (48)
+     Tests  1081 passed (1081)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
-| `apps/desktop/src/main` | 243 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/main` | 261 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 177 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
@@ -31,7 +31,7 @@ Test Files  47 passed (47)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1063** | 47 files |
+| **Total** | **1081** | 48 files |
 
 ### Tests that run real processes
 
@@ -178,6 +178,9 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | `assets/icon.ico` has 16/24/32/48/64/128/256 px frames | Verified by parsing the ICO header |
 | Every script a workflow runs is tracked by git | `scripts/check-repo.mjs`, in `pnpm lint` — written after nine release scripts turned out to be outside the repository |
 | Ignore rules cannot swallow source | Same check: an unanchored `release/` pattern is rejected by name |
+| A packaged build trusts only its embedded key, whatever the environment says | `update-config.test.ts` — the override is honoured for tests and local builds, ignored when `app.isPackaged` (§5) |
+| A build with no embedded key refuses every update | `update-config.test.ts` — `hasUsableKeys` is false for the shipped placeholder |
+| A redirect to a look-alike host is refused | `update-config.test.ts` — `github.com.evil.example` is rejected; the check compares hostnames, not substrings |
 | The unsigned notice is on every surface §6.4 names | `check-repo` asserts it in README, the update dialog, the release-notes generator and the release docs (acceptance item 10's automated string check) |
 | Generated release notes carry the unsigned notice | The generator appends it, and drops it only when `--signed` is passed after a certificate was used |
 | Every relative documentation link resolves | Same check, 17 documents |

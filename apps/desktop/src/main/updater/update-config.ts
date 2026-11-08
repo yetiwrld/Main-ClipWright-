@@ -54,12 +54,27 @@ export const EMBEDDED_UPDATE_KEYS: { current: string; next?: string } = {
 /**
  * Allow CI or a test build to inject the key without editing this file.
  * Returns the embedded keys when nothing is supplied.
+ *
+ * §5: the override is honoured only when `allowOverride` is true, which callers
+ * set for an unpackaged build (`!app.isPackaged`). A shipped binary trusts its
+ * embedded key and nothing else — otherwise setting one environment variable
+ * would be enough to make a released app accept manifests signed by someone
+ * else. The threat is narrow (it needs the variable set *and* control of the
+ * release host) but the rule costs nothing and the failure mode is total: every
+ * subsequent update would be attacker-signed.
+ *
+ * The variable remains useful where it is actually needed: signing and
+ * verification tests, and a local build that has no key embedded yet.
  */
 export function resolveTrustedKeys(
   env: Record<string, string | undefined> = {},
+  options: { allowOverride?: boolean } = {},
 ): { current: string; next?: string } {
-  const current = env.UPDATE_PUBLIC_KEY_B64?.trim() || EMBEDDED_UPDATE_KEYS.current;
-  const next = env.UPDATE_PUBLIC_KEY_NEXT_B64?.trim() || EMBEDDED_UPDATE_KEYS.next;
+  const allowOverride = options.allowOverride ?? true;
+  const current =
+    (allowOverride ? env.UPDATE_PUBLIC_KEY_B64?.trim() : undefined) || EMBEDDED_UPDATE_KEYS.current;
+  const next =
+    (allowOverride ? env.UPDATE_PUBLIC_KEY_NEXT_B64?.trim() : undefined) || EMBEDDED_UPDATE_KEYS.next;
   return next ? { current, next } : { current };
 }
 

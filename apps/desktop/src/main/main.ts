@@ -1145,7 +1145,9 @@ app.whenReady().then(async () => {
     updateService = new UpdateService({
       currentVersion: app.getVersion(),
       channel: storage.getSettings().updateChannel,
-      keys: resolveTrustedKeys(process.env),
+      // A packaged build trusts only its embedded key (§5); the environment
+      // override exists for tests and for a local build with no key yet.
+      keys: resolveTrustedKeys(process.env, { allowOverride: !app.isPackaged }),
       getUpdater: () => getElectronUpdater(),
       fetch: (url, init) => fetch(url, init) as never,
       cacheDir: join(app.getPath('userData'), 'updates'),
