@@ -196,6 +196,18 @@ const sourceDirs = [
   join(ROOT, 'apps', 'desktop', 'src', 'renderer'),
 ];
 
+/**
+ * The final segment of a path, whichever separator it uses.
+ *
+ * `path.basename` follows the host platform, which made a Windows-only bug
+ * untestable on the machine that fixed it. Splitting on both separators gives the
+ * same answer everywhere, so the Linux run proves what Windows will do.
+ */
+function lastSegment(file) {
+  const index = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+  return index === -1 ? file : file.slice(index + 1);
+}
+
 function listSources(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -213,8 +225,17 @@ const productionSources = allSources.filter((file) => !file.includes('__tests__'
 const ENTRY_POINTS = new Set(['main.ts', 'main.tsx', 'index.ts', 'index.tsx']);
 
 for (const file of productionSources) {
-  if (ENTRY_POINTS.has(file.split('/').pop() ?? '')) continue;
-  const base = (file.split('/').pop() ?? '').replace(/\.tsx?$/, '');
+  // NOT `split('/')`: on Windows these are `C:\...` paths, where splitting on
+  // '/' returns the whole path and every entry-point exemption silently stops
+  // matching. That is not cosmetic — it made this check flag main.tsx and 22
+  // other files as orphans on CI while passing on Linux.
+  //
+  // NOT `path.basename` either: it is platform-specific, so the fix could not be
+  // tested on the platform where it was written. `lastSegment` splits on both
+  // separators and behaves identically everywhere.
+  const name = lastSegment(file);
+  if (ENTRY_POINTS.has(name)) continue;
+  const base = name.replace(/\.tsx?$/, '');
   const imported = productionSources.some(
     (other) => other !== file && new RegExp(`from '[^']*/${base}\\.js'`).test(readFileSync(other, 'utf8')),
   );
@@ -374,7 +395,7 @@ if (existsSync(builderConfigPath)) {
   // directory rather than by exact path, because the config globs a tree
   // (`dist/main/**/*`) and demanding the literal filename would be a false alarm.
   const mainEntry = (desktopManifest.main ?? './dist/main/index.cjs').replace(/^\.\//, '');
-  const mainDir = mainEntry.split('/').slice(0, -1).join('/');
+  const mainDir = mainEntry.includes('/') ? mainEntry.slice(0, mainEntry.lastIndexOf('/')) : '.';
   if (!yaml.includes(mainDir)) {
     fail(`electron-builder.yml does not package ${mainDir}/, which holds package.json's "main" (${mainEntry}).`);
   }
