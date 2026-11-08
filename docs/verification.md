@@ -17,7 +17,7 @@ pnpm test:unit
 
 ```
 Test Files  53 passed (53)
-     Tests  1193 passed (1193)
+     Tests  1196 passed (1196)
 ```
 
 | Area | Tests | What they actually check |
@@ -29,11 +29,11 @@ Test Files  53 passed (53)
 | `apps/desktop/src/renderer` | 177 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
-| `packages/timeline-engine` | 121 | Commands, invariants, undo/redo, caption editing (§11 §2.5) |
+| `packages/timeline-engine` | 124 | Commands, invariants, undo/redo, caption editing (§11 §2.5) |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1193** | 53 files |
+| **Total** | **1196** | 53 files |
 
 ### Tests that run real processes
 

@@ -18,6 +18,7 @@ import {
   regenerateCaptions,
   retimeCaption,
   setWordEmphasis,
+  splitCaptionSegment,
   syncCaptionsWithTranscript,
   trimCaptionWordsToRange,
   type CommandResult,
@@ -322,5 +323,58 @@ describe('syncCaptionsWithTranscript (SPEC 11 §9)', () => {
     const before = segment(edited.state, itemId).startUs;
     const next = ok(syncCaptionsWithTranscript(edited.state, { trackId, words: [{ text: 'other', startUs: 9_000_000, endUs: 9_100_000 }] }));
     expect(segment(next.state, itemId).startUs).toBe(before);
+  });
+});
+
+describe('captions whose words carry no textOverride', () => {
+  /**
+   * The normal case for captions generated from a transcript: the word refs name
+   * words by id and the text lives in the transcript, so `textOverride` is
+   * absent. Splitting one used to produce two captions with empty text, because
+   * the code joined `textOverride ?? ''` — silently, with no error.
+   */
+  function stateWithPlainCaption(): { state: TimelineState; itemId: string } {
+    const base = createDefaultTimeline({ id: 'comp-2', name: 'Plain', fps: FPS });
+    const track = base.tracks.find((candidate) => candidate.kind === 'caption')!;
+    const item = createCaptionItem({
+      id: 'cap-plain',
+      trackId: track.id,
+      startUs: 0,
+      durationUs: 2_000_000,
+      fallbackText: 'alpha beta gamma delta',
+      words: [
+        { wordId: 'a', startUs: 0, endUs: 500_000 },
+        { wordId: 'b', startUs: 500_000, endUs: 1_000_000 },
+        { wordId: 'c', startUs: 1_000_000, endUs: 1_500_000 },
+        { wordId: 'd', startUs: 1_500_000, endUs: 2_000_000 },
+      ],
+    });
+    const added = addItem(base, { item, fps: FPS });
+    if (!added.ok) throw new Error(added.message);
+    return { state: added.state, itemId: 'cap-plain' };
+  }
+
+  it('keeps the text when the caption is created from a fallback', () => {
+    const { state, itemId } = stateWithPlainCaption();
+    expect(segment(state, itemId).text).toBe('alpha beta gamma delta');
+  });
+
+  it('splits into two captions that each have text', () => {
+    const { state, itemId } = stateWithPlainCaption();
+    const split = ok(splitCaptionSegment(state, { itemId, timeUs: 1_000_000, fps: FPS }));
+    const captions = Object.values(split.state.items).filter((item) => item.type === 'caption');
+    expect(captions).toHaveLength(2);
+    const texts = captions.map((caption) => caption.captionSegment!.text).filter(Boolean);
+    expect(texts).toHaveLength(2);
+    expect(texts.join(' ')).toBe('alpha beta gamma delta');
+  });
+
+  it('does not produce an empty caption when trimming words with no overrides', () => {
+    const { state, itemId } = stateWithPlainCaption();
+    const shrunk = ok(retimeCaption(state, { itemId, startUs: 0, endUs: 1_000_000, fps: FPS }));
+    const trimmed = ok(trimCaptionWordsToRange(shrunk.state, { itemId }));
+    expect(segment(trimmed.state, itemId).wordRefs).toHaveLength(2);
+    // Two words kept, so the text must be two words rather than blank.
+    expect(segment(trimmed.state, itemId).text.trim().length).toBeGreaterThan(0);
   });
 });

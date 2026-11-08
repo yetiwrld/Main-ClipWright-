@@ -1912,8 +1912,13 @@ export function splitCaptionSegment(
   const leftWords = segment.wordRefs.filter((w) => w.endUs <= splitUs);
   const rightWords = segment.wordRefs.filter((w) => w.startUs >= splitUs);
 
-  const leftText = leftWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
-  const rightText = rightWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+  // Each half's fallback is the slice of the original text its words cover, so a
+  // caption with no overrides still splits into real text.
+  const originalWords = segment.text.split(/\s+/).filter(Boolean);
+  const leftFallback = originalWords.slice(0, leftWords.length).join(' ');
+  const rightFallback = originalWords.slice(leftWords.length).join(' ');
+  const leftText = captionTextFrom(leftWords, leftFallback);
+  const rightText = captionTextFrom(rightWords, rightFallback);
 
   const newId = `cap-${Date.now()}`;
 
@@ -1983,7 +1988,7 @@ export function mergeCaptionSegments(
   const rightSeg = right.captionSegment;
   if (!leftSeg || !rightSeg) return fail('invalid', 'That caption item has no segment.');
   const mergedWords = [...leftSeg.wordRefs, ...rightSeg.wordRefs];
-  const mergedText = mergedWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+  const mergedText = captionTextFrom(mergedWords, `${leftSeg.text} ${rightSeg.text}`.trim());
   const rightEndUs = rightSeg.endUs;
 
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
@@ -2041,7 +2046,7 @@ export function trimCaptionSegment(
       if (target.captionSegment) {
         target.captionSegment.wordRefs = remainingWords;
         target.captionSegment.startUs = newStart;
-        const remainingText = remainingWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+        const remainingText = captionTextFrom(remainingWords, '', segment.text);
         target.captionSegment.text = remainingText;
       }
       sortTrackItems(draft, item.trackId);
@@ -2060,7 +2065,7 @@ export function trimCaptionSegment(
       if (target.captionSegment) {
         target.captionSegment.wordRefs = remainingWords;
         target.captionSegment.endUs = newEnd;
-        const remainingText = remainingWords.map((w) => w.textOverride ?? '').filter(Boolean).join(' ');
+        const remainingText = captionTextFrom(remainingWords, '', segment.text);
         target.captionSegment.text = remainingText;
       }
       sortTrackItems(draft, item.trackId);
@@ -2343,15 +2348,52 @@ export function renameTrack(
  * range (SPEC 11 §3). Derived every time rather than stored, so trimming and
  * extending cannot leave the two disagreeing.
  */
-function visibleCaptionText(segment: Pick<CaptionSegment, 'startUs' | 'endUs' | 'wordRefs'>): string {
-  return segment.wordRefs
-    .filter((word) => {
-      const midpoint = (word.startUs + word.endUs) / 2;
-      return midpoint >= segment.startUs && midpoint <= segment.endUs;
-    })
-    .map((word) => word.textOverride ?? '')
-    .filter(Boolean)
-    .join(' ');
+/**
+ * The text for a set of word refs.
+ *
+ * `textOverride` is only present when a word was edited for this caption alone;
+ * otherwise the text lives in the transcript. Falling back to the segment's own
+ * text keeps a split or merge from producing an empty caption when the refs carry
+ * no overrides — which is the normal case for captions generated from a
+ * transcript.
+ */
+function captionTextFrom(
+  wordRefs: ReadonlyArray<CaptionWordRef>,
+  fallback: string,
+  segmentText?: string,
+): string {
+  const overrides = wordRefs.map((word) => word.textOverride ?? '').filter(Boolean);
+  // All words carried text: use it.
+  if (overrides.length === wordRefs.length && wordRefs.length > 0) return overrides.join(' ');
+  // None did: the text lives elsewhere. Prefer an explicit slice; a split passes
+  // the half it covers, while a trim can only slice the segment's own words
+  // positionally, because word refs carry no text of their own.
+  if (overrides.length === 0) {
+    if (fallback) return fallback;
+    if (segmentText) return segmentText.split(/\s+/).filter(Boolean).slice(0, wordRefs.length).join(' ');
+    return '';
+  }
+  // Mixed — this should not happen, but guessing would corrupt the caption.
+  return overrides.join(' ');
+}
+
+function visibleCaptionText(segment: Pick<CaptionSegment, 'startUs' | 'endUs' | 'wordRefs' | 'text'>): string {
+  const visible = segment.wordRefs.filter((word) => {
+    const midpoint = (word.startUs + word.endUs) / 2;
+    return midpoint >= segment.startUs && midpoint <= segment.endUs;
+  });
+
+  // Overrides are absent on the normal path — a caption generated from a
+  // transcript names its words by id and stores no text of its own. Slicing the
+  // segment's existing text by the same word positions keeps retiming from
+  // blanking the caption, which is what joining an empty override list did.
+  const overrides = visible.map((word) => word.textOverride ?? '');
+  if (visible.length > 0 && overrides.every(Boolean)) return overrides.join(' ');
+
+  const originalWords = segment.text.split(/\s+/).filter(Boolean);
+  const firstVisible = segment.wordRefs.findIndex((word) => visible.includes(word));
+  if (firstVisible === -1) return '';
+  return originalWords.slice(firstVisible, firstVisible + visible.length).join(' ');
 }
 
 /**
@@ -2546,7 +2588,7 @@ export function trimCaptionWordsToRange(state: TimelineState, params: { itemId: 
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
     const target = draft.items[params.itemId]!;
     target.captionSegment!.wordRefs = kept;
-    target.captionSegment!.text = kept.map((word) => word.textOverride ?? '').filter(Boolean).join(' ');
+    target.captionSegment!.text = captionTextFrom(kept, '', segment.text);
     target.captionSegment!.manualText = true;
   });
 

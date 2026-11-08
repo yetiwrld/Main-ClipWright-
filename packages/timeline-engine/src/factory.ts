@@ -154,9 +154,17 @@ export interface CreateCaptionItemParams {
 }
 
 export function createCaptionItem(params: CreateCaptionItemParams): TimelineItem {
-  const text = params.words.length > 0
-    ? params.words.map((word) => word.textOverride ?? '').filter(Boolean).join(' ')
-    : (params.fallbackText ?? '');
+  // Word overrides win when every word has one; otherwise the caller's text is
+  // the only copy that covers all the words, which is the normal case for a
+  // caption generated from a transcript. Taking the overrides blindly produced an
+  // empty caption, which then rendered as nothing and exported as nothing.
+  const overrides = params.words.map((word) => word.textOverride ?? '');
+  const text =
+    params.words.length === 0
+      ? (params.fallbackText ?? '')
+      : overrides.every(Boolean)
+        ? overrides.join(' ')
+        : (params.fallbackText ?? overrides.filter(Boolean).join(' '));
 
   return TimelineItemSchema.parse({
     id: params.id ?? nextId('cap'),
