@@ -416,80 +416,6 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     expect(amplitudeToDb(peakLevel(afterSpeech))).toBeGreaterThan(-50);
     expect(amplitudeToDb(peakLevel(duringSpeech))).toBeDefined();
   }, 120_000);
-});
-
-describe.skipIf(!HAS_FFMPEG)('measureLoudnessFile', () => {
-  it('measures a real file', async () => {
-    const path = makeAudioFile('measure.mp4', { seconds: 1, volume: 0.5 });
-    const measured = await measureLoudnessFile(path);
-    expect(measured).not.toBeNull();
-    expect(measured!.integratedLufs).toBeLessThan(0);
-    expect(Number.isFinite(measured!.truePeakDb)).toBe(true);
-  }, 60_000);
-});
-
-describe('planAudioItems', () => {
-  it('maps plan items to mix requests relative to the range start', () => {
-    const plan = buildExportPlan(
-      makeSettings({
-        rangeUs: [1_000_000, 3_000_000],
-        items: [
-          {
-            id: 'item-1',
-            trackId: 'track-audio',
-            type: 'audio',
-            mediaId: 'media-a',
-            startUs: 1_500_000,
-            durationUs: 1_000_000,
-            sourceInUs: 250_000,
-            sourceDurationUs: 1_000_000,
-            disabled: false,
-            muted: false,
-            hasAudio: true,
-          },
-        ],
-      }),
-    );
-    const items = planAudioItems(plan, () => '/media/a.mp4');
-    expect(items).toHaveLength(1);
-    // Starts 0.5 s into the exported range.
-    expect(items[0].timelineStartUs).toBe(500_000);
-    expect(items[0].sourceInUs).toBe(250_000);
-  });
-
-  it('skips items without audio or without a resolvable path', () => {
-    const plan = buildExportPlan(
-      makeSettings({
-        items: [
-          {
-            id: 'item-silent',
-            trackId: 'track-video',
-            type: 'video',
-            mediaId: 'media-a',
-            startUs: 0,
-            durationUs: 1_000_000,
-            sourceInUs: 0,
-            disabled: false,
-            muted: false,
-            hasAudio: false,
-          },
-          {
-            id: 'item-lost',
-            trackId: 'track-audio',
-            type: 'audio',
-            mediaId: 'media-missing',
-            startUs: 0,
-            durationUs: 1_000_000,
-            sourceInUs: 0,
-            disabled: false,
-            muted: false,
-            hasAudio: true,
-          },
-        ],
-      }),
-    );
-    expect(planAudioItems(plan, () => undefined)).toHaveLength(0);
-  });
 
   /**
    * SPEC 12 §4.2 — "linked audio gets an equal-power crossfade over the same range
@@ -639,4 +565,78 @@ describe('planAudioItems', () => {
     // than the mixer having dropped both sides.
     expect(energyAt(300, 0.9, 0.96)).toBeGreaterThan(1e-3);
   }, 120_000);
+});
+
+describe.skipIf(!HAS_FFMPEG)('measureLoudnessFile', () => {
+  it('measures a real file', async () => {
+    const path = makeAudioFile('measure.mp4', { seconds: 1, volume: 0.5 });
+    const measured = await measureLoudnessFile(path);
+    expect(measured).not.toBeNull();
+    expect(measured!.integratedLufs).toBeLessThan(0);
+    expect(Number.isFinite(measured!.truePeakDb)).toBe(true);
+  }, 60_000);
+});
+
+describe('planAudioItems', () => {
+  it('maps plan items to mix requests relative to the range start', () => {
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [1_000_000, 3_000_000],
+        items: [
+          {
+            id: 'item-1',
+            trackId: 'track-audio',
+            type: 'audio',
+            mediaId: 'media-a',
+            startUs: 1_500_000,
+            durationUs: 1_000_000,
+            sourceInUs: 250_000,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+          },
+        ],
+      }),
+    );
+    const items = planAudioItems(plan, () => '/media/a.mp4');
+    expect(items).toHaveLength(1);
+    // Starts 0.5 s into the exported range.
+    expect(items[0].timelineStartUs).toBe(500_000);
+    expect(items[0].sourceInUs).toBe(250_000);
+  });
+
+  it('skips items without audio or without a resolvable path', () => {
+    const plan = buildExportPlan(
+      makeSettings({
+        items: [
+          {
+            id: 'item-silent',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-a',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            disabled: false,
+            muted: false,
+            hasAudio: false,
+          },
+          {
+            id: 'item-lost',
+            trackId: 'track-audio',
+            type: 'audio',
+            mediaId: 'media-missing',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+          },
+        ],
+      }),
+    );
+    expect(planAudioItems(plan, () => undefined)).toHaveLength(0);
+  });
 });
