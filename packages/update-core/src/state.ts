@@ -147,7 +147,14 @@ export function createUpdateError(kind: UpdateErrorKind, detail?: string): Updat
 export function classifyUpdateError(error: unknown): UpdateError {
   if (!error) return createUpdateError('unknown');
   const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
+  // Node hides the real reason inside `cause`: an offline machine produces
+  // `TypeError: fetch failed` with `cause.code === 'ENOTFOUND'`. Classifying on
+  // the message alone told the user "The update couldn't be completed" when the
+  // answer was "there is no internet connection".
+  const cause = (error as { cause?: unknown })?.cause;
+  const causeCode =
+    typeof cause === 'object' && cause !== null && 'code' in cause ? String((cause as { code: unknown }).code) : '';
+  const lower = `${message} ${causeCode}`.toLowerCase();
 
   // Offline / DNS / TLS-shaped failures.
   if (
@@ -155,9 +162,13 @@ export function classifyUpdateError(error: unknown): UpdateError {
     lower.includes('econnrefused') ||
     lower.includes('econnreset') ||
     lower.includes('etimedout') ||
+    lower.includes('eai_again') ||
     lower.includes('network') ||
     lower.includes('offline') ||
-    lower.includes('getaddrinfo')
+    lower.includes('getaddrinfo') ||
+    // The generic undici failure: when `fetch` cannot reach the network at all it
+    // throws exactly this, with the specific reason in `cause`.
+    lower.includes('fetch failed')
   ) {
     return createUpdateError('offline', message);
   }
@@ -167,7 +178,15 @@ export function classifyUpdateError(error: unknown): UpdateError {
   if (lower.includes('enospc') || lower.includes('no space')) {
     return createUpdateError('not-enough-space', message);
   }
-  if (lower.includes('eperm') || lower.includes('eacces') || lower.includes('virus')) {
+  if (
+    lower.includes('eperm') ||
+    lower.includes('eacces') ||
+    lower.includes('virus') ||
+    // §11: "the downloaded file was removed by your security software". On
+    // Windows a scanner holding the file open produces EBUSY or ENOENT on the
+    // downloaded installer, not a message that mentions security.
+    lower.includes('ebusy')
+  ) {
     return createUpdateError('quarantined', message);
   }
   if (lower.includes('signature') || lower.includes('sha512') || lower.includes('checksum')) {

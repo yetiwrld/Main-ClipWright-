@@ -263,6 +263,29 @@ describe('classifyUpdateError', () => {
     }
   });
 
+  it("maps Node's real offline error, whose reason is hidden in cause", () => {
+    // This is what an offline machine actually produces. Classifying on the
+    // message alone gave "The update couldn't be completed" — true, unhelpful,
+    // and not what §11 asks for.
+    const plain = new TypeError('fetch failed');
+    expect(classifyUpdateError(plain).kind).toBe('offline');
+    expect(classifyUpdateError(plain).message).toContain('internet connection');
+
+    const withDns = new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } });
+    expect(classifyUpdateError(withDns).kind).toBe('offline');
+
+    const withTimeout = new TypeError('fetch failed', { cause: { code: 'ETIMEDOUT' } });
+    expect(classifyUpdateError(withTimeout).kind).toBe('offline');
+  });
+
+  it('maps a file held open by antivirus to the quarantine wording (§11)', () => {
+    // On Windows a scanner locking the downloaded installer surfaces as EBUSY,
+    // with no mention of security in the message itself.
+    const error = classifyUpdateError(new Error('EBUSY: resource busy or locked'));
+    expect(error.kind).toBe('quarantined');
+    expect(error.message).toContain('security software');
+  });
+
   it('maps a rate limit', () => {
     expect(classifyUpdateError(new Error('API rate limit exceeded')).kind).toBe('rate-limited');
     expect(classifyUpdateError(new Error('HTTP 429')).kind).toBe('rate-limited');
