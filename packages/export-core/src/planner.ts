@@ -50,6 +50,25 @@ export interface PlannedItem {
     wordRefs?: Array<{ wordId: string; startUs: number; endUs: number; textOverride?: string }>;
     speaker?: string;
   };
+  /**
+   * Where the picture sits inside the canvas (SPEC 10 §8.4–8.6): the stored crop,
+   * scale, rotation and offset. Carried on the plan because the preview applies
+   * them, and an export that ignored them would deliver a different picture from
+   * the one the user approved.
+   */
+  geometry?: {
+    crop?: { left?: number; top?: number; right?: number; bottom?: number };
+    transform?: {
+      x?: number;
+      y?: number;
+      scale?: number;
+      scaleX?: number;
+      scaleY?: number;
+      rotation?: number;
+      flipH?: boolean;
+      flipV?: boolean;
+    };
+  };
 }
 
 /** Export plan describing the full render. */
@@ -163,6 +182,20 @@ export interface ExportSettings {
     };
     /** Which `.cwstyle` the caption uses, for a styled burn-in. */
     captionStyleId?: string;
+    /** Crop and transform, so the decoded frame matches the preview. */
+    geometry?: {
+      crop?: { left?: number; top?: number; right?: number; bottom?: number };
+      transform?: {
+        x?: number;
+        y?: number;
+        scale?: number;
+        scaleX?: number;
+        scaleY?: number;
+        rotation?: number;
+        flipH?: boolean;
+        flipV?: boolean;
+      };
+    };
   }>;
 }
 
@@ -233,6 +266,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         hasAudio,
         captionText: item.captionSegment?.text,
         captionStyleId: item.captionStyleId,
+        geometry: item.geometry,
         captionSegment: item.captionSegment,
       };
     })

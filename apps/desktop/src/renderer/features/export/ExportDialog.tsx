@@ -280,6 +280,14 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       muted: Boolean(item.muted) || mutedTracks.has(item.trackId) || !hasAudioSource,
       hasAudio: hasAudioSource,
       captionSegment: item.captionSegment,
+      // Without this every caption burns in with the project default style, so a
+      // composition whose captions are Karaoke exports in Bold Creator's look —
+      // present, but not the look that was designed (SPEC 11 §6).
+      captionStyleId: item.captionStyleId,
+      // The plan carries the item's look so the file matches the preview; without
+      // this the export renders every clip whole and centred however it was
+      // cropped, scaled or rotated in the editor (SPEC 10 §8.4–8.6).
+      geometry: { crop: item.crop, transform: item.transform },
     });
   }
   return items;

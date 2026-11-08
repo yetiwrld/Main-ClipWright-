@@ -479,7 +479,11 @@ export class MomentsService {
             mediaId,
             sourceInUs: moment.startUs,
             sourceDurationUs: durationUs,
-            transform: { x: framing.x, y: framing.y, scale: framing.scale },
+            // `scale` is the project's framing field (`02 §8`); the item's own
+            // transform stores per-axis scale. Writing `scale` here put a key on the
+            // item's transform that nothing read, so a clip created from a moment
+            // opened at 100% however it had been framed.
+            transform: { x: framing.x, y: framing.y, scaleX: framing.scale, scaleY: framing.scale },
             volumeDb: 0,
             effects: [],
             keyframes: {},

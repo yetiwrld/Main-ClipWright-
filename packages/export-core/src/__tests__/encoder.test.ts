@@ -463,3 +463,112 @@ describe('sourceFilterChain fit mode', () => {
     expect(chain).not.toContain('pad=');
   });
 });
+
+/**
+ * SPEC 10 §8.4–8.6 — the export has to draw what the preview drew.
+ *
+ * The interesting property is not "a filter appears" but that the chain stays
+ * valid: every stage has to emit even dimensions (yuv420p cannot hold an odd width)
+ * and the final stage has to land back on the exact output size, or the encoder
+ * rejects the stream halfway through a long export.
+ */
+describe('sourceFilterChain geometry', () => {
+  const base = { targetFps: 30, outputWidth: 1080, outputHeight: 1920, fit: 'fit' as const };
+
+  it('leaves an untouched item exactly as it was', () => {
+    expect(sourceFilterChain({ ...base, geometry: {} })).toBe(sourceFilterChain(base));
+    expect(sourceFilterChain({ ...base, geometry: { crop: {}, transform: {} } })).toBe(
+      sourceFilterChain(base),
+    );
+  });
+
+  it('crops in source-fraction maths so any source size works', () => {
+    const chain = sourceFilterChain({ ...base, geometry: { crop: { left: 0.1, right: 0.1 } } });
+    // iw/ih are the source's own dimensions, so the crop survives a 4K or a 480p
+    // source without a second lookup of its size.
+    expect(chain).toContain('crop=floor(iw*0.8/2)*2:floor(ih*1/2)*2:floor(iw*0.1/2)*2:floor(ih*0/2)*2');
+  });
+
+  it('ignores a crop that would leave no picture', () => {
+    // The same guard as the preview: a degenerate crop must not reach ffmpeg,
+    // where it becomes an error mid-export rather than a slightly wrong frame.
+    const chain = sourceFilterChain({ ...base, geometry: { crop: { left: 0.9, right: 0.9 } } });
+    // No source-fraction crop stage; the canvas cap below is a different filter and
+    // must still be there.
+    expect(chain).not.toContain('crop=floor(');
+    expect(chain).toContain("crop=w='min(iw,1080)'");
+  });
+
+  it('scales the fitted picture without changing the canvas', () => {
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { scaleX: 1.5, scaleY: 1.5 } } });
+    expect(chain).toContain('scale=w=trunc(iw*1.5/2)*2:h=trunc(ih*1.5/2)*2:flags=lanczos');
+    // Growing past the canvas is trimmed back rather than padded: `pad` cannot
+    // shrink a picture, and a zoom means "keep the middle".
+    expect(chain).toContain("crop=w='min(iw,1080)':h='min(ih,1920)':x=(iw-ow)/2:y=(ih-oh)/2");
+    expect(chain).toContain('pad=1080:1920');
+  });
+
+  it('handles a zoom out, where the picture ends up smaller than the canvas', () => {
+    // The mirror case of the one above. `crop` must be a no-op rather than an
+    // error, which is why the expression is `min(iw, W)` and not a bare width.
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { scaleX: 0.5, scaleY: 0.5 } } });
+    // `min(iw, W)` is `iw` here, so the crop keeps the whole (smaller) picture and
+    // the pad letterboxes it. A bare `crop=1080:1920` would fail outright.
+    expect(chain).toContain("crop=w='min(iw,1080)':h='min(ih,1920)'");
+    expect(chain).toContain('pad=1080:1920');
+  });
+
+  it('honours the legacy framing scale', () => {
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { scale: 1.4 } } });
+    expect(chain).toContain('trunc(iw*1.4/2)*2');
+  });
+
+  it('rotates, then fits the canvas, then pads', () => {
+    // `rotate` produces a canvas large enough for the rotated bounding box, which
+    // is wider than the output for any angle in between — so a fit has to follow it
+    // before the pad, or ffmpeg refuses the pad as a shrink.
+    const chain = sourceFilterChain({
+      ...base,
+      outputWidth: 1920,
+      outputHeight: 1080,
+      geometry: { transform: { rotation: 90 } },
+    });
+    const stages = chain.split(',');
+    const rotateAt = stages.findIndex((stage) => stage.startsWith('rotate='));
+    // The fit *after* the rotate — the first one is the pre-existing letterbox.
+    const fitAt = stages.findIndex(
+      (stage, index) => index > rotateAt && stage.includes('force_original_aspect_ratio'),
+    );
+    const padAt = stages.findIndex((stage) => stage.startsWith('pad=1920:1080'));
+    expect(rotateAt).toBeGreaterThan(-1);
+    expect(fitAt).toBeGreaterThan(rotateAt);
+    expect(padAt).toBeGreaterThan(fitAt);
+  });
+
+  it('moves the picture by a fraction of the canvas', () => {
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { x: 0.25, y: -0.1 } } });
+    // 25% of 1080 = 270, −10% of 1920 = −192, both added to the centring term.
+    expect(chain).toContain('(ow-iw)/2+270:(oh-ih)/2+-192');
+  });
+
+  it('flips with hflip/vflip rather than a negative scale', () => {
+    // A negative `scale` reverses the picture but can leave dimensions odd, and it
+    // makes every later expression that reads `iw` untrustworthy.
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { flipH: true, flipV: true } } });
+    expect(chain).toContain('hflip');
+    expect(chain).toContain('vflip');
+    expect(chain).not.toContain('iw*-1');
+  });
+
+  it('rounds a rotation onto even dimensions', () => {
+    // `rotate` computes its own output size from a float; an odd result fails at
+    // yuv420p after the first frame has already been encoded.
+    const chain = sourceFilterChain({ ...base, geometry: { transform: { rotation: 17 } } });
+    const pads = chain.match(/pad=\d+:\d+/g) ?? [];
+    for (const pad of pads) {
+      const [, w, h] = pad.match(/pad=(\d+):(\d+)/)!;
+      expect(Number(w) % 2, pad).toBe(0);
+      expect(Number(h) % 2, pad).toBe(0);
+    }
+  });
+});

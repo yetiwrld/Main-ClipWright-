@@ -4,6 +4,7 @@ import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
+import { itemGeometry } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
 
@@ -28,6 +29,10 @@ export function PreviewPane({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [missing, setMissing] = useState(false);
+  // The source's own aspect ratio, known only after the first frame's metadata.
+  // Until then the canvas ratio is the best guess, which is also what the element
+  // was doing before crop existed.
+  const [sourceAspect, setSourceAspect] = useState((state.canvas?.width ?? 1080) / (state.canvas?.height ?? 1920));
   const durationUs = projectDurationUs(state);
 
   // The item that is showing at a given time; read imperatively so playback does
@@ -133,6 +138,7 @@ export function PreviewPane({
   const item = activeItemId ? (state.items[activeItemId] ?? null) : null;
   const src = item?.mediaId ? `${MEDIA_ORIGIN}${encodeURIComponent(item.mediaId)}` : undefined;
   const canvas = state.canvas ?? { width: 1080, height: 1920, aspect: '9:16' };
+  const geometry = itemGeometry(item ?? {});
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -161,14 +167,70 @@ export function PreviewPane({
           }}
         >
           {src && !missing ? (
-            <video
-              ref={videoRef}
-              src={src}
-              muted={muted}
-              playsInline
-              crossOrigin="anonymous"
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-            />
+            /*
+              Crop is a source-rectangle selection, not a clip: the surviving part
+              of the source is fitted to the canvas exactly as the whole source
+              would have been, so an uncropped item looks the same as before and a
+              cropped one does not stretch (SPEC 14 §3.2: never stretch). The
+              fitted box is sized from the crop's own aspect ratio; the video inside
+              it is oversized by the crop factors and offset, which makes the box
+              show precisely the cropped region.
+
+              The transform sits on a wrapper rather than the <video> so it does not
+              also move or scale the caption canvas drawn above it (SPEC 10 §4).
+            */
+            <div
+              data-testid="preview-item"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                // `inset: 0` makes this the canvas, so these percentages are
+                // percentages of the frame — the unit `transform.x/y` is stored in.
+                transform: `translate(${geometry.offsetX * 100}%, ${geometry.offsetY * 100}%)`,
+              }}
+            >
+              <div
+                data-testid="preview-item-fit"
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: `translate(-50%, -50%) scale(${
+                    geometry.scaleX * (geometry.flipH ? -1 : 1)
+                  }, ${geometry.scaleY * (geometry.flipV ? -1 : 1)}) rotate(${geometry.rotation}deg)`,
+                  // Fitted inside the canvas, preserving the cropped aspect.
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  aspectRatio: `${geometry.source.width * sourceAspect} / ${
+                    geometry.source.height
+                  }`,
+                  width: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                <video
+                  ref={videoRef}
+                  src={src}
+                  muted={muted}
+                  playsInline
+                  crossOrigin="anonymous"
+                  onLoadedMetadata={(event) => {
+                    const { videoWidth, videoHeight } = event.currentTarget;
+                    if (videoWidth > 0 && videoHeight > 0) setSourceAspect(videoWidth / videoHeight);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    // Oversized by 1/crop and shifted by the crop origin: the box
+                    // then shows the cropped rectangle and nothing else.
+                    left: `${-(geometry.source.x / geometry.source.width) * 100}%`,
+                    top: `${-(geometry.source.y / geometry.source.height) * 100}%`,
+                    width: `${100 / geometry.source.width}%`,
+                    height: `${100 / geometry.source.height}%`,
+                    objectFit: 'fill',
+                  }}
+                />
+              </div>
+            </div>
           ) : (
             <div
               style={{

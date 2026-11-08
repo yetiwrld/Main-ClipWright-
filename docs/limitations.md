@@ -57,12 +57,14 @@ This document tracks architectural scope boundaries and honest limitations per `
 1. **Captions are burnt in; the rest of the compositor is not yet.** Captioned
    exports are rendered by ffmpeg from a generated ASS script, so font, weight,
    size, fill, outline, shadow, position and karaoke timing all come from the
-   `.cwstyle` and match the preview (SPEC 11 §3). What is still missing is the
-   *video* compositor: each video/image item is decoded by its own ffmpeg process
-   and the topmost visible item is written, so effects, transitions, keyframed
-   transforms, blend modes, masks and the `rotationJitterDeg` per-caption tilt are
-   **not rendered**. Where nothing is on the timeline you get the canvas colour.
-   The export dialog says so before you press Export.
+   `.cwstyle` and match the preview (SPEC 11 §3). Each video/image item is decoded
+   by its own ffmpeg process, and the item's *static* crop, scale, rotation, flip
+   and offset are applied to the decoded frame, so a clip framed in the editor
+   exports framed. What is still missing is the rest of the *video* compositor:
+   only the topmost visible item is written, so effects, transitions, **keyframed**
+   property values, blend modes, opacity, masks and the `rotationJitterDeg`
+   per-caption tilt are **not rendered**. Where nothing is on the timeline you get
+   the canvas colour. The export dialog says so before you press Export.
 2. **ASS is a smaller language than the style format.** A blurred drop shadow is
    approximated by its vertical offset, and letter-spacing is in pixels rather than
    ems, so a style with a heavy blur will look slightly cleaner on export than in

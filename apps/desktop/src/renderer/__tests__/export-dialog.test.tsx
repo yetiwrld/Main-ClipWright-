@@ -307,3 +307,30 @@ describe('ExportDialog caption styles', () => {
     expect(payload.captionStyles).toBeUndefined();
   });
 });
+
+describe('collectExportItems — what the plan carries', () => {
+  it('carries each caption\'s own style id', () => {
+    // The burn-in reads the style from the plan. A dialog that dropped this field
+    // exported every caption in the project default's look while the preview showed
+    // per-caption styles — the export silently disagreeing with what was approved.
+    const state = makeState();
+    (state.items['item-2'] as { captionStyleId?: string }).captionStyleId = 'karaoke';
+    const caption = collectExportItems(state).find((item) => item.id === 'item-2')!;
+    expect((caption as { captionStyleId?: string }).captionStyleId).toBe('karaoke');
+  });
+
+  it('carries the crop and transform the inspector wrote', () => {
+    // Same failure, one layer down: the export filter chain needs the geometry or
+    // it renders the clip whole and centred however it was framed.
+    const state = makeState();
+    Object.assign(state.items['item-1']!, {
+      crop: { left: 0.1, top: 0, right: 0.1, bottom: 0 },
+      transform: { x: 0.1, y: 0, scaleX: 1.5, scaleY: 1.5, rotation: 15 },
+    });
+    const video = collectExportItems(state).find((item) => item.id === 'item-1')!;
+    expect(video.geometry).toEqual({
+      crop: { left: 0.1, top: 0, right: 0.1, bottom: 0 },
+      transform: { x: 0.1, y: 0, scaleX: 1.5, scaleY: 1.5, rotation: 15 },
+    });
+  });
+});

@@ -325,18 +325,116 @@ export function sourceFilterChain(options: {
    * own aspect differs (SPEC 14 §3.2: never stretch).
    */
   fit?: 'fill' | 'fit';
+  /**
+   * Crop, scale, rotation and offset, as stored on the item (`10 §8.4–8.6`).
+   * Omitted means the picture is drawn whole and centred, which is what every
+   * item did before the inspector could edit it.
+   */
+  geometry?: {
+    crop?: { left?: number; top?: number; right?: number; bottom?: number };
+    transform?: {
+      x?: number;
+      y?: number;
+      scale?: number;
+      scaleX?: number;
+      scaleY?: number;
+      rotation?: number;
+      flipH?: boolean;
+      flipV?: boolean;
+    };
+  };
 }): string {
   const filters: string[] = [];
   if (options.speed && options.speed !== 1) filters.push(`setpts=${(1 / options.speed).toFixed(6)}*PTS`);
   filters.push(`fps=${options.targetFps}:round=near`);
+
+  // Crop first: everything after it works on the surviving rectangle. The values
+  // are fractions of the source, so they are expressed as ffmpeg `iw`/`ih` maths
+  // and stay correct at whatever size the source happens to be.
+  const crop = options.geometry?.crop;
+  if (crop) {
+    const left = clampFraction(crop.left ?? 0);
+    const top = clampFraction(crop.top ?? 0);
+    const right = clampFraction(crop.right ?? 0);
+    const bottom = clampFraction(crop.bottom ?? 0);
+    const width = 1 - left - right;
+    const height = 1 - top - bottom;
+    const untouched = left === 0 && top === 0 && right === 0 && bottom === 0;
+    if (!untouched && width > 0.01 && height > 0.01) {
+      // `floor(w*iw/2)*2` keeps the size even, because yuv420p cannot represent an
+      // odd width and an odd crop would otherwise fail at the encoder.
+      filters.push(
+        `crop=floor(iw*${fmt(width)}/2)*2:floor(ih*${fmt(height)}/2)*2:floor(iw*${fmt(left)}/2)*2:floor(ih*${fmt(top)}/2)*2`,
+      );
+    }
+  }
+
+  const scale = geometryScale(options.geometry?.transform);
+  const rotation = options.geometry?.transform?.rotation ?? 0;
+  const offsetX = options.geometry?.transform?.x ?? 0;
+  const offsetY = options.geometry?.transform?.y ?? 0;
+  const flipH = options.geometry?.transform?.flipH ?? false;
+  const flipV = options.geometry?.transform?.flipV ?? false;
+
+  // `hflip`/`vflip` rather than a negative `scale`: a negative scale reverses the
+  // picture *and* can leave the dimensions odd, which yuv420p rejects.
+  const flipFilters: string[] = [];
+  if (flipH) flipFilters.push('hflip');
+  if (flipV) flipFilters.push('vflip');
 
   if (options.fit === 'fit') {
     // Fit inside the canvas, then pad the remainder with black. The pad
     // expression keeps the frames centred, and both sides stay even.
     const width = roundEvenLocal(options.outputWidth);
     const height = roundEvenLocal(options.outputHeight);
+    const capToCanvas = `crop=w='min(iw,${width})':h='min(ih,${height})':x=(iw-ow)/2:y=(ih-oh)/2`;
     filters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos`);
-    filters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`);
+    // ffmpeg rounds `decrease` *up* to the nearest integer, which can leave the
+    // picture a pixel wider than the canvas (1080×1920 for a 9:16 crop of a 16:9
+    // source comes out 1082 wide). `pad` then rejects the overflow and the picture
+    // is torn off its right edge — measured, not guessed: two black columns at the
+    // right and one at the left. Capping the axes first makes the pad a pure
+    // letterbox in every case, which is what its centring expression assumes.
+    filters.push(capToCanvas);
+    filters.push(...flipFilters);
+
+    const moved = rotation !== 0 || scale.x !== 1 || scale.y !== 1 || offsetX !== 0 || offsetY !== 0;
+    if (!moved) {
+      filters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`);
+      filters.push('setsar=1');
+      filters.push('format=yuv420p');
+      return filters.join(',');
+    }
+
+    // The fitted picture is placed on the canvas explicitly, because `pad` cannot
+    // express a scale, a rotation or an off-centre position — and, crucially, `pad`
+    // refuses to *shrink* a picture that a scale or rotation has made larger. So
+    // after each of those the picture is fitted to the canvas size again, and the
+    // final `pad` only ever adds the black the picture leaves behind.
+    const rotationRadians = (rotation * Math.PI) / 180;
+    if (scale.x !== 1 || scale.y !== 1) {
+      filters.push(
+        `scale=w=trunc(iw*${fmt(scale.x)}/2)*2:h=trunc(ih*${fmt(scale.y)}/2)*2:flags=lanczos`,
+      );
+      // Cap each axis at the canvas, keeping the middle. `min` is what makes one
+      // expression serve both directions: a zoom in truncates the axes that
+      // overflow, a zoom out leaves them alone. A plain `crop=W:H` cannot do that —
+      // it fails when the picture is smaller than the canvas on either axis, which
+      // a non-square zoom does routinely.
+      filters.push(capToCanvas);
+    }
+    if (rotation !== 0) {
+      filters.push(
+        `rotate=${fmt(rotationRadians)}:ow=rotw(${fmt(rotationRadians)}):oh=roth(${fmt(rotationRadians)}):c=black`,
+      );
+      filters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos`);
+      filters.push(capToCanvas);
+    }
+    // The offset rides on the final pad, which is the last stage before the frame
+    // leaves for the encoder — so it is expressed in output pixels.
+    filters.push(
+      `pad=${width}:${height}:(ow-iw)/2+${fmt(offsetX * width)}:(oh-ih)/2+${fmt(offsetY * height)}:black`,
+    );
     filters.push('setsar=1');
     filters.push('format=yuv420p');
     return filters.join(',');
@@ -352,6 +450,34 @@ export function sourceFilterChain(options: {
 
 function roundEvenLocal(value: number): number {
   return Math.round(value / 2) * 2 || 2;
+}
+
+function clampFraction(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(0.95, Math.max(0, value));
+}
+
+/** Trim trailing zeros so the filter string is stable and readable in the log. */
+function fmt(value: number): string {
+  return Number(value.toFixed(6)).toString();
+}
+
+/**
+ * The effective scale, matching `itemGeometry` in `@clipwright/compositor`: the
+ * per-axis values win once either has moved off 1, otherwise the legacy framing
+ * `scale` applies to both axes.
+ */
+function geometryScale(
+  transform:
+    | { scale?: number; scaleX?: number; scaleY?: number }
+    | undefined,
+): { x: number; y: number } {
+  const scaleX = transform?.scaleX ?? 1;
+  const scaleY = transform?.scaleY ?? 1;
+  const legacy = transform?.scale ?? 1;
+  return scaleX === 1 && scaleY === 1 && legacy !== 1
+    ? { x: legacy, y: legacy }
+    : { x: scaleX, y: scaleY };
 }
 
 /** Arguments for probing an item's source range into raw frames (§4.2). */

@@ -36,3 +36,18 @@ export {
   type CaptionWordOverride,
   type CaptionWordTiming,
 } from './caption-frame.js';
+
+/**
+ * SPEC 10 §8.4–8.6 — where an item's picture sits inside the canvas.
+ *
+ * The preview and the export both draw a cropped, scaled, rotated picture; this is
+ * the one place the stored values are turned into a rectangle and a transform.
+ */
+export {
+  croppedSource,
+  effectiveScale,
+  itemGeometry,
+  type ItemGeometry,
+  type ItemGeometryInput,
+  type SourceRect,
+} from './item-geometry.js';

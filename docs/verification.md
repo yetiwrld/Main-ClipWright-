@@ -16,17 +16,17 @@ pnpm test:unit
 ```
 
 ```
-Test Files  64 passed (64)
-     Tests  1458 passed (1458)
+Test Files  66 passed (66)
+     Tests  1490 passed (1490)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
-| `packages/export-core` | 285 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, and the ASS caption script: field order, colour byte order, anchor mapping, karaoke timing, range shifting |
-| `packages/compositor` | 70 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios) and the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop |
+| `packages/export-core` | 296 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, the ASS caption script (field order, colour byte order, anchor mapping, karaoke timing, range shifting), and the decode filter chain: crop, scale, rotation, offset and flip, with every stage kept even-sized and landing on the exact output size |
+| `packages/compositor` | 82 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios), the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop, and item geometry: crop rectangles, per-axis and legacy scale, flips, offsets |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
 | `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
-| `apps/desktop/src/renderer` | 283 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector (jsdom) |
+| `apps/desktop/src/renderer` | 293 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector, preview geometry (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 144 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation (§09 §17) |
@@ -34,7 +34,7 @@ Test Files  64 passed (64)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1458** | 64 files |
+| **Total** | **1490** | 66 files |
 
 ### Tests that run real processes
 
@@ -55,6 +55,28 @@ Bundled tooling in this environment is **ffmpeg 4.1** (a 2018 build). That is a
 deliberate constraint: if the code works on the oldest build we might ship, it
 works on newer ones. Capability detection (`-vsync cfr` vs `-fps_mode`) exists
 because of it.
+
+### The geometry filter chain, checked against real ffmpeg
+
+Crop, scale, rotation, offset and flip are built as an ffmpeg filter chain
+(`sourceFilterChain`), and a chain that *looks* right can still be rejected by
+ffmpeg or silently misplace the picture. Three bugs were found by running the
+generated chains against the bundled binary rather than by reading them:
+
+| Chain | What went wrong | Fix |
+|---|---|---|
+| scaled | `pad` refuses to shrink a picture larger than its canvas — it failed with `Input area … not within the padded area` | cap each axis with `crop=w='min(iw,W)':h='min(ih,H)'` before the pad |
+| rotated | `rotate` emits a bounding-box canvas larger than the output for any angle between 0 and 90°, so the following pad failed the same way | fit to the canvas after the rotate, then pad |
+| plain (no geometry at all) | `force_original_aspect_ratio=decrease` rounds **up**, so a 9:16 crop of a 16:9 source came out 1082 px wide; the pad then tore one column off the left and two off the right | the same cap, applied to every `fit` chain |
+
+Ten chains (plain, crop, zoom in, zoom out, legacy framing scale, 90° and 33°
+rotation, offset, flip, all combined) were each run through ffmpeg 4.1 on a
+1280×720 source and produced exactly 1080×1920 `yuv420p` raw frames — 3 110 400
+bytes apiece, with no stderr. A solid red source was then sampled pixel by pixel
+to confirm the picture is centred: the plain path fills the frame with no black,
+and a letterboxed crop leaves one black column on the left and two on the right,
+which is the odd-pixel remainder of an aspect fit rather than the torn edge the
+uncapped chain produced.
 
 ---
 

@@ -6,10 +6,14 @@
  * export resolution and rate, and the source composes them onto the output
  * frame as the timeline plays.
  *
+ * Each decoder's filter chain applies the item's own static geometry — crop,
+ * scale, rotation, flip and offset — so a clip framed in the editor exports with
+ * that framing (`@clipwright/export-core`'s `sourceFilterChain`).
+ *
  * What it does **not** do yet: run the real compositor (text, effects,
- * transitions, blend modes). Items are composited by "topmost visible wins",
- * with lower layers showing through where the top item has no frame. That is
- * honest — the file contains the composition's actual footage — but it is not
+ * transitions, blend modes, keyframes). Items are composited by "topmost visible
+ * wins", with lower layers showing through where the top item has no frame. That
+ * is honest — the file contains the composition's actual footage — but it is not
  * the full `renderFrame` path, and `docs/export.md` says so.
  */
 
@@ -90,6 +94,9 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       outputWidth: plan.width,
       outputHeight: plan.height,
       fit: 'fit',
+      // The item's own crop/scale/rotation, so the decoded frame is the picture the
+      // editor showed rather than the whole source (SPEC 10 §8.4–8.6).
+      geometry: item.geometry,
     });
     const args = buildDecodeArgs({
       sourcePath: mediaPath,

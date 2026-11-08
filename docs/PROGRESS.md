@@ -71,15 +71,19 @@ metering UI, voiceover recorder), and keyframes/effects/transitions in the
 inspector.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-canvas editing and the keyframe editor are missing, the playback clock is not
-audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
-slow). Numeric editing of opacity, level, pan, speed, crop, scale and rotation
-works and is undoable.
+canvas editing (drag handles, crop rectangle, anchor grid) and the keyframe editor
+are missing, the playback clock is not audio-mastered, and the preview does not
+switch to proxies (so scrubbing 4K is slow). Numeric editing of opacity, level,
+pan, speed, crop, scale, rotation and flip works, is undoable, and — since the
+preview and the export both apply the same geometry — is visible where it matters:
+on screen and in the file.
 
-**Phase 6's export is incomplete in one important way.** Captions are rendered;
-the rest of the video compositor is not. Each video/image item is decoded
-separately and the topmost visible item is written out, so effects, transitions,
-keyframed transforms and blend modes are **not rendered into the exported file**.
+**Phase 6's export is incomplete in one important way.** Captions are rendered,
+and each clip's static crop, scale, rotation, flip and offset are applied to its
+decoded frames; the rest of the video compositor is not. Each video/image item is
+decoded separately and the topmost visible item is written out, so effects,
+transitions, keyframed transforms and blend modes are **not rendered into the
+exported file**.
 This is stated in the export dialog before the user presses Export.
 
 ---
@@ -116,7 +120,8 @@ Also found and fixed two real security holes along the way:
 
 **1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid),
 the keyframe editor, and proxy playback. The inspector's numeric controls, including
-the volume slider that used to be a read-only placeholder, now work.
+the volume slider that used to be a read-only placeholder, now work, and the values
+they write are drawn by the preview and applied by the export.
 
 **2. Finish Phase 5 ⚠️** — the style editor's colour pickers and anchor grid,
 text and shape items, brand kits, and the audio tools beyond the envelope.

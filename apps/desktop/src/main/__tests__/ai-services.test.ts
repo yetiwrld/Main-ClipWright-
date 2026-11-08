@@ -423,6 +423,11 @@ describe('MomentsService', () => {
     expect(videoItem?.sourceInUs).toBe(moment.startUs);
     expect(videoItem?.durationUs).toBe(moment.durationUs);
 
+    // The project's framing must land on the axes the item's transform actually
+    // reads (`transform.scaleX/scaleY`), not on a `scale` key nothing consumes.
+    expect(videoItem?.transform.scaleX).toBe(project.settings.initialFraming.scale);
+    expect(videoItem?.transform.scaleY).toBe(project.settings.initialFraming.scale);
+
     const captions = items.filter((item) => item.type === 'caption');
     expect(captions.length).toBeGreaterThan(0);
     for (const caption of captions) {
