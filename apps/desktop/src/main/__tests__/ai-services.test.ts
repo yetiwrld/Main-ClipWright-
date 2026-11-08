@@ -285,6 +285,24 @@ describe('ConsentService', () => {
     expect(prompt.neverSent).toBe('audio, video, thumbnails, file paths, or other projects');
   });
 
+  it('names every outbound host in Settings → Privacy (§10)', () => {
+    // §10 says Settings → Privacy lists every place the app talks to. That list
+    // used to say "our release server", which names nothing a user can look up
+    // and was not even accurate: releases live on GitHub. A vague entry here
+    // undermines the whole page, because the page's value is that it is complete
+    // and checkable.
+    const overview = consents.overview();
+    const entries = overview.backgroundCalls;
+    const text = entries.map((entry) => `${entry.label} ${entry.detail}`).join(' ');
+
+    expect(entries).toHaveLength(4);
+    expect(text).toContain('github.com');
+    expect(text).toContain('huggingface.co');
+    // No unnamed servers: every entry must say where it goes.
+    expect(text).not.toMatch(/release server/i);
+    expect(text).not.toMatch(/our server/i);
+  });
+
   it('logs metadata only and exports it as CSV', () => {
     consents.recordTransfer({ providerHost: 'api.openai.com', task: 'moment_analysis', category: 'transcript', approxBytes: 4821 });
     consents.recordTransfer({ providerHost: 'api.openai.com', task: 'transcription', category: 'audio', approxBytes: 120_000 });

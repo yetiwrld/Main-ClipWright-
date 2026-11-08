@@ -166,28 +166,31 @@ export class ConsentService {
         {
           id: 'updates',
           label: 'Update check',
-          detail: 'Asks our release server whether a newer version exists.',
+          // SPEC 15 §10: name the host. "Our release server" reads like a private
+          // service the user has no way to look up, and it was not even accurate —
+          // releases are published on GitHub.
+          detail: 'Asks github.com whether a newer version of Clipwright exists. Sends no project data.',
           toggleKey: 'updateCheck',
           enabled: settings.privacy.updateCheck,
         },
         {
           id: 'ytdlp',
           label: 'yt-dlp update',
-          detail: 'Keeps the URL downloader working when sites change.',
+          detail: 'Asks github.com for a newer yt-dlp so link downloads keep working when sites change.',
           toggleKey: 'ytDlpUpdate',
           enabled: settings.privacy.ytDlpUpdate,
         },
         {
           id: 'downloads',
           label: 'Model downloads',
-          detail: 'Only happens when you press Download in the model manager.',
+          detail: 'Downloads from huggingface.co, only when you press Download in the model manager.',
           toggleKey: null,
           enabled: null,
         },
         {
           id: 'ingest',
           label: 'URL downloads',
-          detail: 'Only happens for links you paste into Import.',
+          detail: 'Fetches the site you paste into Import. Only happens for links you enter.',
           toggleKey: null,
           enabled: null,
         },
