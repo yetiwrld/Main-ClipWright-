@@ -8,6 +8,7 @@ import { TimelinePanel } from './TimelinePanel.js';
 import { projectDurationUs } from '@clipwright/timeline-engine';
 import { PreviewPane } from './PreviewPane.js';
 import { ItemInspector, MediaLibrary, type MediaAsset } from './Inspector.js';
+import { CaptionPanel, CaptionWordView } from './CaptionPanel.js';
 import { ExportDialog } from '../export/ExportDialog.js';
 
 export function EditorPage({
@@ -28,6 +29,7 @@ export function EditorPage({
   const [timelineShare, setTimelineShare] = useState(0.42);
   const [resizing, setResizing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [leftTab, setLeftTab] = useState<'media' | 'captions'>('media');
 
   useEffect(() => {
     if (!isDesktop()) {
@@ -196,13 +198,45 @@ export function EditorPage({
                 overflow: 'hidden',
               }}
             >
-              <PanelHeader title="Media" onToggleCollapse={() => setLeftOpen(false)} />
-              <MediaLibrary
-                media={media}
-                timeline={timeline}
-                loading={mediaLoading}
-                error={mediaError}
-              />
+              <PanelHeader title="Library" onToggleCollapse={() => setLeftOpen(false)} />
+              <div
+                role="tablist"
+                aria-label="Library sections"
+                style={{ display: 'flex', gap: 'var(--space-1)', padding: '0 var(--space-2) var(--space-1)' }}
+              >
+                <Button
+                  size={28}
+                  variant={leftTab === 'media' ? 'secondary' : 'ghost'}
+                  role="tab"
+                  aria-selected={leftTab === 'media'}
+                  onClick={() => setLeftTab('media')}
+                >
+                  Media
+                </Button>
+                <Button
+                  size={28}
+                  variant={leftTab === 'captions' ? 'secondary' : 'ghost'}
+                  role="tab"
+                  aria-selected={leftTab === 'captions'}
+                  onClick={() => setLeftTab('captions')}
+                >
+                  Captions
+                </Button>
+              </div>
+              {leftTab === 'media' ? (
+                <MediaLibrary
+                  media={media}
+                  timeline={timeline}
+                  loading={mediaLoading}
+                  error={mediaError}
+                />
+              ) : state ? (
+                <CaptionPanel state={state} timeline={timeline} />
+              ) : (
+                <div style={{ padding: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+                  Loading…
+                </div>
+              )}
             </section>
           )}
 
@@ -242,7 +276,27 @@ export function EditorPage({
             >
               <PanelHeader title="Inspector" onToggleCollapse={() => setRightOpen(false)} />
               {state ? (
-                <ItemInspector state={state} timeline={timeline} />
+                <>
+                  <ItemInspector state={state} timeline={timeline} />
+                  {timeline.selection.length === 1 &&
+                    state.items[timeline.selection[0]!]?.type === 'caption' && (
+                      <>
+                        <div
+                          style={{
+                            borderTop: '1px solid var(--line-subtle)',
+                            fontSize: 'var(--fs-xs)',
+                            color: 'var(--text-muted)',
+                            padding: 'var(--space-2) var(--space-2) 0',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.02em',
+                          }}
+                        >
+                          Words
+                        </div>
+                        <CaptionWordView state={state} timeline={timeline} itemId={timeline.selection[0]!} />
+                      </>
+                    )}
+                </>
               ) : (
                 <div style={{ padding: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                   Loading…

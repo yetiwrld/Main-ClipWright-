@@ -34,6 +34,13 @@ import {
   splitCaptionSegment,
   mergeCaptionSegments,
   trimCaptionSegment,
+  editCaptionText,
+  retimeCaption,
+  trimCaptionWordsToRange,
+  applyCaptionStyle,
+  setWordEmphasis,
+  regenerateCaptions,
+  syncCaptionsWithTranscript,
   applyEffect,
   removeEffect,
   toggleEffectEnabled,
@@ -117,6 +124,11 @@ export interface TimelineApi {
   splitCaptionSegment: (itemId: string, timeUs: number) => boolean;
   mergeCaptionSegments: (leftItemId: string, rightItemId: string) => boolean;
   trimCaptionSegment: (itemId: string, edge: 'start' | 'end', timeUs: number) => boolean;
+  editCaptionText: (itemId: string, text: string, maxCharsPerLine?: number, maxLines?: number) => boolean;
+  retimeCaption: (itemId: string, startUs?: number, endUs?: number) => boolean;
+  trimCaptionWordsToRange: (itemId: string) => boolean;
+  applyCaptionStyle: (itemIds: string[], styleId: string, keepOverrides?: boolean) => boolean;
+  setWordEmphasis: (itemId: string, wordIndex: number, emphasis: boolean, color?: string, scale?: number) => boolean;
   applyEffect: (itemId: string, effectId: string, params?: Record<string, number | boolean | string>) => boolean;
   removeEffect: (itemId: string, effectId: string) => boolean;
   toggleEffectEnabled: (itemId: string, effectId: string) => boolean;
@@ -444,6 +456,22 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Merge captions', (s) => mergeCaptionSegments(s, { leftItemId, rightItemId, fps })),
       trimCaptionSegment: (itemId, edge, timeUs) =>
         run('Trim caption', (s) => trimCaptionSegment(s, { itemId, edge, timeUs, fps })),
+      editCaptionText: (itemId, text, maxCharsPerLine, maxLines) =>
+        run('Edit caption', (s) =>
+          editCaptionText(s, { itemId, text, maxCharsPerLine, maxLines }),
+        ),
+      retimeCaption: (itemId, startUs, endUs) =>
+        run('Retime caption', (s) => retimeCaption(s, { itemId, startUs, endUs, fps })),
+      trimCaptionWordsToRange: (itemId) =>
+        run('Trim caption words', (s) => trimCaptionWordsToRange(s, { itemId })),
+      applyCaptionStyle: (itemIds, styleId, keepOverrides) =>
+        run('Apply caption style', (s) =>
+          applyCaptionStyle(s, { itemIds, styleId, keepOverrides }),
+        ),
+      setWordEmphasis: (itemId, wordIndex, emphasis, color, scale) =>
+        run(emphasis ? 'Emphasise word' : 'Remove emphasis', (s) =>
+          setWordEmphasis(s, { itemId, wordIndex, emphasis, color, scale }),
+        ),
       applyEffect: (itemId, effectId, params) =>
         run('Apply effect', (s) => applyEffect(s, { itemId, effectId, params })),
       removeEffect: (itemId, effectId) =>

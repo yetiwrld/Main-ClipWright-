@@ -3,6 +3,7 @@ import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-rea
 import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import { CaptionOverlay } from './CaptionOverlay.js';
 
 const MEDIA_ORIGIN = 'clipwright-media://media/';
 
@@ -149,6 +150,13 @@ export function PreviewPane({ state, fps }: { state: TimelineState; fps: 30 | 60
               {missing ? 'Nothing under the playhead' : 'Add a clip to preview'}
             </div>
           )}
+
+          {/*
+            Captions are painted over the video, always — including over the
+            "nothing under the playhead" message, because a caption track can be
+            the only track with content in a range.
+          */}
+          <CaptionOverlay state={state} width={canvas.width} height={canvas.height} />
         </div>
       </div>
 
