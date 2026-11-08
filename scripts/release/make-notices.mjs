@@ -59,12 +59,20 @@ function licenceOf(pkg) {
   return null;
 }
 
-/** Walk the workspace's installed runtime dependencies, one level deep. */
+/**
+ * Walk the runtime dependencies that actually ship, one level deep.
+ *
+ * Only `apps/desktop/node_modules` is read, because that is the only place a
+ * *shipped* dependency lives: the root `package.json` declares no dependencies at
+ * all — every entry is a devDependency — yet pnpm links the whole toolchain into
+ * the root `node_modules`. Scanning it listed vitest, jsdom, playwright and
+ * electron-builder as third-party components of a shipping app.
+ *
+ * `apps/desktop/package.json` names the entry point, and electron-builder packs
+ * from that directory, so its production dependencies are the shipping set.
+ */
 async function collect() {
-  const roots = [
-    join(ROOT, 'apps', 'desktop', 'node_modules'),
-    join(ROOT, 'node_modules'),
-  ];
+  const roots = [join(ROOT, 'apps', 'desktop', 'node_modules')];
   const seen = new Map();
 
   for (const nodeModules of roots) {
@@ -84,6 +92,16 @@ async function collect() {
         if (!existsSync(packagePath)) continue;
         try {
           const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+
+          // Skip anything platform-conditional. These are native helper
+          // packages — `@ffmpeg-installer/linux-x64` and its win32 twin — that
+          // exist as dev dependencies so the encoder suites have a binary to run.
+          // Whatever machine generates this file installs exactly one variant, so
+          // including them makes the output depend on the host: a list committed
+          // from Linux can never match one generated on the Windows CI runner.
+          // They do not ship, and they are documented by hand above.
+          if (pkg.os || pkg.cpu) continue;
+
           // Only runtime dependencies ship; dev tooling does not.
           if (pkg.devDependencies && !pkg.dependencies && relative === 'typescript') continue;
           seen.set(pkg.name, {
@@ -160,7 +178,29 @@ const text = lines.join('\n');
 if (check) {
   const current = await readFile(OUT, 'utf8').catch(() => '');
   if (current !== text) {
+    // Name what differs. "The file is out of date" is unactionable when the
+    // difference is one platform-specific package, which is exactly what happens
+    // between a Linux checkout and the Windows runner: 80 entries in the lockfile
+    // are conditional on `os`/`cpu`, so the installed set genuinely differs.
+    // The JavaScript section lists `name@version  —  licence  repository`, one per
+    // line. Parse from that heading onward only: the prose above it explains the
+    // bundled runtimes, and a looser pattern reads "Licence:" and "Distributed"
+    // as package names.
+    const listed = new Set();
+    const body = current.slice(current.indexOf('JavaScript packages'));
+    for (const line of body.split('\n')) {
+      const match = /^(\S+?)@[^\s]+\s+—/.exec(line);
+      if (match) listed.add(match[1]);
+    }
+    const expected = new Set(packages.map((pkg) => pkg.name));
+    const added = [...expected].filter((name) => !listed.has(name));
+    const removed = [...listed].filter((name) => !expected.has(name));
     console.error('\nmake-notices: THIRD-PARTY-NOTICES.txt is out of date.');
+    if (added.length > 0) console.error(`  installed but not listed: ${added.join(', ')}`);
+    if (removed.length > 0) console.error(`  listed but not installed: ${removed.join(', ')}`);
+    if (added.length === 0 && removed.length === 0) {
+      console.error('  The same packages are present; a version or repository URL changed.');
+    }
     console.error('Run `node scripts/release/make-notices.mjs` and commit the result.\n');
     process.exit(1);
   }
