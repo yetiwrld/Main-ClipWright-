@@ -58,6 +58,31 @@ export interface StartExportRequest {
   createFrameSource?: (plan: ExportPlan) => FrameSource | Promise<FrameSource>;
 }
 
+/**
+ * A word-id lookup over a project's transcript, built lazily.
+ *
+ * The plan carries word *refs* — ids and timings — not the words themselves, so
+ * the ASS writer needs this to emit karaoke tags; without it every caption burns
+ * in as prose and the sweep is silently lost (SPEC 11 §5).
+ *
+ * The transcript is read once per export rather than once per word: a ten-minute
+ * clip has thousands of refs. A missing or unreadable transcript is not an error —
+ * the captions are then simply prose, which is better than an export that fails
+ * over its subtitles.
+ */
+export function wordResolverFrom(
+  load: () => Array<{ id: string; text: string }> | undefined,
+): (wordId: string) => string | undefined {
+  let words: Map<string, string> | null = null;
+  return (wordId: string) => {
+    if (!words) {
+      words = new Map();
+      for (const word of load() ?? []) words.set(word.id, word.text);
+    }
+    return words.get(wordId);
+  };
+}
+
 export interface StartExportFailure {
   ok: false;
   /** Plain-language reason (SPEC 14 §8). */
@@ -79,6 +104,12 @@ export interface ExportStorageLike {
   saveExportHistory(record: ExportHistoryRecord): ExportHistoryRecord;
   listExportHistory(options?: { projectId?: string; limit?: number }): ExportHistoryRecord[];
   averageExportSpeed(projectId?: string): number | null;
+  /**
+   * The project's transcript, for the karaoke burn-in. Optional so the service
+   * still works without one — a caption whose words cannot be resolved falls back
+   * to its plain text rather than vanishing.
+   */
+  getTranscript?(projectId: string): { words: Array<{ id: string; text: string }> } | undefined;
 }
 
 export class ExportService {
@@ -191,6 +222,11 @@ export class ExportService {
         // Without these a burn-in silently uses the built-in preset, so a caption
         // the user restyled exports in the look it started from.
         captionStyles: request.captionStyles as Record<string, CaptionStyle> | undefined,
+        // The plan carries word *refs* — ids and timings — not the words. Only the
+        // transcript knows what they say, and without this the ASS writer skipped
+        // every word it could not resolve, so a karaoke caption burned in as prose
+        // with no sweep (SPEC 11 §5).
+        resolveWordText: this.wordResolver(plan.projectId),
       });
       // Sidecar subtitles are written next to the finished file on success;
       // see `record`.
@@ -245,6 +281,18 @@ export class ExportService {
     while (this.pendingRecords.size > 0) {
       await Promise.all([...this.pendingRecords]);
     }
+  }
+
+  private wordResolver(projectId: string): ((wordId: string) => string | undefined) | undefined {
+    if (!this.storage.getTranscript) return undefined;
+    const load = () => {
+      try {
+        return this.storage.getTranscript?.(projectId)?.words;
+      } catch {
+        return undefined;
+      }
+    };
+    return wordResolverFrom(load);
   }
 
   listHistory(projectId?: string): ExportHistoryRecord[] {

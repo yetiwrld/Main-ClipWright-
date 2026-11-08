@@ -65,21 +65,27 @@ This document tracks architectural scope boundaries and honest limitations per `
    property values, blend modes, opacity, masks and the `rotationJitterDeg`
    per-caption tilt are **not rendered**. Where nothing is on the timeline you get
    the canvas colour. The export dialog says so before you press Export.
-2. **ASS is a smaller language than the style format.** A blurred drop shadow is
+2. **Karaoke needs the transcript, and a transcript edited after the export
+   started is not re-read.** The burn-in resolves each word ref against the
+   project's transcript when the export starts. That is correct for normal use and
+   wrong for one case: edit a word in the caption editor while an export is already
+   rendering and the file will carry the text the transcript had when the render
+   began. The preview updates immediately; the in-flight export does not.
+3. **ASS is a smaller language than the style format.** A blurred drop shadow is
    approximated by its vertical offset, and letter-spacing is in pixels rather than
    ems, so a style with a heavy blur will look slightly cleaner on export than in
    the preview. Everything the ten presets ask for is expressible. The per-caption
    `rotationJitterDeg` tilt is not applied — ASS has no per-event rotation, so the
    tilt exists in the preview and the editable style but not in the burned-in file.
-3. **Project-local style copies live in the project's settings blob.** The style
+4. **Project-local style copies live in the project's settings blob.** The style
    editor saves a copy into `settings.captionStyles`, and the overlay, the caption
    list and the burn-in all resolve through it, so an edited style now survives to
    export. It is not a first-class table: styles are not listed separately, cannot
    be renamed or deleted from a dedicated manage screen (a copy can only be
    replaced by editing it again), and a project opened in a build that predates the
    style editor shows the presets — the copies are simply invisible to it, not lost.
-4. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-5. **No resumable export.** A failed or interrupted export restarts from the
+5. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+6. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
 6. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and

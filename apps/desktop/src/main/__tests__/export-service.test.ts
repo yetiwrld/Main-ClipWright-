@@ -18,6 +18,7 @@ import {
   qualityBitrate,
   resolveOutputDir,
   sanitiseFileName,
+  wordResolverFrom,
   type ExportStorageLike,
 } from '../export/export-service.js';
 import { ffmpegPath, ffprobePath } from '../export/ffmpeg-runner.js';
@@ -595,4 +596,55 @@ describe.skipIf(!HAS_FFMPEG)('ExportService output paths', () => {
     await service.whenIdle();
     expect(service.averageSpeed()).toBe(1.8);
   }, 120_000);
+});
+
+
+describe('wordResolverFrom', () => {
+  it('turns word refs into text for a karaoke burn-in', () => {
+    // The plan carries ids and timings, not words. Without this lookup the ASS
+    // writer skipped every word it could not resolve, so a karaoke caption burned
+    // in as prose with no sweep — the caption was there, the effect was not.
+    const resolve = wordResolverFrom(() => [
+      { id: 'w1', text: 'Hello' },
+      { id: 'w2', text: 'there' },
+    ]);
+    expect(resolve('w1')).toBe('Hello');
+    expect(resolve('w2')).toBe('there');
+  });
+
+  it('returns undefined for a word that is not in the transcript', () => {
+    // A ref whose word was deleted from the transcript must fall back to the
+    // caption's plain text rather than printing `undefined`.
+    const resolve = wordResolverFrom(() => [{ id: 'w1', text: 'Hello' }]);
+    expect(resolve('gone')).toBeUndefined();
+  });
+
+  it('reads the transcript once, not once per word', () => {
+    // A ten-minute clip has thousands of refs; a storage call each would dominate
+    // the burn-in setup and the test would be too slow to run.
+    let reads = 0;
+    const resolve = wordResolverFrom(() => {
+      reads += 1;
+      return [{ id: 'w1', text: 'Hello' }];
+    });
+    for (let index = 0; index < 100; index += 1) resolve('w1');
+    resolve('w2');
+    expect(reads).toBe(1);
+  });
+
+  it('still resolves when the transcript is missing', () => {
+    // No transcript means prose captions, which is a worse-looking export — not a
+    // failed one.
+    const resolve = wordResolverFrom(() => undefined);
+    expect(resolve('w1')).toBeUndefined();
+  });
+
+  it('picks up a word edited after the resolver was built', () => {
+    // The resolver is built per export, so an edit saved before the export starts
+    // must be the text that is burned in.
+    const words = [{ id: 'w1', text: 'Helo' }];
+    const resolve = wordResolverFrom(() => words);
+    words[0]!.text = 'Hello';
+    expect(resolve('w1')).toBe('Hello');
+  });
 });
