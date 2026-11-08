@@ -35,8 +35,7 @@ import {
   applyEffectsToFrame,
   compositeRgb,
   compositeRgbMasked,
-  compositeRgbShifted,
-  compositeRgbScaled,
+  compositeRgbScaledShifted,
   effectPassCount,
   effectsForLayer,
   evaluateProperty,
@@ -607,23 +606,46 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         if (layer.effects.length > 0) {
           applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
         }
-        if (layer.scale !== undefined && layer.scale !== 1) {
-          // A zoom scales the picture about the frame centre; the layer is sampled
-          // through that scale and then composited as usual.
-          compositeRgbScaled(base, rgb, layer.opacity, layer.blendMode, layer.scale);
-          continue;
-        }
-        if (layer.offsetX || layer.offsetY) {
-          // A slide translates the whole layer; the pixels it no longer covers keep
-          // what is underneath, so the two clips meet at a seam instead of the
-          // incoming one simply painting over the outgoing one.
-          compositeRgbShifted(
+        const scaling = layer.scale !== undefined && layer.scale !== 1;
+        const shifting = Boolean(layer.offsetX || layer.offsetY);
+        if (scaling || shifting) {
+          /*
+            A zoom scales the picture about the frame centre and a slide translates
+            it, and a clip can be doing both at once — a `reveal` slide on a clip
+            that also carries its own `scale`. These used to be separate branches
+            with `scale` first, so any layer with a scale skipped the offset
+            entirely and a scaled clip never slid: measured as a `reveal` that left
+            a quarter of the frame still showing the clip that should have left.
+
+            Composed in one pass rather than chained, because two passes would blend
+            a semi-transparent layer twice and make it too opaque.
+          */
+          compositeRgbScaledShifted(
             base,
             rgb,
             layer.opacity,
             layer.blendMode,
+            layer.scale ?? 1,
             layer.offsetX ?? 0,
             layer.offsetY ?? 0,
+          );
+          continue;
+        }
+        if (layer.wipe) {
+          /*
+            Checked before the plain-offset case above and after the shift, because a
+            layer can carry both: a `reveal` slide moves the outgoing clip *and*
+            clips the incoming one to the hole it left. The incoming side of a reveal
+            has the mask and no offset, while the outgoing side has the offset and no
+            mask, so the two never fight — but a wipe that also had an offset would
+            otherwise be shifted and drawn unmasked.
+          */
+          compositeRgbMasked(
+            base,
+            rgb,
+            layer.opacity,
+            layer.blendMode,
+            wipeMaskFor(layer.wipe, plan.width, plan.height),
           );
           continue;
         }
@@ -637,20 +659,6 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
             layer.opacity,
             layer.blendMode,
             dissolveMaskFor(layer.dissolve, plan.width, plan.height),
-          );
-          continue;
-        }
-        if (layer.wipe) {
-          // A wipe is the one transition that is not an opacity: which pixels show
-          // the incoming clip depends on where they are, so the layer is composited
-          // through a per-pixel mask instead. Building the mask costs one pass over
-          // the frame, and only while a wipe is actually running.
-          compositeRgbMasked(
-            base,
-            rgb,
-            layer.opacity,
-            layer.blendMode,
-            wipeMaskFor(layer.wipe, plan.width, plan.height),
           );
           continue;
         }

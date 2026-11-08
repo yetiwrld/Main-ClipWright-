@@ -199,6 +199,98 @@ describe('transitionState', () => {
     }
   });
 
+  /*
+    §4.2 gives a slide a `mode`: push, cover or reveal. They differ only in who
+    stays still, so the test for each is "which side has zero offset at every
+    progress" — push moves both, cover leaves the outgoing clip in place, reveal
+    leaves the incoming clip in place. A renderer that drew only the offsets it
+    understood would otherwise show all three as a push, which is the mode most
+    people mean and the one that already worked.
+  */
+  it('slide travels both pictures in push mode', () => {
+    for (const p of [0.25, 0.5, 0.75]) {
+      const push = transitionState('slide', p, { direction: 'left', mode: 'push' });
+      expect(push.fromOffsetX).toBeCloseTo(-p, 6);
+      expect(push.toOffsetX).toBeCloseTo(1 - p, 6);
+    }
+  });
+
+  it('slide leaves the outgoing clip still in cover mode', () => {
+    // B slides over a stationary A: only the incoming side moves.
+    for (const p of [0.25, 0.5, 0.75]) {
+      const cover = transitionState('slide', p, { direction: 'left', mode: 'cover' });
+      expect(cover.fromOffsetX, 'the outgoing clip must not move').toBeCloseTo(0, 6);
+      expect(cover.toOffsetX).toBeCloseTo(1 - p, 6);
+    }
+    // It still arrives centred and starts off-frame, so the transition joins the
+    // clips either side rather than jumping at an endpoint.
+    expect(transitionState('slide', 1, { direction: 'left', mode: 'cover' }).toOffsetX).toBeCloseTo(0, 6);
+    expect(transitionState('slide', 0, { direction: 'left', mode: 'cover' }).toOffsetX).toBeCloseTo(1, 6);
+  });
+
+  it('slide leaves the incoming clip still in reveal mode', () => {
+    // A slides away to uncover a stationary B underneath.
+    for (const p of [0.25, 0.5, 0.75]) {
+      const reveal = transitionState('slide', p, { direction: 'left', mode: 'reveal' });
+      expect(reveal.toOffsetX, 'the incoming clip must not move').toBeCloseTo(0, 6);
+      expect(reveal.fromOffsetX).toBeCloseTo(-p, 6);
+    }
+    expect(transitionState('slide', 0, { direction: 'left', mode: 'reveal' }).fromOffsetX).toBeCloseTo(0, 6);
+    expect(transitionState('slide', 1, { direction: 'left', mode: 'reveal' }).fromOffsetX).toBeCloseTo(-1, 6);
+  });
+
+  it('reveals the region the outgoing clip has vacated', () => {
+    /*
+      The mode's whole difficulty is the direction of the uncovered region. A `left`
+      slide moves the outgoing clip towards `-x`, so by p it covers `[-p, 1-p]` and
+      has cleared everything to the *right* of `1-p`. The incoming clip must be
+      revealed there, which means the reported wipe normal has to be the one whose
+      mask is 1 on the right — `-1`, the direction of travel — rather than its
+      opposite.
+    */
+    const state = transitionState('slide', 0.5, { direction: 'left', mode: 'reveal' });
+    const shape = state.wipe!;
+    expect(shape, 'a reveal needs a shape; offsets alone cannot uncover anything').toBeDefined();
+    // Rebuild the mask exactly as the renderers do, and read which side it frees.
+    const maskAt = (nx: number): number => {
+      const corners = [0, shape.axisX, shape.axisY, shape.axisX + shape.axisY];
+      const min = Math.min(...corners);
+      const span = Math.max(...corners) - min || 1;
+      const t = (nx * shape.axisX + 0.5 * shape.axisY - min) / span;
+      return t <= shape.position ? 1 : 0;
+    };
+    expect(maskAt(0.1), 'the side still covered by the outgoing clip').toBe(0);
+    expect(maskAt(0.9), 'the side the outgoing clip has vacated').toBe(1);
+  });
+
+  it('applies the slide mode to the vertical directions too', () => {
+    // The mode is about *who moves*, not about which axis they move along, so a
+    // vertical slide has to honour it as well.
+    const cover = transitionState('slide', 0.5, { direction: 'up', mode: 'cover' });
+    expect(cover.fromOffsetY).toBeCloseTo(0, 6);
+    expect(cover.toOffsetY).toBeCloseTo(0.5, 6);
+    const reveal = transitionState('slide', 0.5, { direction: 'up', mode: 'reveal' });
+    expect(reveal.toOffsetY).toBeCloseTo(0, 6);
+    expect(reveal.fromOffsetY).toBeCloseTo(-0.5, 6);
+  });
+
+  it('defaults a slide with no mode to push', () => {
+    // An unqualified slide is the one that was always implemented; a transition
+    // stored before `mode` existed must not change meaning.
+    for (const p of [0, 0.5, 1]) {
+      const unset = transitionState('slide', p, { direction: 'left' });
+      const push = transitionState('slide', p, { direction: 'left', mode: 'push' });
+      expect(unset.fromOffsetX).toBeCloseTo(push.fromOffsetX, 6);
+      expect(unset.toOffsetX).toBeCloseTo(push.toOffsetX, 6);
+    }
+  });
+
+  it('treats an unknown slide mode as push rather than breaking the frame', () => {
+    const odd = transitionState('slide', 0.5, { direction: 'left', mode: 'sideways' });
+    expect(odd.fromOffsetX).toBeCloseTo(-0.5, 6);
+    expect(odd.toOffsetX).toBeCloseTo(0.5, 6);
+  });
+
   it('zoom scales both sides and crossfades them', () => {
     const middle = transitionState('zoom', 0.5);
     expect(middle.fromScale).toBeGreaterThan(1);

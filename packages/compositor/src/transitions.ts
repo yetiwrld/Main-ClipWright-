@@ -306,22 +306,85 @@ export function transitionState(
         because a reveal has a starting edge rather than a motion. The two option
         lists are separate for that reason.)
 
-        §4.2 also gives a slide a `mode` (push/cover/reveal) and diagonal
-        directions. The four axis directions are implemented as a push; the
-        diagonals fall back to horizontal travel, and `mode` is not implemented.
+        §4.2's `mode` decides *who stays still*, and that is the whole difference
+        between the three: `push` moves both pictures as one strip, `cover` slides
+        the incoming clip over a stationary outgoing one, and `reveal` slides the
+        outgoing clip away to uncover a stationary incoming one. The still side
+        reports a zero offset, which is all a renderer needs — it already treats an
+        offset as "move this layer by this much", so nothing has to know the mode
+        at draw time. An unset or unrecognised mode is `push`, because that is what
+        an unqualified slide has always meant here and a project stored before
+        `mode` existed must not change how it renders.
       */
       const direction = params.direction;
-      if (direction === 'up' || direction === 'down') {
-        // `up`: the strip travels upward, so the outgoing clip exits through the
-        // top and the incoming one enters from below.
-        const travel = direction === 'up' ? -1 : 1;
+      const mode = params.mode === 'cover' || params.mode === 'reveal' ? params.mode : 'push';
+      const vertical = direction === 'up' || direction === 'down';
+      // `up`: the strip travels upward, so the outgoing clip exits through the top
+      // and the incoming one enters from below.
+      const travel = vertical ? (direction === 'up' ? -1 : 1) : direction === 'right' ? 1 : -1;
+      const travelOffset = (amount: number) => (vertical ? { y: amount } : { x: amount });
+
+      /*
+        `cover` is an offset and nothing else: the incoming clip slides over an
+        outgoing clip that does not move, and since the incoming layer is already
+        painted on top, reporting a zero offset for the outgoing side is the whole
+        implementation.
+      */
+      if (mode === 'cover') {
+        const incoming = travelOffset(-travel * (1 - progress));
+        return {
+          ...base,
+          toOffsetX: incoming.x ?? 0,
+          toOffsetY: incoming.y ?? 0,
+        };
+      }
+
+      /*
+        `reveal` is the mirror image — the outgoing clip slides away and uncovers an
+        incoming clip that does not move — but it cannot be expressed by offsets
+        alone. The incoming layer is painted *on top*, so leaving it still would
+        cover the outgoing clip instead of being uncovered by it, and the frame would
+        show the incoming clip at every progress: a cut at p = 0.
+
+        What actually reveals the incoming clip is the *hole* the outgoing one leaves
+        behind, and that hole is a moving edge — the same shape a wipe reports. So
+        the incoming side is clipped to the region the outgoing clip has vacated,
+        which is a wipe whose edge travels with it. Nothing extra is needed from
+        either renderer: they already know how to clip a layer to a wipe.
+      */
+      if (mode === 'reveal') {
+        const outgoing = travelOffset(travel * progress);
+        return {
+          ...base,
+          fromOffsetX: outgoing.x ?? 0,
+          fromOffsetY: outgoing.y ?? 0,
+          wipe: {
+            /*
+              The normal has to point at the region the outgoing clip has *vacated*,
+              and that is the way the pictures travel. Check it against the geometry:
+              a `left` slide moves the outgoing clip to `-p`, so at p = 0.5 it covers
+              the left half and has cleared the right — and `axisX = -1` is the normal
+              whose mask (`t <= edge` with `t` running from the far side) is 1 on the
+              right. Using `-travel` here revealed the side the outgoing clip was
+              still standing on, which is a wipe travelling the wrong way.
+            */
+            axisX: vertical ? 0 : travel,
+            axisY: vertical ? travel : 0,
+            position: progress,
+            softness: 0,
+            reveal: 'incoming',
+          },
+        };
+      }
+
+      // `push`, the default: both pictures move together as one strip.
+      if (vertical) {
         return {
           ...base,
           fromOffsetY: travel * progress,
           toOffsetY: -travel * (1 - progress),
         };
       }
-      const travel = direction === 'right' ? 1 : -1;
       return {
         ...base,
         fromOffsetX: travel * progress,

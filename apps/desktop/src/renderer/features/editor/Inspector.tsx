@@ -262,6 +262,23 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
                 />
               );
             })()}
+            {(() => {
+              const options = modeOptionsFor(item.transitionIn.type);
+              if (!options) return null;
+              return (
+                <Select
+                  // `push` is what an unset mode means, so the picker shows that
+                  // rather than an empty value the engine would silently treat as
+                  // push anyway.
+                  value={String(item.transitionIn.params?.mode ?? 'push')}
+                  ariaLabel="Motion of the slide"
+                  options={options}
+                  onChange={(value) =>
+                    timeline.updateTransition(item.id, { params: { mode: value } })
+                  }
+                />
+              );
+            })()}
           </div>
         </Field>
       )}
@@ -584,6 +601,25 @@ const SLIDE_DIRECTION_OPTIONS = [
   { value: 'up', label: 'Travels up' },
   { value: 'down', label: 'Travels down' },
 ];
+
+/*
+  `mode` is the slide's second axis and it is not a synonym for direction: it says
+  *who moves*. Push travels both pictures as one strip, cover slides the incoming
+  clip over a still outgoing one, and reveal slides the outgoing clip away from a
+  still incoming one — the last is the one people reach for when they want the
+  outgoing shot to clear off the screen.
+*/
+const SLIDE_MODE_OPTIONS = [
+  { value: 'push', label: 'Both pictures travel' },
+  { value: 'cover', label: 'Incoming slides over the outgoing' },
+  { value: 'reveal', label: 'Outgoing slides away' },
+];
+
+/** The mode list a given transition type should offer, if any. */
+function modeOptionsFor(type: string) {
+  if (type === 'slide') return SLIDE_MODE_OPTIONS;
+  return null;
+}
 
 /** The direction list a given transition type should offer, if any. */
 function directionOptionsFor(type: string) {

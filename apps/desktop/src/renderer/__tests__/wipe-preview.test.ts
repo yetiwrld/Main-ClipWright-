@@ -127,6 +127,35 @@ describe('dissolve in the preview (SPEC 12 §4.2)', () => {
     expect(size(fine)).toBeLessThan(size(coarse));
   });
 
+  it('draws a reveal slide as the hole the outgoing clip leaves', () => {
+    /*
+      A `reveal` is not an offset: the incoming clip is painted on top, so leaving
+      it still would cover the outgoing clip instead of being uncovered by it, and
+      the frame would show the incoming clip at every progress — a cut at p = 0.
+      The compositor therefore reports a wipe for it, and the preview draws that
+      wipe. Without this the reveal would be a cut on screen while the export
+      clipped it correctly, which is the preview/export disagreement this file
+      exists to catch.
+    */
+    const state = transitionState('slide', 0.5, { direction: 'left', mode: 'reveal' });
+    expect(state.wipe, 'a reveal has to report a shape').toBeDefined();
+    const [top, right, bottom, left] = parseInset(wipeClipPath(state.wipe!));
+    // The outgoing clip has travelled left, clearing the right half: that is the
+    // half the incoming clip is revealed in, so the clip-path frees the right.
+    expect(left).toBeCloseTo(50, 5);
+    expect(right).toBe(0);
+    expect(top).toBe(0);
+    expect(bottom).toBe(0);
+  });
+
+  it('keeps a cover slide as a plain offset with no clip', () => {
+    // A cover slides the incoming clip over a still outgoing one, so the incoming
+    // layer needs no mask — clipping it would cut the very edge that is sliding in.
+    const state = transitionState('slide', 0.5, { direction: 'left', mode: 'cover' });
+    expect(state.wipe).toBeUndefined();
+    expect(state.toOffsetX).toBeCloseTo(0.5, 6);
+  });
+
   it('clamps progress into 0–100 %', () => {
     // A NaN or out-of-range stop makes CSS drop the whole mask, which would show
     // the incoming clip in full from the first frame.

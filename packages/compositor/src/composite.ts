@@ -346,6 +346,75 @@ export function compositeRgbScaled(
  * the two clips meet at a seam rather than overlapping. `offsetX` is in frame widths
  * and positive moves the layer right.
  */
+/**
+ * Composite a layer scaled about the frame centre and then translated.
+ *
+ * A slide and a zoom can both be running on one clip — a `reveal` slide on a clip
+ * that also carries a `scale`, for instance — and the two effects have to compose
+ * rather than the first one winning. Chaining `compositeRgbScaled` into
+ * `compositeRgbShifted` would do the geometry correctly but blend the layer *twice*,
+ * so a half-opaque clip would come out three-quarters opaque. This samples the layer
+ * once through the combined inverse transform and blends once.
+ *
+ * `offsetX`/`offsetY` are in frame widths/heights and positive moves the layer right
+ * and down, matching `compositeRgbShifted`.
+ */
+export function compositeRgbScaledShifted(
+  base: RgbFrame,
+  layer: RgbFrame,
+  opacity: number,
+  mode: BlendMode,
+  scale: number,
+  offsetX: number,
+  offsetY = 0,
+): void {
+  const alpha = Math.min(1, Math.max(0, opacity));
+  if (alpha <= 0) return;
+  if (base.width !== layer.width || base.height !== layer.height) {
+    throw new Error(
+      `Cannot composite a ${layer.width}×${layer.height} layer onto a ${base.width}×${base.height} frame.`,
+    );
+  }
+  const s = Number.isFinite(scale) && scale > 1e-4 ? scale : 1;
+  const shiftX = Math.round(offsetX * base.width);
+  const shiftY = Math.round(offsetY * base.height);
+  const out = base.data;
+  const src = layer.data;
+  const width = base.width;
+  const height = base.height;
+  const centreX = width / 2;
+  const centreY = height / 2;
+  const inverse = 1 / s;
+  // Sample centres: an integer scale then lands on exact pixels instead of drifting
+  // half a pixel off the source grid.
+  for (let y = 0; y < height; y += 1) {
+    // Undo the translation first, then the scale: the layer is scaled about the
+    // *frame's* centre and only afterwards moved, so the inverse runs the other way.
+    const sourceY = (y + 0.5 - shiftY - centreY) * inverse + centreY - 0.5;
+    const sy = Math.round(sourceY);
+    if (sy < 0 || sy >= height) continue;
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = (x + 0.5 - shiftX - centreX) * inverse + centreX - 0.5;
+      const sx = Math.round(sourceX);
+      if (sx < 0 || sx >= width) continue;
+      const i = (y * width + x) * 3;
+      const j = (sy * width + sx) * 3;
+      if (mode === 'normal' && alpha >= 1) {
+        out[i] = src[j]!;
+        out[i + 1] = src[j + 1]!;
+        out[i + 2] = src[j + 2]!;
+        continue;
+      }
+      for (let channel = 0; channel < 3; channel += 1) {
+        const cb = out[i + channel]! / 255;
+        const cs = src[j + channel]! / 255;
+        const blended = blendChannel(mode, cb, cs);
+        out[i + channel] = (alpha * blended + (1 - alpha) * cb) * 255;
+      }
+    }
+  }
+}
+
 export function compositeRgbShifted(
   base: RgbFrame,
   layer: RgbFrame,

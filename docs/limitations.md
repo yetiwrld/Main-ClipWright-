@@ -143,11 +143,20 @@ This document tracks architectural scope boundaries and honest limitations per `
      patches on a regular grid whose coverage follows the progress. The file is
      authoritative; the preview conveys the character of the transition, not its
      exact pixel pattern.
-   - **`slide` implements the push, not `mode`, and not the diagonals.** §4.2 gives
-     a slide a `mode` (`push` / `cover` / `reveal`) and a direction including two
-     diagonals. All four axis directions push — both pictures travel together, which
-     is the mode most people mean — and the diagonals fall back to horizontal travel
-     rather than doing nothing. `cover` and `reveal` are not implemented.
+   - **A slide's `mode` is only visible on clips that do not fill the frame.**
+     §4.2's three modes differ in *who stays still*: `push` moves both pictures as
+     one strip, `cover` slides the incoming clip over a stationary outgoing one, and
+     `reveal` slides the outgoing clip away from a stationary incoming one. Their
+     reported state differs in which side carries a zero offset, and the motion
+     differs on screen — but with two opaque clips that both fill the frame the
+     rendered picture is pixel-identical in all three, because the area one vacates
+     is exactly the area the other enters and the incoming clip is painted on top.
+     The modes are only distinguishable where the canvas shows through, on a scaled
+     clip, and the tests measure the motion rather than a still for that reason.
+   - **A slide has four axis directions, not the wipe's six.** §4.2 lists
+     L/R/U/D/diagonals for a *wipe* and plain "direction" for a slide, so the two
+     diagonals are not a slide requirement and the inspector does not offer them.
+     Earlier notes here claimed they were a gap; they were not.
    - **A transition's audio crossfade needs handles on the incoming clip.** §4.2
      asks for an equal-power audio crossfade over the transition's own range. The
      incoming clip's half of a centred window begins *before* the clip does, so the

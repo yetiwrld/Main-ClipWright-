@@ -283,6 +283,42 @@ describe('ItemInspector transitions', () => {
     );
   });
 
+  it('offers a slide mode and sends it as a param', () => {
+    // SPEC 12 §4.2 gives a slide a `mode` alongside its direction. Without a
+    // control the cover and reveal shapes the engine implements are unreachable,
+    // and every slide is a push — which is what shipped before this.
+    const state = withTransition('slide');
+    const timeline = fakeTimeline(state);
+    timeline.updateTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+
+    fireEvent.click(screen.getByLabelText('Motion of the slide'));
+    fireEvent.click(screen.getByText('Outgoing slides away'));
+    expect(timeline.updateTransition).toHaveBeenCalledWith('item-1', {
+      params: { mode: 'reveal' },
+    });
+  });
+
+  it('shows push as the slide mode when none is stored', () => {
+    // An unset mode means push in the engine, so the picker must say so rather
+    // than rendering blank and implying no mode is chosen.
+    const state = withTransition('slide');
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.getByLabelText('Motion of the slide').textContent).toContain('Both pictures');
+  });
+
+  it('shows the mode control only on a slide', () => {
+    // Every other transition has one motion; a mode picker there would offer a
+    // choice that does nothing.
+    const wipe = withTransition('wipe');
+    const first = render(<ItemInspector state={wipe} timeline={fakeTimeline(wipe)} />);
+    expect(screen.queryByLabelText('Motion of the slide')).toBeNull();
+    first.unmount();
+    const crossfade = withTransition('crossfade');
+    render(<ItemInspector state={crossfade} timeline={fakeTimeline(crossfade)} />);
+    expect(screen.queryByLabelText('Motion of the slide')).toBeNull();
+  });
+
   it('creates a transition when one is chosen', () => {
     const state = withNeighbour();
     const timeline = fakeTimeline(state);

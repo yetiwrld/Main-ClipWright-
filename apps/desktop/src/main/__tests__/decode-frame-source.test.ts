@@ -589,6 +589,139 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     return path;
   }
 
+  /**
+   * A field of a base colour with one bright block near its left edge.
+   *
+   * A flat colour cannot show whether a clip moved: every pixel it covers is the
+   * same pixel, so sliding it changes nothing measurable. A *periodic* pattern does
+   * not help either — a shift of a whole number of periods is invisible to any
+   * phase measurement, and a half-frame slide is many periods — so the mark has to
+   * be unique. One block gives an unambiguous centroid under any shift.
+   *
+   * The block's placement is a parameter because where it can be seen depends on
+   * the slide's mode. A `cover` leaves the outgoing clip exactly where it started
+   * and slides the incoming one over it, so only the left end of the outgoing clip
+   * is reliably on screen throughout; a `reveal` uncovers the incoming clip from
+   * the right, so only its right end is. Putting the mark in the wrong half makes
+   * the test fail for a reason that has nothing to do with motion.
+   */
+  function makeMarkedSource(
+    name: string,
+    base: [number, number, number],
+    mark: [number, number, number],
+    where: 'left' | 'right' = 'left',
+    width = 1280,
+    height = 720,
+  ): string {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, name);
+    const rawPath = join(TMP, `${name}.rgb`);
+    const frame = Buffer.alloc(width * height * 3);
+    const markFrom = Math.round(width * (where === 'left' ? 0.04 : 0.85));
+    const markTo = Math.round(width * (where === 'left' ? 0.12 : 0.93));
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const inMark = x >= markFrom && x < markTo;
+        const index = (y * width + x) * 3;
+        frame[index] = inMark ? mark[0] : base[0];
+        frame[index + 1] = inMark ? mark[1] : base[1];
+        frame[index + 2] = inMark ? mark[2] : base[2];
+      }
+    }
+    writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+        '-s', `${width}x${height}`, '-framerate', '30', '-i', rawPath,
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-c:v', 'libx264', '-crf', '4', '-preset', 'ultrafast',
+        '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_primaries', 'bt709',
+        '-color_trc', 'bt709', '-color_range', 'tv', '-y', path],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+    return path;
+  }
+
+  /**
+   * Horizontal centroid of a marked block along one scanline, as a fraction of the
+   * frame width, or `null` when that colour is not on screen.
+   *
+   * A centroid is unambiguous: unlike a periodic pattern's phase, it cannot alias
+   * when the picture shifts by many periods, which is exactly what a slide does.
+   * Measuring a single scanline rather than the whole frame keeps 4:2:0 chroma
+   * bleed from dragging the answer around.
+   */
+  function markCentroid(
+    raw: Buffer,
+    width: number,
+    height: number,
+    matches: (r: number, g: number, b: number) => boolean,
+  ): number | null {
+    const row = Math.floor(height / 2);
+    let sum = 0;
+    let count = 0;
+    for (let x = 0; x < width; x += 1) {
+      const index = (row * width + x) * 3;
+      const r = raw[index]!;
+      const g = raw[index + 1]!;
+      const b = raw[index + 2]!;
+      if (!matches(r, g, b)) continue;
+      sum += x;
+      count += 1;
+    }
+    // A block narrower than this is a compression artefact rather than the mark.
+    if (count < width * 0.01) return null;
+    return sum / count / width;
+  }
+
+  /** One RGB frame from `outputPath` at `seconds`, as raw bytes. */
+  function readFrameAt(
+    outputPath: string,
+    plan: { width: number; height: number },
+    seconds: number,
+  ): Buffer {
+    const rgbPath = join(TMP, 'mode-probe.rgb');
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-loglevel', 'error', '-nostdin',
+        '-ss', String(seconds), '-i', outputPath, '-frames:v', '1',
+        // Force the matrix the compositor used, or the probe measures a different
+        // colour space from the one the clips were written in.
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+      { stdio: 'ignore' },
+    );
+    const raw = readFileSync(rgbPath);
+    rmSync(rgbPath, { force: true });
+    expect(raw.length, 'the probe frame has the planned size').toBe(plan.width * plan.height * 3);
+    return raw;
+  }
+
+  /**
+   * Fractions of a frame that are red, blue, or neither.
+   *
+   * The two sources are (220, 30, 30) and (30, 30, 220). Four rounds of 4:2:0
+   * subsampling pull them a little toward each other without ever crossing the
+   * middle, so a generous hue test separates them while the canvas background —
+   * whichever colour it is — lands in `dark`. That is the point: this measures
+   * *which clip is where*, and treats everything else as not-a-clip.
+   */
+  function classify(raw: Buffer): { red: number; blue: number; mixed: number } {
+    let red = 0;
+    let blue = 0;
+    let mixed = 0;
+    const total = raw.length / 3;
+    for (let index = 0; index < raw.length; index += 3) {
+      const r = raw[index]!;
+      const b = raw[index + 2]!;
+      if (r > 110 && b < 100) red += 1;
+      else if (b > 110 && r < 100) blue += 1;
+      else mixed += 1;
+    }
+    return { red: red / total, blue: blue / total, mixed: mixed / total };
+  }
+
   /** Decode the last frame of a file straight to RGB and average each channel. */
   function decodedChannelMeans(path: string): [number, number, number] {
     const rgbPath = join(TMP, 'probe.rgb');
@@ -1398,6 +1531,153 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(rightBlue, 'right band is the incoming clip').toBeGreaterThan(120);
     expect(rightRed, 'right band is not still the outgoing clip').toBeLessThan(110);
   }, 180_000);
+  /**
+   * SPEC 12 §4.2 — a slide's `mode`, measured in the produced file.
+   *
+   * The three modes are `push` (both pictures move), `cover` (the incoming one
+   * slides over a still outgoing one) and `reveal` (the outgoing one slides away
+   * from a still incoming one). Their reported *state* differs only in which side
+   * carries a zero offset, which the compositor's own tests pin.
+   *
+   * Proving the difference reaches the file needs a measurement that a single
+   * frame cannot make. At any one progress the three produce the same picture:
+   * the area the outgoing clip vacates is exactly the area the incoming one
+   * enters, and the incoming clip is painted on top, so with opaque clips the
+   * frame is identical — verified by forcing the mode to `push` and watching this
+   * file's early version still pass.
+   *
+   * What actually differs is *what stays still*, so these tests measure motion
+   * rather than a still: each clip carries a bar pattern, and the pattern's phase
+   * along one scanline says whether that clip is travelling. A flat colour could
+   * not show this at all — sliding a uniform field changes no pixel.
+   */
+  it('leaves the outgoing clip stationary in cover mode', async () => {
+    // Each clip's mark is a colour neither field has, so the centroid of a mark
+    // cannot be confused with the *area* the clip covers — which moves as the seam
+    // does — nor with the other clip's mark.
+    const first = makeMarkedSource('cover-first.mp4', [200, 40, 40], [40, 220, 40]);
+    const second = makeMarkedSource('cover-second.mp4', [40, 40, 200], [230, 220, 40]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'cover-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'cover-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'slide', durationUs: 400_000, alignment: 'center',
+            params: { direction: 'left', mode: 'cover' }, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-cover.mp4');
+
+    await runExportJob({
+      jobId: 'job-cover',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'cover-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+
+    /** Where the outgoing clip's mark sits, as a fraction of the frame width. */
+    const outgoingMark = (seconds: number): number | null => {
+      const raw = readFrameAt(outputPath, plan, seconds);
+      // The outgoing clip's mark is green; its field is red and the incoming clip's
+      // mark is yellow, so green appears nowhere else in the frame.
+      return markCentroid(raw, plan.width, plan.height, (r, g, b) => g - r > 60 && g - b > 60);
+    };
+
+    /*
+      In `cover` the outgoing clip never moves, so its mark must hold exactly the
+      same position across the window. Under `push` the same clip travels a frame
+      width a second, and its mark — which starts in the first eighth of the frame —
+      has left the picture entirely by a quarter of the way through. Either way the
+      measurement separates the modes, and it cannot alias: a centroid has no period.
+    */
+    const early = outgoingMark(0.9);
+    const late = outgoingMark(1.1);
+    expect(early, 'the outgoing clip is still on screen early in the window').not.toBeNull();
+    expect(late, 'the outgoing clip is still on screen late in the window').not.toBeNull();
+    const drift = Math.abs(late! - early!);
+    expect(drift, `the outgoing clip's mark moved ${(drift * 100).toFixed(1)}% of the frame`)
+      .toBeLessThan(0.01);
+  }, 180_000);
+
+  it('leaves the incoming clip stationary in reveal mode', async () => {
+    const first = makeMarkedSource('reveal-first.mp4', [200, 40, 40], [40, 220, 40], 'left');
+    // The incoming clip is uncovered from the right, so its mark lives there.
+    const second = makeMarkedSource('reveal-second.mp4', [40, 40, 200], [230, 220, 40], 'right');
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'reveal-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'reveal-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'slide', durationUs: 400_000, alignment: 'center',
+            params: { direction: 'left', mode: 'reveal' }, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-reveal.mp4');
+
+    await runExportJob({
+      jobId: 'job-reveal',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'reveal-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+
+    /** Where the incoming clip's mark sits, as a fraction of the frame width. */
+    const incomingMark = (seconds: number): number | null => {
+      const raw = readFrameAt(outputPath, plan, seconds);
+      // The incoming clip's mark is yellow, which neither field nor the outgoing
+      // clip's green mark can be mistaken for.
+      return markCentroid(raw, plan.width, plan.height, (r, g, b) => r > 140 && g > 140 && b < 110);
+    };
+
+    /*
+      A `reveal` leaves the incoming clip where it started and slides the outgoing
+      one off it, so the incoming clip's mark must hold its position across the
+      window. Under `push` both pictures travel, and the incoming clip's mark — which
+      enters from off-frame — is somewhere else entirely at each instant.
+
+      Sampling two times rather than asserting on one frame is what makes this able
+      to fail: at any single progress a renderer that ignored `mode` draws the same
+      picture, and only the motion tells them apart.
+    */
+    const early = incomingMark(0.9);
+    const late = incomingMark(1.1);
+    expect(early, 'the incoming clip is already partly uncovered early in the window').not.toBeNull();
+    expect(late, 'the incoming clip is on screen late in the window').not.toBeNull();
+    const drift = Math.abs(late! - early!);
+    expect(drift, `the incoming clip's mark moved ${(drift * 100).toFixed(1)}% of the frame`)
+      .toBeLessThan(0.01);
+  }, 180_000);
+
   /**
    * SPEC 12 §4.2 — `zoom`: "A zooms in/out while crossfading into B".
    *
