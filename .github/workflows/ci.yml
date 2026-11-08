@@ -27,31 +27,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false
 
-      - name: Design token & No-fakes audit
-        run: pnpm lint
-
-      - name: Repository references resolve
-        run: node scripts/check-repo.mjs
-
-      - name: Typecheck all packages
-        run: pnpm typecheck
-
-      - name: Run unit & integration tests
-        run: pnpm test
-
-      # Runs *after* the tests, because it needs the JSON report they leave
-      # behind: the counts quoted in docs/verification.md are compared against a
-      # real run instead of being trusted.
-      - name: Documented test counts match a real run
-        run: node scripts/check-repo.mjs
+      # The same script a developer runs locally — lint, typecheck, tests, build
+      # and the repository check, in that order. Keeping one definition means CI
+      # cannot drift from what was actually verified, and the build step cannot
+      # be the one everybody forgets: it was, and it was broken for a while.
+      - name: Lint, typecheck, test, build, verify repository
+        run: pnpm verify
 
       # SPEC 15 §6.2: the shipped notices must match what is actually installed,
       # and no dependency may have an unrecognised licence.
       - name: Third-party notices are current
         run: node scripts/release/make-notices.mjs --check
-
-      - name: Build desktop application
-        run: pnpm build
 
       # A build that drops the main process produces an installer for an app that
       # cannot start. Catch it here rather than in the release job.

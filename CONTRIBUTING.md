@@ -6,13 +6,17 @@ not let the app claim more than it does.
 ## Before you open a pull request
 
 ```bash
-pnpm typecheck
-pnpm lint        # design tokens + no-fakes/determinism
-pnpm test
+pnpm verify
 ```
 
-All three must pass. CI runs exactly these, plus a secret scan and a check that
-`THIRD-PARTY-NOTICES.txt` is current (`node scripts/release/make-notices.mjs --check`).
+That is lint, typecheck, the full test suite, **the production build** and the
+repository checks, in one script. It is exactly what CI runs, so a green local
+run means a green pull request (bar the secret scan and the third-party notices
+check, which CI adds).
+
+It is one command rather than five on purpose. The shorter checklist —
+typecheck, lint, test — does not build the app, and the build was once broken
+while all three passed.
 
 ## Rules that are not negotiable
 

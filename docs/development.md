@@ -62,11 +62,18 @@ that rejects `Math.random()` and `Date.now()` in them.
 | `pnpm dev` | renderer dev server |
 | `pnpm build` | build every package and the app |
 | `pnpm typecheck` | `tsc --noEmit` everywhere |
-| `pnpm lint` | design-token audit + no-fakes/determinism audit |
-| `pnpm test` / `pnpm test:unit` | vitest, all 910 tests |
+| `pnpm lint` | design-token audit + no-fakes/determinism audit + repository checks |
+| `pnpm test` / `pnpm test:unit` | vitest, all 1063 tests |
+| `pnpm verify` | **the full gate** — lint, typecheck, test, build, repository checks |
 | `pnpm test:e2e` | Playwright (needs browser binaries) |
 | `pnpm verify:exports` | export matrix against real fixtures |
 | `pnpm dist:win` | installer + portable exe |
+
+`pnpm verify` is the one to run before pushing, and the one CI runs. It exists
+because the shorter checklist (`typecheck`, `lint`, `test`) does not build the
+app — and for a while the production build was broken while all three passed.
+A check that cannot fail on the thing that is broken is not a check.
+
 
 ## Tests
 
