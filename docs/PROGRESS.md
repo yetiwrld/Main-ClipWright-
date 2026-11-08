@@ -44,29 +44,33 @@ That is Phase 1, 2 and 3 complete plus most of Phase 4.
 
 ## What is missing
 
-**Phase 5 has not been built.** The folders exist and are empty — one line each:
+**Phase 5 is built, minus the style editor.** The last sessions finished the
+caption engine, the frame builder, the preview overlay, the caption list and the
+per-word editor, and put styled captions into the export path:
 
-```
-packages/caption-styles/src/index.ts   →  export const CAPTION_STYLES_VERSION = '1.0.0';
-packages/compositor/src/index.ts       →  export const COMPOSITOR_VERSION = '1.0.0';
-packages/audio-core/src/index.ts       →  one line
-```
+- `packages/caption-styles` — the `.cwstyle` v1 schema, ten presets, resolution.
+- `packages/compositor` — `layoutText` (where words go) and `captionFrameAt` (what
+  they look like at an instant): karaoke sweeps, word-by-word, keyword emphasis,
+  palette cycling, in/out and per-word animation.
+- The editor — a Captions tab listing every caption in order with an `edited` chip,
+  click-to-emphasise per word, and a canvas overlay in the preview painted by the
+  same code the export uses.
+- The export — ffmpeg burns the captions in from a generated ASS script, so the
+  file matches the preview.
 
-So there is no caption editing interface, no text or graphics, no keyframes, no
-effects, no transitions, no audio tools, no brand kits. The timeline can show a
-caption track that came from a clip, but there is no way to style or edit one.
+Still open in Phase 5: the full style editor (colour pickers, anchor grid, drag on
+canvas), text and shape items, brand kits, and the audio tools in `audio-core`.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-no transform/opacity/crop editing in the inspector, only the Media tab in the left
-panel, playback clock is not audio-mastered, and the preview does not switch to
-proxies (so scrubbing 4K is slow).
+no transform/opacity/crop editing in the inspector, playback clock is not
+audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
+slow).
 
-**Phase 6's export is incomplete in one important way.** The compositor is not in
-the export path: each item is decoded separately and the topmost visible item is
-written out. Text, effects, transitions and keyframed transforms are **not
-rendered into the exported file**. This is stated in the export dialog before the
-user presses Export, so nobody is misled, but it means a clip with captions
-exports without the captions.
+**Phase 6's export is incomplete in one important way.** Captions are rendered;
+the rest of the video compositor is not. Each video/image item is decoded
+separately and the topmost visible item is written out, so effects, transitions,
+keyframed transforms and blend modes are **not rendered into the exported file**.
+This is stated in the export dialog before the user presses Export.
 
 ---
 
@@ -100,16 +104,17 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — small, well-defined gaps: inspector controls, the
-remaining left-panel tabs that belong to Phase 4, proxy playback.
+**1. Finish Phase 4 ⚠️** — small, well-defined gaps: inspector controls,
+proxy playback.
 
-**2. Build Phase 5 ❌** — the biggest remaining chunk by far. Captions UI, text and
-graphics, keyframes, effects, transitions, audio, AI editing tools, brand kits.
-Three packages are currently empty placeholders.
+**2. Finish Phase 5 ⚠️** — the style editor dialog, text and shape items, brand
+kits, and the audio tools (`audio-core` is still a placeholder). Captions
+themselves are done: engine, frame builder, preview, list, word editor, burn-in.
 
-**3. Make the export render the timeline** — put the compositor into the export
-path so captions, text, effects and transitions actually appear in the exported
-file. Until this is done, the editor can do things the export cannot show.
+**3. Make the export render the rest of the timeline** — the video compositor:
+effects, transitions, keyframed transforms and blend modes. Captions already
+render; this is the remaining half, and it is what stops the editor offering
+things the export cannot show.
 
 **4. Finish Phase 6** — build an installer on a real Windows machine and run the
 acceptance checks in `specs/15` §12. These need a clean Windows VM and a published
