@@ -16,6 +16,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   compositeLayers,
   compositeRgb,
+  compositeRgbScaled,
+  compositeRgbShifted,
   joinYuv,
   rgbToYuv,
   splitYuv,
@@ -367,5 +369,121 @@ describe('colour matrix', () => {
     expect(Math.abs(at(back, 0, 0) - 0x33)).toBeLessThan(4);
     expect(Math.abs(at(back, 0, 1) - 0x66)).toBeLessThan(4);
     expect(Math.abs(at(back, 0, 2) - 0xcc)).toBeLessThan(4);
+  });
+});
+
+/**
+ * SPEC 12 §4.2 — the shifted and scaled composites a running transition needs.
+ *
+ * These exist because a transition shape is not an opacity: a slide moves the
+ * picture and a zoom resizes it, and neither can be expressed by fading. Both were
+ * computed by `transitionState` and read by nothing, so the export showed a cut
+ * where the preview showed movement.
+ */
+describe('transition composites', () => {
+  /** A frame of one colour, so a region can be identified by its value. */
+  const solid = (width: number, height: number, value: number): RgbFrame => {
+    const data = new Uint8ClampedArray(width * height * 3);
+    data.fill(value);
+    return { width, height, data };
+  };
+
+  const at = (frame: RgbFrame, x: number, y: number): number =>
+    frame.data[(y * frame.width + x) * 3]!;
+
+  describe('compositeRgbShifted', () => {
+    it('moves the layer without changing its size', () => {
+      const base = solid(8, 4, 0);
+      // A layer with a bright left half, so the boundary is visible.
+      const layer = solid(8, 4, 0);
+      for (let y = 0; y < 4; y += 1) {
+        for (let x = 0; x < 4; x += 1) layer.data[(y * 8 + x) * 3] = 200;
+      }
+      compositeRgbShifted(base, layer, 1, 'normal', 0.5);
+      // Shifted right by half the width: columns 4–7 hold the bright half and
+      // columns 0–3 are untouched.
+      expect(at(base, 5, 2)).toBe(200);
+      expect(at(base, 1, 2)).toBe(0);
+    });
+
+    it('leaves what is underneath where the layer no longer covers', () => {
+      // This is what makes a slide a push rather than a cover: the outgoing clip
+      // shows through the gap instead of being overwritten by canvas.
+      const base = solid(8, 4, 90);
+      const layer = solid(8, 4, 200);
+      compositeRgbShifted(base, layer, 1, 'normal', 0.5);
+      expect(at(base, 1, 2)).toBe(90);
+      expect(at(base, 6, 2)).toBe(200);
+    });
+
+    it('honours the layer opacity', () => {
+      const base = solid(8, 4, 0);
+      const layer = solid(8, 4, 200);
+      compositeRgbShifted(base, layer, 0.5, 'normal', 0);
+      expect(at(base, 4, 2)).toBe(100);
+    });
+
+    it('does nothing for a layer shifted entirely off the frame', () => {
+      // Otherwise an off-screen layer would run the whole pixel loop to discover
+      // it has nothing to draw.
+      const base = solid(8, 4, 40);
+      compositeRgbShifted(base, solid(8, 4, 200), 1, 'normal', 1);
+      compositeRgbShifted(base, solid(8, 4, 200), 1, 'normal', -2);
+      expect(at(base, 4, 2)).toBe(40);
+    });
+
+    it('moves vertically as well', () => {
+      const base = solid(4, 8, 0);
+      const layer = solid(4, 8, 0);
+      for (let x = 0; x < 4; x += 1) layer.data[x * 3] = 210;
+      compositeRgbShifted(base, layer, 1, 'normal', 0, 0.5);
+      // Half of an eight-row frame is four rows, so the bright first row lands on
+      // row 4 — not on row 6, which is what I wrote first.
+      expect(at(base, 1, 4)).toBe(210);
+      expect(at(base, 1, 1)).toBe(0);
+    });
+  });
+
+  describe('compositeRgbScaled', () => {
+    it('enlarges the picture about the centre', () => {
+      const base = solid(8, 8, 0);
+      // A layer bright only in a 2×2 centre block.
+      const layer = solid(8, 8, 0);
+      for (let y = 3; y < 5; y += 1) {
+        for (let x = 3; x < 5; x += 1) layer.data[(y * 8 + x) * 3] = 200;
+      }
+      compositeRgbScaled(base, layer, 1, 'normal', 2);
+      // At scale 2 the 2×2 block covers the middle 4×4.
+      expect(at(base, 2, 2)).toBe(200);
+      expect(at(base, 5, 5)).toBe(200);
+      // Well outside it is untouched.
+      expect(at(base, 0, 0)).toBe(0);
+    });
+
+    it('leaves the frame alone at a scale of 1', () => {
+      const base = solid(8, 8, 0);
+      const layer = solid(8, 8, 150);
+      compositeRgbScaled(base, layer, 1, 'normal', 1);
+      for (let i = 0; i < base.data.length; i += 3) expect(base.data[i]).toBe(150);
+    });
+
+    it('shrinks toward the centre and leaves a border', () => {
+      // A zoom out must not fill the frame with the edge colour; the pixels it
+      // does not cover keep what is underneath.
+      const base = solid(8, 8, 30);
+      compositeRgbScaled(base, solid(8, 8, 200), 1, 'normal', 0.5);
+      expect(at(base, 4, 4)).toBe(200);
+      expect(at(base, 0, 0)).toBe(30);
+    });
+
+    it('treats a zero or negative scale as no scaling', () => {
+      // Zero would divide by zero; a negative scale is a flip, which is not what
+      // this function promises.
+      for (const scale of [0, -1, Number.NaN]) {
+        const base = solid(4, 4, 0);
+        compositeRgbScaled(base, solid(4, 4, 180), 1, 'normal', scale);
+        expect(at(base, 2, 2), `scale ${scale}`).toBe(180);
+      }
+    });
   });
 });

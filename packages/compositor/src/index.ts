@@ -98,6 +98,7 @@ export {
   compositeRgb,
   compositeRgbMasked,
   compositeRgbShifted,
+  compositeRgbScaled,
   joinYuv,
   rgbToYuv,
   splitYuv,

@@ -272,6 +272,67 @@ export function compositeRgb(
 }
 
 /**
+ * Composite a layer scaled about the frame's centre (SPEC 12 §4.2, `zoom`).
+ *
+ * The layer is sampled with nearest-neighbour at the source coordinate the scaled
+ * picture maps back to. Bilinear would be smoother, but a zoom's scale changes every
+ * frame and the resampling error it adds is far smaller than the 4:2:0 rounding the
+ * frames have already been through; nearest keeps the cost to one multiply per pixel.
+ *
+ * Pixels the scaled layer no longer covers (scale < 1) are left untouched, and a
+ * scaled-up layer simply fills the frame — which is what "A zooms in" means.
+ */
+export function compositeRgbScaled(
+  base: RgbFrame,
+  layer: RgbFrame,
+  opacity: number,
+  mode: BlendMode,
+  scale: number,
+): void {
+  const alpha = Math.min(1, Math.max(0, opacity));
+  if (alpha <= 0) return;
+  if (base.width !== layer.width || base.height !== layer.height) {
+    throw new Error(
+      `Cannot composite a ${layer.width}×${layer.height} layer onto a ${base.width}×${base.height} frame.`,
+    );
+  }
+  // A scale of zero would divide by zero; a negative one is a flip, not a zoom.
+  const s = Number.isFinite(scale) && scale > 1e-4 ? scale : 1;
+  const out = base.data;
+  const src = layer.data;
+  const width = base.width;
+  const height = base.height;
+  const centreX = width / 2;
+  const centreY = height / 2;
+  const inverse = 1 / s;
+  for (let y = 0; y < height; y += 1) {
+    // Sample at pixel centres so an integer scale lands on exact pixels instead of
+    // drifting half a pixel off the source grid.
+    const sourceY = (y + 0.5 - centreY) * inverse + centreY - 0.5;
+    const sy = Math.round(sourceY);
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = (x + 0.5 - centreX) * inverse + centreX - 0.5;
+      const sx = Math.round(sourceX);
+      if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue;
+      const i = (y * width + x) * 3;
+      const j = (sy * width + sx) * 3;
+      if (mode === 'normal' && alpha >= 1) {
+        out[i] = src[j]!;
+        out[i + 1] = src[j + 1]!;
+        out[i + 2] = src[j + 2]!;
+        continue;
+      }
+      for (let channel = 0; channel < 3; channel += 1) {
+        const cb = out[i + channel]! / 255;
+        const cs = src[j + channel]! / 255;
+        const blended = blendChannel(mode, cb, cs);
+        out[i + channel] = (alpha * blended + (1 - alpha) * cb) * 255;
+      }
+    }
+  }
+}
+
+/**
  * Composite a layer shifted horizontally by a fraction of the frame (SPEC 12 §4.2,
  * `slide`).
  *

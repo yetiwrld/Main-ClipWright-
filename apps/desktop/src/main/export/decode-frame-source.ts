@@ -36,6 +36,7 @@ import {
   compositeRgb,
   compositeRgbMasked,
   compositeRgbShifted,
+  compositeRgbScaled,
   effectPassCount,
   effectsForLayer,
   evaluateProperty,
@@ -154,6 +155,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
     dissolve?: DissolveShape;
     offsetX?: number;
     offsetY?: number;
+    scale?: number;
   } => {
     if (item.transitionIn) {
       const at = transitionAt(item.startUs, asTransition(item.transitionIn), timeUs);
@@ -167,6 +169,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           dissolve: at.state.dissolve,
           offsetX: at.state.toOffsetX,
           offsetY: at.state.toOffsetY,
+          scale: at.state.toScale,
         };
       }
     }
@@ -185,6 +188,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           active: true,
           offsetX: at.state.fromOffsetX,
           offsetY: at.state.fromOffsetY,
+          scale: at.state.fromScale,
         };
       }
     }
@@ -446,6 +450,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         /** Travel from a running slide, in frame widths/heights (SPEC 12 §4.2). */
         offsetX?: number;
         offsetY?: number;
+        /** Scale about the frame centre from a running zoom (SPEC 12 §4.2). */
+        scale?: number;
       }> = [];
 
       /*
@@ -498,6 +504,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               dissolve: transition.dissolve,
               offsetX: transition.offsetX,
               offsetY: transition.offsetY,
+              scale: transition.scale,
             });
           }
           continue;
@@ -522,6 +529,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           dissolve: transition.dissolve,
           offsetX: transition.offsetX,
           offsetY: transition.offsetY,
+          scale: transition.scale,
         });
       }
 
@@ -598,6 +606,12 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         // useful — operation.
         if (layer.effects.length > 0) {
           applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
+        }
+        if (layer.scale !== undefined && layer.scale !== 1) {
+          // A zoom scales the picture about the frame centre; the layer is sampled
+          // through that scale and then composited as usual.
+          compositeRgbScaled(base, rgb, layer.opacity, layer.blendMode, layer.scale);
+          continue;
         }
         if (layer.offsetX || layer.offsetY) {
           // A slide translates the whole layer; the pixels it no longer covers keep

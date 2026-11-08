@@ -544,6 +544,51 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     return path;
   }
 
+  /**
+   * A red field with a white box in the middle, for measuring scale.
+   *
+   * A uniform colour cannot show a zoom: scaling a solid fill looks identical. The
+   * box gives a region whose *area* grows when the picture is scaled up, which is
+   * what the zoom test counts.
+   */
+  function makeBoxedSource(name: string, width = 1280, height = 720): string {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, name);
+    const rawPath = join(TMP, `${name}.rgb`);
+    const frame = Buffer.alloc(width * height * 3);
+    for (let index = 0; index < frame.length; index += 3) {
+      frame[index] = 200;
+      frame[index + 1] = 40;
+      frame[index + 2] = 40;
+    }
+    // A box a sixth of the frame across, centred: 1/36 of the area, which is
+    // small enough that scaling it visibly enlarges it without hitting the edges.
+    const boxW = Math.round(width / 6);
+    const boxH = Math.round(height / 6);
+    const x0 = Math.round((width - boxW) / 2);
+    const y0 = Math.round((height - boxH) / 2);
+    for (let y = y0; y < y0 + boxH; y += 1) {
+      for (let x = x0; x < x0 + boxW; x += 1) {
+        const index = (y * width + x) * 3;
+        frame[index] = 250;
+        frame[index + 1] = 250;
+        frame[index + 2] = 250;
+      }
+    }
+    writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+        '-s', `${width}x${height}`, '-framerate', '30', '-i', rawPath,
+        '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast',
+        '-colorspace', 'bt709', '-color_primaries', 'bt709',
+        '-color_trc', 'bt709', '-color_range', 'tv', '-y', path],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+    return path;
+  }
+
   /** Decode the last frame of a file straight to RGB and average each channel. */
   function decodedChannelMeans(path: string): [number, number, number] {
     const rgbPath = join(TMP, 'probe.rgb');
@@ -1352,5 +1397,108 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(leftBlue, 'left band is not yet the incoming clip').toBeLessThan(110);
     expect(rightBlue, 'right band is the incoming clip').toBeGreaterThan(120);
     expect(rightRed, 'right band is not still the outgoing clip').toBeLessThan(110);
+  }, 180_000);
+  /**
+   * SPEC 12 §4.2 — `zoom`: "A zooms in/out while crossfading into B".
+   *
+   * The transition produced from/to scales and nothing read them, so a zoom reached
+   * the file as a plain crossfade at constant size. The measurement is spatial: a
+   * clip scaled up past the frame covers *more* of it, so a test pattern with
+   * distinct edges tells a zoom from a crossfade where both pictures happen to be
+   * present. Here the outgoing clip is a red field with a bright white box in the
+   * middle and the incoming clip is flat blue: as the red clip scales up, the white
+   * box grows, so the count of white-ish pixels rises even as the clip fades.
+   */
+  it('zooms the outgoing clip while crossfading in the exported file', async () => {
+    const first = makeBoxedSource('zoom-boxed.mp4');
+    const second = makeSolidSource('zoom-flat.mp4', [30, 30, 220]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'zoom-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'zoom-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'zoom', durationUs: 400_000, alignment: 'center',
+            params: { amount: 0.6 }, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-zoom.mp4');
+
+    await runExportJob({
+      jobId: 'job-zoom',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'zoom-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+
+    /**
+     * The box's width in pixels, measured along its centre row.
+     *
+     * Counting the box's *area* does not work: 4:2:0 chroma is subsampled, so the
+     * boundary smears over several pixels and a large faint halo swamps the real
+     * change. A single scanline through the middle has the same problem at the two
+     * edges only, so it measures the run between them and is insensitive to how
+     * wide the smear is.
+     */
+    const boxWidthAt = (seconds: number): number => {
+      const rgbPath = join(TMP, 'zoom-probe.rgb');
+      execFileSync(
+        ffmpegPath(),
+        ['-hide_banner', '-loglevel', 'error', '-nostdin',
+          '-ss', String(seconds), '-i', outputPath, '-frames:v', '1',
+          '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+          '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+        { stdio: 'ignore' },
+      );
+      const raw = readFileSync(rgbPath);
+      rmSync(rgbPath, { force: true });
+      const row = Math.floor(plan.height / 2);
+      let first = -1;
+      let last = -1;
+      for (let x = 0; x < plan.width; x += 1) {
+        /*
+          The box is detected by its *neutrality*, not by an absolute level. Both
+          sources are overlaid by the same incoming clip during the transition, so
+          any fixed brightness threshold is only valid at one progress: the box's
+          green is 250 before the transition and 76 half way through, while the
+          field's is 55 and 28. `green − red` is 0 in the box and −158 in the field
+          before the transition, and 2 against −38 half way through — a fade of any
+          strength leaves that difference where it was.
+        */
+        const green = raw[(row * plan.width + x) * 3 + 1]!;
+        const red = raw[(row * plan.width + x) * 3]!;
+        if (green - red > -10) {
+          if (first < 0) first = x;
+          last = x;
+        }
+      }
+      return first < 0 ? 0 : last - first + 1;
+    };
+
+    // Before the transition the box is at its natural size; at 1.0 s the centred
+    // window [0.8 s, 1.2 s) is half done, so the outgoing clip is scaled by
+    // 1 + 0.6 × 0.5 = 1.3.
+    const natural = boxWidthAt(0.5);
+    const zoomed = boxWidthAt(1.0);
+    expect(natural, 'the source pattern has a detectable box').toBeGreaterThan(100);
+    // A crossfade leaves the box exactly the same width while dimming it; only a
+    // scale changes how much of the row it covers.
+    expect(zoomed, 'the outgoing clip should be scaled up mid-transition').toBeGreaterThan(
+      natural * 1.15,
+    );
   }, 180_000);
 });
