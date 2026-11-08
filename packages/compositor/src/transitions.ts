@@ -90,6 +90,9 @@ export interface TransitionState {
    */
   fromOffsetX: number;
   toOffsetX: number;
+  /** Vertical slide, as a fraction of frame height. Positive moves a layer down. */
+  fromOffsetY: number;
+  toOffsetY: number;
   /** Scale applied to each side, for `zoom`. */
   fromScale: number;
   toScale: number;
@@ -223,6 +226,8 @@ export function transitionState(
     toOpacity: 1,
     fromOffsetX: 0,
     toOffsetX: 0,
+    fromOffsetY: 0,
+    toOffsetY: 0,
     fromScale: 1,
     toScale: 1,
   };
@@ -287,11 +292,36 @@ export function transitionState(
     }
 
     case 'slide': {
-      // Both pictures move together as one strip. `direction` names the way the
-      // frame travels: `left` means the outgoing clip exits to the left and the
-      // incoming one enters from the right. Moving only the incoming clip would
-      // show the canvas through the gap, which is a different effect.
-      const travel = params.direction === 'right' ? 1 : -1;
+      /*
+        Both pictures move together as one strip; moving only the incoming clip
+        would show the canvas through the gap, which is a different effect.
+
+        `direction` names the way the *picture travels*, which is the opposite of
+        saying which side the incoming clip arrives from: `left` means the outgoing
+        clip exits to the left and the incoming one arrives from the right. That is
+        the long-standing convention here and the preview and export both follow it,
+        so the inspector's labels say "travel" rather than "comes from".
+
+        (A wipe's `direction` uses the other reading — where the reveal starts —
+        because a reveal has a starting edge rather than a motion. The two option
+        lists are separate for that reason.)
+
+        §4.2 also gives a slide a `mode` (push/cover/reveal) and diagonal
+        directions. The four axis directions are implemented as a push; the
+        diagonals fall back to horizontal travel, and `mode` is not implemented.
+      */
+      const direction = params.direction;
+      if (direction === 'up' || direction === 'down') {
+        // `up`: the strip travels upward, so the outgoing clip exits through the
+        // top and the incoming one enters from below.
+        const travel = direction === 'up' ? -1 : 1;
+        return {
+          ...base,
+          fromOffsetY: travel * progress,
+          toOffsetY: -travel * (1 - progress),
+        };
+      }
+      const travel = direction === 'right' ? 1 : -1;
       return {
         ...base,
         fromOffsetX: travel * progress,

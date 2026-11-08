@@ -131,7 +131,20 @@ export interface TimelineApi {
   unlink: (itemId: string) => boolean;
   toggleDisabled: (itemId: string) => boolean;
   addTransition: (trackId: string, leftItemId: string, rightItemId: string, type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom', durationUs?: number, alignment?: 'center' | 'start' | 'end') => boolean;
-  updateTransition: (itemId: string, patch: { durationUs?: number; alignment?: 'center' | 'start' | 'end'; type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom' }) => boolean;
+  updateTransition: (
+    itemId: string,
+    patch: {
+      durationUs?: number;
+      alignment?: 'center' | 'start' | 'end';
+      type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom';
+      /**
+       * Type-specific parameters (SPEC 12 §4.2). Merged, so setting a wipe's
+       * direction keeps its softness. Only sent when a control is actually used,
+       * which is what lets the engine skip the parameter work entirely otherwise.
+       */
+      params?: Record<string, number | boolean | string | undefined>;
+    },
+  ) => boolean;
   removeTransition: (itemId: string) => boolean;
   setWorkArea: (edge: 'in' | 'out', timeUs: number) => boolean;
   clearWorkArea: () => boolean;
@@ -472,7 +485,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       toggleDisabled: (itemId) => run('Toggle disabled', (s) => toggleItemDisabled(s, { itemId })),
       addTransition: (trackId: string, leftItemId: string, rightItemId: string, type: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom', durationUs?: number, alignment?: 'center' | 'start' | 'end') =>
         run('Add transition', (s) => addTransition(s, { trackId, leftItemId, rightItemId, type, durationUs, alignment, fps })),
-      updateTransition: (itemId: string, patch: { durationUs?: number; alignment?: 'center' | 'start' | 'end'; type?: 'crossfade' | 'dissolve' | 'fade-black' | 'dip-color' | 'wipe' | 'slide' | 'zoom' }) =>
+      updateTransition: (itemId, patch) =>
         run('Update transition', (s) => updateTransition(s, { itemId, patch, fps })),
       removeTransition: (itemId: string) =>
         run('Remove transition', (s) => removeTransition(s, { itemId })),

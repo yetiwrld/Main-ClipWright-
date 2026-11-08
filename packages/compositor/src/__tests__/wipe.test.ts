@@ -145,3 +145,58 @@ describe('wipe geometry (SPEC 12 §4.2)', () => {
     });
   });
 });
+
+describe('slide direction (SPEC 12 §4.2)', () => {
+  it('moves both pictures horizontally for left and right', () => {
+    // Both sides travel: moving only the incoming clip would expose the canvas
+    // through the gap, which is a different transition.
+    for (const direction of ['left', 'right']) {
+      const state = transitionState('slide', 0.3, { direction });
+      expect(Math.abs(state.fromOffsetX)).toBeGreaterThan(0);
+      expect(Math.abs(state.toOffsetX)).toBeGreaterThan(0);
+      expect(state.fromOffsetY).toBe(0);
+      expect(state.toOffsetY).toBe(0);
+    }
+  });
+
+  it('moves both pictures vertically for up and down', () => {
+    // These used to fall through to the horizontal branch, so picking "from the
+    // top" slid the picture sideways.
+    for (const direction of ['up', 'down']) {
+      const state = transitionState('slide', 0.3, { direction });
+      expect(state.fromOffsetX).toBe(0);
+      expect(state.toOffsetX).toBe(0);
+      expect(Math.abs(state.fromOffsetY)).toBeGreaterThan(0);
+      expect(Math.abs(state.toOffsetY)).toBeGreaterThan(0);
+    }
+  });
+
+  it('puts the two clips end to end at every progress', () => {
+    // The defining property of a push: the outgoing clip's trailing edge meets the
+    // incoming clip's leading edge, so together they always cover the frame.
+    for (const direction of ['left', 'right', 'up', 'down']) {
+      for (const p of [0.1, 0.5, 0.9]) {
+        const state = transitionState('slide', p, { direction });
+        const vertical = state.fromOffsetY !== 0 || state.toOffsetY !== 0;
+        const from = vertical ? state.fromOffsetY : state.fromOffsetX;
+        const to = vertical ? state.toOffsetY : state.toOffsetX;
+        // `to` starts at −1 and ends at 0; `from` starts at 0 and ends at +1 (for
+        // the positive travel). Their sum is always one frame apart.
+        expect(Math.abs(to - from), `${direction} p=${p}`).toBeCloseTo(1, 6);
+      }
+    }
+  });
+
+  it('travels the way the direction names', () => {
+    // `left` names the direction of travel, so the outgoing clip exits left
+    // (negative offset) and the incoming one arrives from the right (positive,
+    // closing to zero). A wipe's `direction` means something different — where the
+    // reveal starts — and the two are deliberately not forced to agree.
+    const left = transitionState('slide', 0.05, { direction: 'left' });
+    expect(left.fromOffsetX).toBeLessThan(0);
+    expect(left.toOffsetX).toBeGreaterThan(0);
+    const up = transitionState('slide', 0.05, { direction: 'up' });
+    expect(up.fromOffsetY).toBeLessThan(0);
+    expect(up.toOffsetY).toBeGreaterThan(0);
+  });
+});

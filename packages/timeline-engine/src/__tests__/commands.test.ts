@@ -752,6 +752,78 @@ describe('timeline commands', () => {
       }
     });
 
+    /** A fixture with a wipe already attached, so params can be edited. */
+    function withWipe(params: Record<string, number | string> = {}) {
+      const fixture = transitionFixture();
+      const added = addTransition(fixture.state, {
+        trackId: fixture.trackId,
+        leftItemId: fixture.leftId,
+        rightItemId: fixture.rightId,
+        type: 'wipe',
+        durationUs: 500_000,
+        fps: 30,
+      });
+      if (!added.ok) throw new Error('setup failed');
+      const withParams = updateTransition(added.state, {
+        itemId: fixture.rightId,
+        patch: { params },
+        fps: 30,
+      });
+      if (!withParams.ok) throw new Error('setup failed');
+      return { ...fixture, state: withParams.state };
+    }
+
+    it('stores transition params', () => {
+      // SPEC 12 §4.2 gives a wipe a direction and softness; before this the command
+      // had no way to carry them, so every wipe was left-to-right and hard-edged.
+      const { state, rightId } = withWipe({ direction: 'up', softness: 0.3 });
+      expect(state.items[rightId]!.transitionIn!.params).toEqual({
+        direction: 'up',
+        softness: 0.3,
+      });
+    });
+
+    it('merges params rather than replacing them', () => {
+      // Changing a wipe's direction must not silently reset its softness to the
+      // default — the user would have to set both again after every edit.
+      const { state, rightId } = withWipe({ direction: 'left', softness: 0.4 });
+      const updated = updateTransition(state, {
+        itemId: rightId,
+        patch: { params: { direction: 'right' } },
+        fps: 30,
+      });
+      if (!updated.ok) throw new Error('update failed');
+      expect(updated.state.items[rightId]!.transitionIn!.params).toEqual({
+        direction: 'right',
+        softness: 0.4,
+      });
+    });
+
+    it('removes a param set to undefined', () => {
+      // How a control clears an override and falls back to the type's default,
+      // which is a different thing from storing the default's value.
+      const { state, rightId } = withWipe({ direction: 'up', softness: 0.4 });
+      const updated = updateTransition(state, {
+        itemId: rightId,
+        patch: { params: { softness: undefined } },
+        fps: 30,
+      });
+      if (!updated.ok) throw new Error('update failed');
+      expect(updated.state.items[rightId]!.transitionIn!.params).toEqual({ direction: 'up' });
+    });
+
+    it('leaves params alone when the patch does not mention them', () => {
+      // The duration slider fires constantly; it must not wipe the geometry.
+      const { state, rightId } = withWipe({ direction: 'up' });
+      const updated = updateTransition(state, {
+        itemId: rightId,
+        patch: { durationUs: 400_000 },
+        fps: 30,
+      });
+      if (!updated.ok) throw new Error('update failed');
+      expect(updated.state.items[rightId]!.transitionIn!.params).toEqual({ direction: 'up' });
+    });
+
     it('refuses a transition when clips are not adjacent', () => {
       const { state, leftId, rightId, trackId } = transitionFixture();
       // Move right clip away

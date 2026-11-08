@@ -143,6 +143,17 @@ This document tracks architectural scope boundaries and honest limitations per `
      patches on a regular grid whose coverage follows the progress. The file is
      authoritative; the preview conveys the character of the transition, not its
      exact pixel pattern.
+   - **`slide` implements the push, not `mode`, and not the diagonals.** §4.2 gives
+     a slide a `mode` (`push` / `cover` / `reveal`) and a direction including two
+     diagonals. All four axis directions push — both pictures travel together, which
+     is the mode most people mean — and the diagonals fall back to horizontal travel
+     rather than doing nothing. `cover` and `reveal` are not implemented.
+   - **`zoom` scales in the preview but not in the file.** A running zoom multiplies
+     each side's scale, and the preview applies it; the export composites each layer
+     whole and never reads the transition's scale, so a zoom currently exports as a
+     crossfade at constant size. The decoder bakes geometry per keyframe segment and
+     has no per-frame scale input, which is why this is not a small change. A test
+     asserting it would fail today, so none is written; it is listed here instead.
    The export is correct and tested; the preview is honest and approximate, and the
    banner is what makes that acceptable.
    - **Adjustment layers grade what is below them, with one approximation.** An

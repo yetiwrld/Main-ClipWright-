@@ -1268,4 +1268,89 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     // would put nearly every pixel in `mixed`.
     expect(mixed / total, 'pixels blended between the clips').toBeLessThan(0.25);
   }, 180_000);
+  /**
+   * SPEC 12 §4.2 — `slide`: "B pushes A". Both pictures travel together across the
+   * frame, so mid-transition the file must show *both* clips side by side.
+   *
+   * The export composites each layer whole: the item's geometry moves a layer, but a
+   * transition's offset has nowhere to go, so a slide arrived in the file as the
+   * incoming clip painted over the outgoing one — a cut with extra steps.
+   */
+  it('slides two clips across the frame in the exported file', async () => {
+    const first = makeSolidSource('slide-first.mp4', [220, 30, 30]); // red, outgoing
+    const second = makeSolidSource('slide-second.mp4', [30, 30, 220]); // blue, incoming
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'slide-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'slide-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'slide', durationUs: 400_000, alignment: 'center',
+            params: { direction: 'left' }, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-slide.mp4');
+
+    await runExportJob({
+      jobId: 'job-slide',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'slide-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+
+    const rgbPath = join(TMP, 'slide-probe.rgb');
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-loglevel', 'error', '-nostdin',
+        '-ss', '1.0', '-i', outputPath, '-frames:v', '1',
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+      { stdio: 'ignore' },
+    );
+    const raw = readFileSync(rgbPath);
+    rmSync(rgbPath, { force: true });
+
+    // At half progress each clip covers half the width: the leading band is the
+    // outgoing clip, the trailing band the incoming one. A cut shows one colour.
+    const bandMeans = (fromFraction: number, toFraction: number) => {
+      const width = plan.width;
+      const x0 = Math.floor(width * fromFraction);
+      const x1 = Math.floor(width * toFraction);
+      let red = 0;
+      let blue = 0;
+      let count = 0;
+      for (let y = 0; y < plan.height; y += 2) {
+        for (let x = x0; x < x1; x += 2) {
+          const index = (y * width + x) * 3;
+          red += raw[index]!;
+          blue += raw[index + 2]!;
+          count += 1;
+        }
+      }
+      return [red / count, blue / count];
+    };
+
+    const [leftRed, leftBlue] = bandMeans(0.05, 0.2);
+    const [rightRed, rightBlue] = bandMeans(0.8, 0.95);
+    // The incoming clip slides in from the right, so the right band is blue and
+    // the left band is still red.
+    expect(leftRed, 'left band is the outgoing clip').toBeGreaterThan(120);
+    expect(leftBlue, 'left band is not yet the incoming clip').toBeLessThan(110);
+    expect(rightBlue, 'right band is the incoming clip').toBeGreaterThan(120);
+    expect(rightRed, 'right band is not still the outgoing clip').toBeLessThan(110);
+  }, 180_000);
 });

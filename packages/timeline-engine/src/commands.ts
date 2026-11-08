@@ -1600,7 +1600,20 @@ export function updateTransition(
   state: TimelineState,
   params: {
     itemId: string;
-    patch: Partial<Pick<NonNullable<TimelineItem['transitionIn']>, 'durationUs' | 'alignment' | 'type'>>;
+    patch: Partial<
+      Pick<NonNullable<TimelineItem['transitionIn']>, 'durationUs' | 'alignment' | 'type'>
+    > & {
+      /**
+       * Type-specific parameters (SPEC 12 §4.2): a wipe's `direction` and
+       * `softness`, a dissolve's `grain`, a dip's `color`, a slide's `mode`, a
+       * zoom's `amount`.
+       *
+       * Merged into the existing params rather than replacing them, so changing a
+       * wipe's direction does not silently reset its softness. A key set to
+       * `undefined` is removed.
+       */
+      params?: Record<string, number | boolean | string | undefined>;
+    };
     fps: Fps;
   },
 ): CommandResult {
@@ -1643,6 +1656,16 @@ export function updateTransition(
     target.transitionIn.durationUs = newDuration;
     if (params.patch.alignment) target.transitionIn.alignment = params.patch.alignment;
     if (params.patch.type) target.transitionIn.type = params.patch.type;
+    if (params.patch.params) {
+      const merged = { ...(target.transitionIn.params ?? {}) };
+      for (const [key, value] of Object.entries(params.patch.params)) {
+        // `undefined` means "remove", which is how a control clears an override and
+        // falls back to the type's default — distinct from storing the default.
+        if (value === undefined) delete merged[key];
+        else merged[key] = value;
+      }
+      target.transitionIn.params = merged;
+    }
   });
 
   return {

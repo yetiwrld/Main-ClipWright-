@@ -455,6 +455,7 @@ export function PreviewPane({
                 opacity={layer.opacity * (transition?.fromOpacity ?? 1)}
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
+                transitionOffsetY={transition?.offsetY ?? 0}
                 transitionScale={transition?.scale ?? 1}
                 transitionWipe={transition?.wipe}
                 transitionDissolve={transition?.dissolve}
@@ -606,6 +607,7 @@ function transitionFor(
 ): {
   fromOpacity: number;
   offsetX: number;
+  offsetY: number;
   scale: number;
   /** Set on the incoming side of a running wipe (SPEC 12 §4.2). */
   wipe?: WipeShape;
@@ -627,6 +629,7 @@ function transitionFor(
     return {
       fromOpacity: fadedByLayers ? 1 : at.state.toOpacity,
       offsetX: at.state.toOffsetX,
+      offsetY: at.state.toOffsetY,
       scale: at.state.toScale,
       wipe: at.state.wipe,
       dissolve: at.state.dissolve,
@@ -644,6 +647,7 @@ function transitionFor(
   return {
     fromOpacity: at.state.fromOpacity,
     offsetX: at.state.fromOffsetX,
+    offsetY: at.state.fromOffsetY,
     scale: at.state.fromScale,
   };
 }
@@ -669,6 +673,7 @@ const PreviewLayer = memo(function PreviewLayer({
   blendMode,
   initialAspect,
   transitionOffsetX,
+  transitionOffsetY,
   transitionScale,
   transitionWipe,
   transitionDissolve,
@@ -687,6 +692,8 @@ const PreviewLayer = memo(function PreviewLayer({
   initialAspect: number;
   /** Horizontal slide from a running transition, in frame widths. */
   transitionOffsetX: number;
+  /** Vertical slide from a running transition, in frame heights. */
+  transitionOffsetY: number;
   /** CSS `filter` string approximating the item's effect chain. */
   effectFilter: string;
   /** Scale from a running `zoom` transition. */
@@ -752,7 +759,7 @@ const PreviewLayer = memo(function PreviewLayer({
         // The transition's slide adds to the item's own offset: both are frame
         // fractions, so they compose without conversion.
         transform: `translate(${(geometry.offsetX + transitionOffsetX) * 100}%, ${
-          geometry.offsetY * 100
+          (geometry.offsetY + transitionOffsetY) * 100
         }%)`,
         // A wipe clips the layer rather than fading it, so it is a `clip-path` on
         // the outermost element: clipping an inner one would be undone by the

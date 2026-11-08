@@ -215,6 +215,74 @@ describe('ItemInspector transitions', () => {
     expect((control as HTMLButtonElement).disabled).toBe(true);
   });
 
+  /** A clip that already has a transition of `type` entering it. */
+  function withTransition(type: string, params: Record<string, string> = {}) {
+    const state = withNeighbour();
+    const item = state.items['item-1']!;
+    return {
+      ...state,
+      items: {
+        ...state.items,
+        'item-1': {
+          ...item,
+          transitionIn: {
+            id: 'tr-1',
+            type: type as never,
+            durationUs: 500_000,
+            alignment: 'center' as const,
+            params,
+            easing: 'linear' as const,
+            crossfadeAudio: true,
+          },
+        },
+      },
+    } as TimelineState;
+  }
+
+  it('offers a direction for a wipe and sends it as a param', () => {
+    // SPEC 12 §4.2 gives a wipe a direction; without this control the shape the
+    // engine implements is unreachable and every wipe is left-to-right.
+    const state = withTransition('wipe');
+    const timeline = fakeTimeline(state);
+    timeline.updateTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+
+    fireEvent.click(screen.getByLabelText('Direction of the transition'));
+    fireEvent.click(screen.getByText('Revealed from the right'));
+    expect(timeline.updateTransition).toHaveBeenCalledWith('item-1', {
+      params: { direction: 'right' },
+    });
+  });
+
+  it('labels a slide direction as travel, not as a reveal', () => {
+    // The engine reads a slide's direction as the way the picture moves and a
+    // wipe's as where the reveal begins. Reusing one list labelled one of them
+    // wrongly, so each type gets its own wording.
+    const state = withTransition('slide');
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    fireEvent.click(screen.getByLabelText('Direction of the transition'));
+    // The custom `Select` renders the chosen option in its trigger *and* in the
+    // open popup, so the label legitimately appears twice.
+    expect(screen.getAllByText('Travels left').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Revealed from the left')).toBeNull();
+  });
+
+  it('shows the direction control only for the types that have one', () => {
+    // A disabled direction picker on a crossfade would imply a setting exists that
+    // does nothing.
+    const state = withTransition('crossfade');
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.queryByLabelText('Direction of the transition')).toBeNull();
+  });
+
+  it('reflects a direction already stored on the transition', () => {
+    const state = withTransition('wipe', { direction: 'up' });
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.getByLabelText('Direction of the transition').textContent).toContain(
+      'top',
+    );
+  });
+
   it('creates a transition when one is chosen', () => {
     const state = withNeighbour();
     const timeline = fakeTimeline(state);

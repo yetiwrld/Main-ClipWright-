@@ -243,6 +243,25 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
                 })
               }
             />
+            {/*
+              Only the types that actually have a direction get the control. A
+              crossfade with a disabled direction picker would suggest the setting
+              exists and is merely unavailable, which is worse than not showing it.
+            */}
+            {(() => {
+              const options = directionOptionsFor(item.transitionIn.type);
+              if (!options) return null;
+              return (
+                <Select
+                  value={String(item.transitionIn.params?.direction ?? 'left')}
+                  ariaLabel="Direction of the transition"
+                  options={options}
+                  onChange={(value) =>
+                    timeline.updateTransition(item.id, { params: { direction: value } })
+                  }
+                />
+              );
+            })()}
           </div>
         </Field>
       )}
@@ -533,13 +552,45 @@ type TransitionType =
 const TRANSITION_OPTIONS = [
   { value: 'none', label: 'None' },
   { value: 'crossfade', label: 'Crossfade — both clips blend' },
-  { value: 'dissolve', label: 'Dissolve — new clip fades in over the old' },
+  // A dissolve switches whole pixels between the clips through a noise field, so
+  // it reads as grain rather than as a fade. Calling it "fades in over the old"
+  // described the fade it used to be — the two types were indistinguishable.
+  { value: 'dissolve', label: 'Dissolve — grainy, pixel-by-pixel switch' },
   { value: 'fade-black', label: 'Fade through black' },
   { value: 'dip-color', label: 'Dip to colour' },
   { value: 'wipe', label: 'Wipe' },
   { value: 'slide', label: 'Slide' },
   { value: 'zoom', label: 'Zoom' },
 ];
+
+/*
+  Two lists, not one, because the same word means opposite things in the two
+  transitions (SPEC 12 §4.2): a wipe's direction is where the reveal *starts*, and a
+  slide's is which way the picture *travels*. One shared list would label one of them
+  wrongly — and an earlier version did exactly that, disagreeing with the engine.
+*/
+const WIPE_DIRECTION_OPTIONS = [
+  { value: 'left', label: 'Revealed from the left' },
+  { value: 'right', label: 'Revealed from the right' },
+  { value: 'up', label: 'Revealed from the top' },
+  { value: 'down', label: 'Revealed from the bottom' },
+  { value: 'diagonal-up', label: 'Revealed diagonally ↗' },
+  { value: 'diagonal-down', label: 'Revealed diagonally ↘' },
+];
+
+const SLIDE_DIRECTION_OPTIONS = [
+  { value: 'left', label: 'Travels left' },
+  { value: 'right', label: 'Travels right' },
+  { value: 'up', label: 'Travels up' },
+  { value: 'down', label: 'Travels down' },
+];
+
+/** The direction list a given transition type should offer, if any. */
+function directionOptionsFor(type: string) {
+  if (type === 'wipe') return WIPE_DIRECTION_OPTIONS;
+  if (type === 'slide') return SLIDE_DIRECTION_OPTIONS;
+  return null;
+}
 
 const ALIGNMENT_OPTIONS = [
   { value: 'center', label: 'Centred on the cut' },

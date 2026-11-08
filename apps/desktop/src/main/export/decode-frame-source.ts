@@ -35,6 +35,7 @@ import {
   applyEffectsToFrame,
   compositeRgb,
   compositeRgbMasked,
+  compositeRgbShifted,
   effectPassCount,
   effectsForLayer,
   evaluateProperty,
@@ -146,7 +147,14 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
   const transitionOpacityFor = (
     item: PlannedItem,
     timeUs: number,
-  ): { opacity: number; active: boolean; wipe?: WipeShape; dissolve?: DissolveShape } => {
+  ): {
+    opacity: number;
+    active: boolean;
+    wipe?: WipeShape;
+    dissolve?: DissolveShape;
+    offsetX?: number;
+    offsetY?: number;
+  } => {
     if (item.transitionIn) {
       const at = transitionAt(item.startUs, asTransition(item.transitionIn), timeUs);
       if (at) {
@@ -157,6 +165,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           // The incoming clip is the one the wipe reveals.
           wipe: at.state.wipe,
           dissolve: at.state.dissolve,
+          offsetX: at.state.toOffsetX,
+          offsetY: at.state.toOffsetY,
         };
       }
     }
@@ -167,8 +177,16 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
     if (successor?.transitionIn) {
       const at = transitionAt(successor.startUs, asTransition(successor.transitionIn), timeUs);
       // The outgoing side is not clipped: it stays whole underneath and the
-      // incoming clip is masked over it. Clipping both would leave a gap.
-      if (at) return { opacity: at.state.fromOpacity, active: true };
+      // incoming clip is masked over it. Clipping both would leave a gap. It does
+      // travel, though: a slide moves both pictures as one strip.
+      if (at) {
+        return {
+          opacity: at.state.fromOpacity,
+          active: true,
+          offsetX: at.state.fromOffsetX,
+          offsetY: at.state.fromOffsetY,
+        };
+      }
     }
     return { opacity: 1, active: false };
   };
@@ -425,6 +443,9 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         wipe?: WipeShape;
         /** Set while a dissolve is switching this layer's pixels in (SPEC 12 §4.2). */
         dissolve?: DissolveShape;
+        /** Travel from a running slide, in frame widths/heights (SPEC 12 §4.2). */
+        offsetX?: number;
+        offsetY?: number;
       }> = [];
 
       /*
@@ -475,6 +496,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               trackOrder: item.trackOrder ?? 0,
               wipe: transition.wipe,
               dissolve: transition.dissolve,
+              offsetX: transition.offsetX,
+              offsetY: transition.offsetY,
             });
           }
           continue;
@@ -497,6 +520,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           trackOrder: item.trackOrder ?? 0,
           wipe: transition.wipe,
           dissolve: transition.dissolve,
+          offsetX: transition.offsetX,
+          offsetY: transition.offsetY,
         });
       }
 
@@ -573,6 +598,20 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         // useful — operation.
         if (layer.effects.length > 0) {
           applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
+        }
+        if (layer.offsetX || layer.offsetY) {
+          // A slide translates the whole layer; the pixels it no longer covers keep
+          // what is underneath, so the two clips meet at a seam instead of the
+          // incoming one simply painting over the outgoing one.
+          compositeRgbShifted(
+            base,
+            rgb,
+            layer.opacity,
+            layer.blendMode,
+            layer.offsetX ?? 0,
+            layer.offsetY ?? 0,
+          );
+          continue;
         }
         if (layer.dissolve) {
           // A dissolve switches whole pixels from one clip to the other through a

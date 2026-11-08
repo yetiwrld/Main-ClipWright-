@@ -272,6 +272,71 @@ export function compositeRgb(
 }
 
 /**
+ * Composite a layer shifted horizontally by a fraction of the frame (SPEC 12 §4.2,
+ * `slide`).
+ *
+ * A slide moves the picture, not its opacity: the incoming clip enters from one
+ * side while the outgoing one exits the other, and mid-transition both are on
+ * screen. The shift is expressible only as a translated composite — an offset in
+ * the item's geometry would be baked into the decoder and could not animate without
+ * one decoder per frame.
+ *
+ * Pixels the layer no longer covers keep whatever is underneath, which is what makes
+ * the two clips meet at a seam rather than overlapping. `offsetX` is in frame widths
+ * and positive moves the layer right.
+ */
+export function compositeRgbShifted(
+  base: RgbFrame,
+  layer: RgbFrame,
+  opacity: number,
+  mode: BlendMode,
+  offsetX: number,
+  offsetY = 0,
+): void {
+  const alpha = Math.min(1, Math.max(0, opacity));
+  if (alpha <= 0) return;
+  if (base.width !== layer.width || base.height !== layer.height) {
+    throw new Error(
+      `Cannot composite a ${layer.width}×${layer.height} layer onto a ${base.width}×${base.height} frame.`,
+    );
+  }
+  const shiftX = Math.round(offsetX * base.width);
+  const shiftY = Math.round(offsetY * base.height);
+  // A whole-frame shift that lands entirely off canvas contributes nothing; doing
+  // the loop anyway would walk every pixel to discover that.
+  if (Math.abs(shiftX) >= base.width || Math.abs(shiftY) >= base.height) return;
+
+  const out = base.data;
+  const src = layer.data;
+  const width = base.width;
+  const height = base.height;
+  const xFrom = Math.max(0, shiftX);
+  const xTo = Math.min(width, width + shiftX);
+  const yFrom = Math.max(0, shiftY);
+  const yTo = Math.min(height, height + shiftY);
+  for (let y = yFrom; y < yTo; y += 1) {
+    const sourceY = y - shiftY;
+    for (let x = xFrom; x < xTo; x += 1) {
+      const sourceX = x - shiftX;
+      const i = (y * width + x) * 3;
+      const j = (sourceY * width + sourceX) * 3;
+      if (mode === 'normal' && alpha >= 1) {
+        out[i] = src[j]!;
+        out[i + 1] = src[j + 1]!;
+        out[i + 2] = src[j + 2]!;
+        continue;
+      }
+      for (let channel = 0; channel < 3; channel += 1) {
+        const cb = out[i + channel]! / 255;
+        const cs = src[j + channel]! / 255;
+        const blended = blendChannel(mode, cb, cs);
+        out[i + channel] = (alpha * blended + (1 - alpha) * cb) * 255;
+      }
+    }
+  }
+}
+
+/**
  * Composite a layer through a per-pixel alpha mask (SPEC 12 §4.2, `wipe`).
  *
  * A wipe cannot be expressed as an opacity — which pixels belong to which side
