@@ -1,6 +1,6 @@
 import React from 'react';
 import { Film, Plus, Power, Trash2 } from 'lucide-react';
-import { Button, Card, EmptyState, IconButton, Input, Slider } from '@clipwright/design-system';
+import { Button, Card, EmptyState, IconButton, Input, Select, Slider } from '@clipwright/design-system';
 import {
   formatTimecode,
   quantizeUs,
@@ -177,6 +177,75 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
         </div>
       </Field>
 
+      {/*
+        Transitions (SPEC 12 §4) belong next to Opacity because that is where a
+        user looks for "how this clip comes in". The control is a mode picker
+        rather than a list of saved transitions because only one transition can
+        enter a clip, and its geometry is implied: it joins this clip to whatever
+        sits immediately before it on the track.
+      */}
+      <Field label="Transition in">
+        <Select
+          value={item.transitionIn?.type ?? 'none'}
+          ariaLabel="Transition entering this clip"
+          // A transition joins two clips, so a clip that is first on its track has
+          // nothing to join to. Disabling beats accepting the click and doing
+          // nothing, which reads as a broken control.
+          disabled={!previousClipOnTrack(state, item) && !item.transitionIn}
+          options={TRANSITION_OPTIONS}
+          onChange={(value) => {
+            const neighbour = previousClipOnTrack(state, item);
+            if (value === 'none') {
+              if (item.transitionIn) timeline.removeTransition(item.id);
+              return;
+            }
+            if (!neighbour) return;
+            if (item.transitionIn) {
+              timeline.updateTransition(item.id, { type: value as TransitionType });
+            } else {
+              // Half a second is short enough to keep the clips recognisable and
+              // long enough to see; the duration control below adjusts it.
+              timeline.addTransition(
+                item.trackId,
+                neighbour.id,
+                item.id,
+                value as TransitionType,
+                500_000,
+                'center',
+              );
+            }
+          }}
+        />
+      </Field>
+
+      {item.transitionIn && (
+        <Field label="Transition length">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+            <Slider
+              value={Math.round(item.transitionIn.durationUs / 10_000)}
+              min={4}
+              max={200}
+              step={1}
+              ariaLabel="Transition length in tens of milliseconds"
+              formatValue={(value) => `${(value / 100).toFixed(2)} s`}
+              onChange={(value) =>
+                timeline.updateTransition(item.id, { durationUs: Math.round(value * 10_000) })
+              }
+            />
+            <Select
+              value={item.transitionIn.alignment}
+              ariaLabel="Where the transition sits relative to the cut"
+              options={ALIGNMENT_OPTIONS}
+              onChange={(value) =>
+                timeline.updateTransition(item.id, {
+                  alignment: value as 'center' | 'start' | 'end',
+                })
+              }
+            />
+          </div>
+        </Field>
+      )}
+
       <Field label="Opacity">
         <Slider
           value={Math.round(item.opacity * 100)}
@@ -346,4 +415,56 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </label>
   );
+}
+
+type TransitionType =
+  | 'crossfade'
+  | 'dissolve'
+  | 'fade-black'
+  | 'dip-color'
+  | 'wipe'
+  | 'slide'
+  | 'zoom';
+
+/**
+ * The transitions the inspector offers.
+ *
+ * Labels describe what the user sees rather than the spec's internal name, because
+ * "dissolve" and "crossfade" are the pair most easily confused: one fades the new
+ * clip in against the old, the other fades the old one *out* as well.
+ */
+const TRANSITION_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'crossfade', label: 'Crossfade — both clips blend' },
+  { value: 'dissolve', label: 'Dissolve — new clip fades in over the old' },
+  { value: 'fade-black', label: 'Fade through black' },
+  { value: 'dip-color', label: 'Dip to colour' },
+  { value: 'wipe', label: 'Wipe' },
+  { value: 'slide', label: 'Slide' },
+  { value: 'zoom', label: 'Zoom' },
+];
+
+const ALIGNMENT_OPTIONS = [
+  { value: 'center', label: 'Centred on the cut' },
+  { value: 'start', label: 'Before the cut' },
+  { value: 'end', label: 'After the cut' },
+];
+
+/**
+ * The clip immediately before `item` on its own track.
+ *
+ * A transition joins two adjacent clips, so the inspector has to find the other
+ * half itself — the user picks one clip and the UI figures out what it is joining
+ * to. `null` when the clip is first on its track, which is also the case where the
+ * control is disabled: there is nothing to transition *from*.
+ */
+function previousClipOnTrack(
+  state: TimelineState,
+  item: TimelineState['items'][string],
+): TimelineState['items'][string] | null {
+  const before = Object.values(state.items)
+    .filter((other) => other.trackId === item.trackId && other.id !== item.id)
+    .filter((other) => other.startUs < item.startUs)
+    .sort((a, b) => b.startUs - a.startUs);
+  return before[0] ?? null;
 }

@@ -55,6 +55,9 @@ function fakeTimeline(state: TimelineState): TimelineApi {
     applyEffect: vi.fn(),
     removeEffect: vi.fn(),
     toggleEffectEnabled: vi.fn(),
+    addTransition: vi.fn(() => true),
+    updateTransition: vi.fn(() => true),
+    removeTransition: vi.fn(() => true),
   } as unknown as TimelineApi;
 }
 
@@ -159,5 +162,150 @@ describe('crop and transform', () => {
     const timeline = renderInspector(makeState());
     fireEvent.change(screen.getByLabelText('Rotation in degrees'), { target: { value: '400' } });
     expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { transform: { rotation: 180 } });
+  });
+});
+
+describe('ItemInspector transitions', () => {
+  /** Two adjacent clips on the main track, so a transition is possible. */
+  function withNeighbour(overrides: Partial<TimelineState['items'][string]> = {}): TimelineState {
+    const base = makeState(overrides);
+    const item = base.items['item-1']!;
+    // Put the clip second on its track and add a predecessor that ends where it
+    // starts — the arrangement `addTransition` requires.
+    const first = {
+      ...createMediaItem({
+        id: 'item-0',
+        trackId: item.trackId,
+        label: 'Before',
+        mediaId: 'media-0',
+        type: 'video',
+        startUs: 0,
+        durationUs: 2_000_000,
+        sourceDurationUs: 10_000_000,
+      }),
+    };
+    const second = { ...item, startUs: 2_000_000, durationUs: 2_000_000 };
+    return {
+      ...base,
+      tracks: base.tracks.map((track) =>
+        track.id === item.trackId ? { ...track, itemIds: [first.id, second.id] } : track,
+      ),
+      items: { [first.id]: first, [second.id]: second },
+    } as TimelineState;
+  }
+
+  it('shows a transition control', () => {
+    const state = withNeighbour();
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.getByLabelText('Transition entering this clip')).toBeTruthy();
+  });
+
+  it('disables the control for a clip that is first on its track', () => {
+    // Nothing to transition from. Accepting the click and doing nothing would read
+    // as a broken control rather than an unavailable one.
+    const state = makeState();
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    const control = screen.getByLabelText('Transition entering this clip');
+    expect((control as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('creates a transition when one is chosen', () => {
+    const state = withNeighbour();
+    const timeline = fakeTimeline(state);
+    timeline.addTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+
+    fireEvent.click(screen.getByLabelText('Transition entering this clip'));
+    fireEvent.click(screen.getByText(/Crossfade/));
+    // The inspector finds the predecessor itself: the user picks one clip.
+    expect(timeline.addTransition).toHaveBeenCalledWith(
+      state.items['item-1']!.trackId,
+      'item-0',
+      'item-1',
+      'crossfade',
+      500_000,
+      'center',
+    );
+  });
+
+  it('changes the type of an existing transition instead of adding a second', () => {
+    const state = withNeighbour({
+      transitionIn: {
+        id: 'tr',
+        type: 'crossfade',
+        durationUs: 500_000,
+        alignment: 'center',
+        params: {},
+        easing: 'easeInOut',
+        crossfadeAudio: true,
+      },
+    } as never);
+    const timeline = fakeTimeline(state);
+    timeline.updateTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+
+    fireEvent.click(screen.getByLabelText('Transition entering this clip'));
+    fireEvent.click(screen.getByText(/Zoom/));
+    expect(timeline.updateTransition).toHaveBeenCalledWith('item-1', { type: 'zoom' });
+    expect(timeline.addTransition).not.toHaveBeenCalled();
+  });
+
+  it('removes a transition when None is chosen', () => {
+    const state = withNeighbour({
+      transitionIn: {
+        id: 'tr',
+        type: 'crossfade',
+        durationUs: 500_000,
+        alignment: 'center',
+        params: {},
+        easing: 'easeInOut',
+        crossfadeAudio: true,
+      },
+    } as never);
+    const timeline = fakeTimeline(state);
+    timeline.removeTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+
+    fireEvent.click(screen.getByLabelText('Transition entering this clip'));
+    fireEvent.click(screen.getByText('None'));
+    expect(timeline.removeTransition).toHaveBeenCalledWith('item-1');
+  });
+
+  it('offers a duration and alignment once a transition exists', () => {
+    const state = withNeighbour({
+      transitionIn: {
+        id: 'tr',
+        type: 'crossfade',
+        durationUs: 500_000,
+        alignment: 'center',
+        params: {},
+        easing: 'easeInOut',
+        crossfadeAudio: true,
+      },
+    } as never);
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.getByLabelText('Transition length in tens of milliseconds')).toBeTruthy();
+    expect(screen.getByLabelText('Where the transition sits relative to the cut')).toBeTruthy();
+  });
+
+  it('writes a duration change through the command', () => {
+    const state = withNeighbour({
+      transitionIn: {
+        id: 'tr',
+        type: 'crossfade',
+        durationUs: 500_000,
+        alignment: 'center',
+        params: {},
+        easing: 'easeInOut',
+        crossfadeAudio: true,
+      },
+    } as never);
+    const timeline = fakeTimeline(state);
+    timeline.updateTransition = vi.fn(() => true);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Transition length in tens of milliseconds'), {
+      target: { value: '100' },
+    });
+    expect(timeline.updateTransition).toHaveBeenCalledWith('item-1', { durationUs: 1_000_000 });
   });
 });
