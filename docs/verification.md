@@ -156,6 +156,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 
 | Gap | Why |
 |---|---|
+| CI has passed on Windows | **Yes, run 42442804025** on `windows-latest`: install from the lockfile, `pnpm verify` (lint, typecheck, 1090 tests, both bundles, `check-repo`), the third-party-notice check, the launchable-package check and the gitleaks scan — every step green. This was the first green run: before it, `ci.yml` had never executed at all, because two pinned action SHAs resolved to no commit |
+| CI catches Windows-only breakage | That green run is the evidence, not the claim: the first executions found six defects that Linux could not (three path-handling bugs in the checks and tests, two ffmpeg-dependent suites with no platform guard, and a line-ending assumption), each now fixed |
 | A packaged Windows installer has been produced | No installer exists here: `electron-builder` needs the Electron binary and the Windows toolchain, and neither can be downloaded in this environment (`Cannot compute electron version from installed node modules`). The app bundle itself is built and verified; the packaging step after it never ran |
 | `electron-builder` has ever completed | **Never, in any environment.** It now gets as far as reading the config (`loaded configuration … electron-builder.yml`) and pinning `electronVersion=34.2.0`, then fails cross-compiling `better-sqlite3` from Linux — `node-gyp does not support cross-compiling native modules from source`. The release workflow runs on `windows-latest`, where that step is native, so the configuration is no longer what stands in the way; the Windows toolchain is |
 | A real GitHub release, end to end | No published release exists yet; the tests use a fake network with real cryptography |
