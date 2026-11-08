@@ -28,8 +28,10 @@ import { YtDlpService } from './updater/ytdlp-service.js';
 import {
   BOOT_CONFIRM_MS,
   backupFolderName,
+  createUpdateError,
   decideBootAction,
   recoveryMessage,
+  type UpdateError,
   type UpdateJournal,
 } from '@clipwright/update-core';
 import { STARTUP_CHECK_DELAY_MS, autoCheckIntervalMs, shouldAutoCheck } from '@clipwright/update-core';
@@ -183,6 +185,13 @@ let journalStore: UpdateJournalStore | null = null;
 
 /** SPEC 15 §9 — the yt-dlp updater, separate from app updates. */
 let ytDlpService: YtDlpService | null = null;
+
+/**
+ * SPEC 15 §7.1 — the `prepareInstall` hook handed to the update service. Defined
+ * once startup has the workspace paths, and assigns to the service's options
+ * through the module-scope reference below.
+ */
+let updatePrepareInstall: (() => Promise<{ ok: boolean; error?: UpdateError }>) | null = null;
 
 /** Last bundled-tool verification result (SPEC 15 §6.1); null while checking. */
 let binIntegrityReport: Awaited<ReturnType<typeof verifyBundledTools>> | null = null;
@@ -1040,6 +1049,38 @@ app.whenReady().then(async () => {
     ? join(process.resourcesPath, 'bin')
     : resolve(process.cwd(), 'resources', 'bin');
 
+  // SPEC 15 §7.1: prepareInstall runs before the installer does. If it fails,
+  // nothing is installed.
+  updatePrepareInstall = async () => {
+    const store = journalStore;
+    if (!store) return { ok: true };
+    const from = app.getVersion();
+    const to = updateService?.snapshot().release?.version ?? from;
+
+    let backup;
+    try {
+      backup = await store.backupBeforeInstall(from, new Date().toISOString());
+    } catch (error) {
+      return {
+        ok: false,
+        error: createUpdateError('unknown', `Your settings could not be backed up: ${String(error)}`),
+      };
+    }
+
+    if (backup.failed.length > 0) {
+      // A partial backup is not a reason to block a security update, but the
+      // user has to be able to find out that one file was not saved.
+      logger?.warn('Backup was incomplete before install', { failed: backup.failed });
+    }
+
+    // §7.1(c): keep the installer we are running from, so there is a way back.
+    const runningInstaller = process.env['PORTABLE_EXECUTABLE_FILE'] ?? app.getPath('exe');
+    await store.cachePreviousInstaller(from, runningInstaller).catch(() => false);
+
+    await store.beginInstall(from, to);
+    return { ok: true };
+  };
+
   // SPEC 15 §9: yt-dlp has its own updater, its own cadence and its own storage.
   // It writes to user data, never to binDir, which is read-only in a real install.
   ytDlpService = new YtDlpService({ userDataDir: userData, bundledDir: binDir });
@@ -1105,6 +1146,8 @@ app.whenReady().then(async () => {
       },
       logger: log,
       isInstallerSigned: () => Boolean(process.env.CSC_LINK),
+      // §7.1: backups, the cached installer and the journal before anything runs.
+      prepareInstall: () => updatePrepareInstall?.() ?? Promise.resolve({ ok: true }),
     });
     startAutomaticUpdateChecks(storage, log);
   }
@@ -1144,6 +1187,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // SPEC 15 §7.1(a): closing every database checkpoints its write-ahead log, so
+  // this is what makes "save before installing" true. `quitAndInstall` triggers
+  // this handler like any other quit — the installer waits for the process to
+  // exit, so there is no window in which a write could still be buffered.
   try {
     storageService?.closeAll();
   } catch {
