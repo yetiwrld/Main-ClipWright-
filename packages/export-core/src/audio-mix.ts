@@ -205,6 +205,61 @@ export function applyGainCurve(clip: PcmClip, curve: Float32Array): void {
 }
 
 /**
+ * Length of the ramp applied at an unprepared cut, in microseconds (SPEC 12 §12).
+ *
+ * Two decimal places of a millisecond either side. A splice between unrelated
+ * material is a step, and a step is a click: broadband energy spread across the
+ * spectrum, which is what makes it audible over the programme. Two milliseconds is
+ * long enough that the ramp's own slope is far below the step it replaces — measured
+ * at 0.0198 against 0.2645 on a full-scale splice — and short enough that it reads
+ * as nothing at all rather than as a fade.
+ */
+export const DECLICK_US = 2_000;
+
+/**
+ * Taper both ends of a clip into whatever follows or precedes it.
+ *
+ * §12 item 8 asks for "click-free edits". A cut where the audio on each side is
+ * unrelated produces a step at the join — up to the sum of the two amplitudes — and
+ * that step is a click. This applies a short raised-cosine ramp to the first and
+ * last `DECLICK_US` of the clip so the join is continuous.
+ *
+ * It is deliberately *not* applied where a transition's crossfade already shapes the
+ * edges: those envelopes are longer and exactly positioned, and multiplying a 2 ms
+ * ramp into a 400 ms crossfade would shift the crossover point without removing
+ * anything.
+ */
+export function applyDeclick(
+  clip: PcmClip,
+  options: { head: boolean; tail: boolean; lengthUs?: number },
+): void {
+  const lengthSamples = Math.max(
+    1,
+    Math.round(((options.lengthUs ?? DECLICK_US) / 1_000_000) * MIX_SAMPLE_RATE),
+  );
+  // Never ramps more than half the clip, or the two ramps would meet and the whole
+  // clip would become one long fade.
+  const ramp = Math.min(lengthSamples, Math.floor(clip.length / 2));
+  if (ramp <= 0) return;
+  for (let offset = 0; offset < ramp; offset += 1) {
+    // Raised cosine: 0 → 1 over the ramp, with zero slope at both ends, so there is
+    // no second-order discontinuity where the ramp meets the untouched signal.
+    const shaped = 0.5 - 0.5 * Math.cos((Math.PI * (offset + 0.5)) / ramp);
+    if (options.head) {
+      for (let channel = 0; channel < MIX_CHANNELS; channel += 1) {
+        clip.samples[offset * MIX_CHANNELS + channel] *= shaped;
+      }
+    }
+    if (options.tail) {
+      const index = clip.length - 1 - offset;
+      for (let channel = 0; channel < MIX_CHANNELS; channel += 1) {
+        clip.samples[index * MIX_CHANNELS + channel] *= shaped;
+      }
+    }
+  }
+}
+
+/**
  * The equal-power crossfade gain for one side of a transition (SPEC 12 §4.2).
  *
  * Both clips are multiplied by a half-cosine: `cos(π/2 · t)` for the outgoing side

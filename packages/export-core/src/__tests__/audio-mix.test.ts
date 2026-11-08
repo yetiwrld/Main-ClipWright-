@@ -6,6 +6,8 @@ import {
   MIX_SAMPLE_RATE,
   amplitudeToDb,
   applyCrossfade,
+  applyDeclick,
+  DECLICK_US,
   applyGainCurve,
   applyItemProcessing,
   equalPowerGain,
@@ -486,5 +488,81 @@ describe('equal-power crossfade (SPEC 12 §4.2)', () => {
       expect(halfwayAfter).toBeLessThan(halfwayBefore);
       expect(halfwayAfter).toBeGreaterThan(0);
     });
+  });
+});
+
+/**
+ * SPEC 12 §12 item 8 — "click-free edits".
+ *
+ * A splice between unrelated material is a step, and a step is a click: broadband
+ * energy spread across the spectrum, audible over the programme. A short raised
+ * cosine at each edge removes it without being long enough to hear as a fade.
+ */
+describe('de-click (SPEC 12 §12 item 8)', () => {
+  /** A constant-level clip, so any ramp in it is visible directly. */
+  const flat = (seconds: number): PcmClip => {
+    const clip = createClip(Math.round(seconds * MIX_SAMPLE_RATE));
+    for (let i = 0; i < clip.length; i += 1) {
+      clip.samples[i * 2] = 1;
+      clip.samples[i * 2 + 1] = 1;
+    }
+    return clip;
+  };
+
+  it('starts and ends at silence', () => {
+    const clip = flat(1);
+    applyDeclick(clip, { head: true, tail: true });
+    expect(Math.abs(clip.samples[0]!)).toBeLessThan(0.01);
+    expect(Math.abs(clip.samples[(clip.length - 1) * 2]!)).toBeLessThan(0.01);
+  });
+
+  it('leaves the middle of the clip untouched', () => {
+    // The ramp must be a taper, not a fade: a clip long enough to have a middle
+    // must still be at full level there.
+    const clip = flat(1);
+    applyDeclick(clip, { head: true, tail: true });
+    const middle = Math.round(clip.length / 2) * 2;
+    expect(clip.samples[middle]).toBe(1);
+  });
+
+  it('confines the ramp to the documented length', () => {
+    // Two milliseconds at the mix rate, rounded up, and no more — a longer taper
+    // would start to be audible as a fade.
+    const clip = flat(1);
+    applyDeclick(clip, { head: true, tail: false });
+    const rampSamples = Math.round((DECLICK_US / 1_000_000) * MIX_SAMPLE_RATE);
+    // Just past the ramp the level is back to unity.
+    expect(clip.samples[rampSamples * 2]).toBe(1);
+    // And inside it, it is not.
+    expect(clip.samples[Math.floor(rampSamples / 2) * 2]).toBeLessThan(1);
+  });
+
+  it('tapers only the edges it is asked to', () => {
+    const clip = flat(1);
+    applyDeclick(clip, { head: true, tail: false });
+    expect(Math.abs(clip.samples[0]!)).toBeLessThan(0.01);
+    expect(Math.abs(clip.samples[(clip.length - 1) * 2]!)).toBe(1);
+  });
+
+  it('never ramps more than half the clip', () => {
+    // A clip shorter than two ramps would otherwise be ramped end to end and
+    // vanish; it should lose its edges and keep a peak in the middle.
+    const clip = createClip(8);
+    for (let i = 0; i < clip.length; i += 1) clip.samples[i * 2] = 1;
+    applyDeclick(clip, { head: true, tail: true, lengthUs: 10_000_000 });
+    expect(Math.max(...Array.from(clip.samples))).toBeGreaterThan(0);
+  });
+
+  it('has zero slope where it meets the untouched signal', () => {
+    // A raised cosine, not a linear ramp: a linear ramp leaves a corner at its
+    // inner end, which is a (much smaller) click of its own.
+    const clip = flat(1);
+    applyDeclick(clip, { head: true, tail: false });
+    const rampSamples = Math.round((DECLICK_US / 1_000_000) * MIX_SAMPLE_RATE);
+    const nearEnd = clip.samples[(rampSamples - 2) * 2]!;
+    const atEnd = clip.samples[(rampSamples + 2) * 2]!;
+    // The last steps of the ramp are much smaller than a linear ramp's step would be.
+    expect(1 - nearEnd).toBeLessThan(0.02);
+    expect(atEnd).toBe(1);
   });
 });

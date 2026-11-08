@@ -93,6 +93,51 @@ describe('collectExportItems', () => {
     expect(caption.captionSegment).toEqual({ text: 'Hello' });
   });
 
+  /**
+   * SPEC 12 §4.2 / §12 item 8 — "mute/solo (export honours mute; solo per
+   * setting)". Mute reaches the export; solo never did. Silencing a track by
+   * soloing another one previewed correctly and then exported with every track
+   * audible, which is the worst kind of disagreement: the user hears the mistake
+   * only after the render finishes.
+   */
+  it('silences tracks that are not soloed when another one is', () => {
+    const state = makeState();
+    // Two audio-bearing tracks, so "the others" is a real set.
+    (state.tracks[0] as { solo: boolean }).solo = true;
+    (state as { tracks: unknown[] }).tracks.push({
+      id: 'track-music', role: 'music', kind: 'audio', name: 'Music', order: 3,
+      hidden: false, locked: false, muted: false, solo: false, heightPx: 48, auto: false,
+      itemIds: ['item-4'],
+    });
+    (state.items as Record<string, unknown>)['item-4'] = {
+      id: 'item-4', trackId: 'track-music', type: 'audio', mediaId: 'media-2',
+      startUs: 0, durationUs: 5_000_000, sourceInUs: 0, sourceDurationUs: 5_000_000,
+    };
+
+    const items = collectExportItems(state);
+    // The soloed track's audio survives...
+    expect(items.find((item) => item.id === 'item-1')!.muted).toBe(false);
+    // ...and the un-soloed one is silent. Its *video* would still be drawn if it
+    // had any; only the sound is suppressed.
+    expect(items.find((item) => item.id === 'item-4')!.muted).toBe(true);
+  });
+
+  it('leaves everything audible when nothing is soloed', () => {
+    // The flag only takes effect while at least one track is soloed; an unsoloed
+    // project must not silently mute itself.
+    const state = makeState();
+    (state as { tracks: unknown[] }).tracks.push({
+      id: 'track-music', role: 'music', kind: 'audio', name: 'Music', order: 3,
+      hidden: false, locked: false, muted: false, solo: false, heightPx: 48, auto: false,
+      itemIds: ['item-4'],
+    });
+    (state.items as Record<string, unknown>)['item-4'] = {
+      id: 'item-4', trackId: 'track-music', type: 'audio', mediaId: 'media-2',
+      startUs: 0, durationUs: 5_000_000, sourceInUs: 0, sourceDurationUs: 5_000_000,
+    };
+    expect(collectExportItems(state).find((item) => item.id === 'item-4')!.muted).toBe(false);
+  });
+
   it('treats a muted track as silent without dropping its video', () => {
     const state = makeState();
     (state.tracks[0] as { muted: boolean }).muted = true;

@@ -157,6 +157,14 @@ This document tracks architectural scope boundaries and honest limitations per `
      audible as a slight step at the cut on material that started at a source's
      very beginning. Padding with silence was rejected: it would put a silent hole
      in the middle of the mix.
+   - **A cut is tapered by 2 ms, not sample-aligned.** §12 item 8 asks for
+     click-free edits. Every hard edge — the head and tail of a clip that no
+     transition already shapes — gets a 2 ms raised-cosine ramp, which is short
+     enough to be inaudible on speech and long enough to cut a full-scale step to
+     a small fraction of it. It is not a zero-crossing search: the taper multiplies
+     rather than moves samples, so a cut on material that is not near zero still
+     loses that 2 ms of level. Where a crossfade already shapes an edge the taper is
+     skipped, since the crossfade's own envelope is longer and precisely placed.
    - **`zoom` resamples with nearest-neighbour.** The scale changes every frame, so
      a bilinear sample would be re-filtered on each one; nearest keeps it to a
      multiply per pixel, and the error it adds is far below the 4:2:0 rounding the
@@ -188,9 +196,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-11. **Audio effects are not applied.** Gain, fades, panning, ducking, loudness
-   normalisation and transition crossfades are; the equaliser, reverb and other
-   audio-rack effects are not yet in the mix.
+11. **Audio effects are mostly not applied.** Gain, fades, panning, ducking,
+   loudness normalisation, transition crossfades, per-track mute and solo, and the
+   2 ms de-click taper are; the equaliser, reverb and other audio-rack effects are
+   not yet in the mix.
 12. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 

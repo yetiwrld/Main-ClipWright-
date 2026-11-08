@@ -263,6 +263,18 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
   if (!state) return [];
   const hiddenTracks = new Set(state.tracks.filter((track) => track.hidden).map((track) => track.id));
   const mutedTracks = new Set(state.tracks.filter((track) => track.muted).map((track) => track.id));
+  /*
+    Solo silences every *other* audio-bearing track, and only while at least one
+    track is soloed (SPEC 12 §4.2, §12 item 8). The preview has always resolved it
+    this way; the export did not, so a soloed project previewed with one track and
+    exported with all of them. Computed here rather than in the planner because it
+    is a property of the composition's track flags, which is exactly what this
+    function already reduces.
+  */
+  const anySolo = state.tracks.some((track) => track.solo);
+  const silencedBySolo = new Set(
+    anySolo ? state.tracks.filter((track) => !track.solo).map((track) => track.id) : [],
+  );
   const items: Array<Record<string, unknown>> = [];
   for (const item of Object.values(state.items)) {
     if (!item) continue;
@@ -278,7 +290,13 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       sourceInUs: item.sourceInUs ?? 0,
       sourceDurationUs: item.sourceDurationUs,
       disabled: item.disabled ?? false,
-      muted: Boolean(item.muted) || mutedTracks.has(item.trackId) || !hasAudioSource,
+      muted:
+        Boolean(item.muted) ||
+        mutedTracks.has(item.trackId) ||
+        // A non-soloed track is silent, but its video still renders: solo is an
+        // audio decision, and hiding the picture would be a different feature.
+        silencedBySolo.has(item.trackId) ||
+        !hasAudioSource,
       hasAudio: hasAudioSource,
       captionSegment: item.captionSegment,
       // Without this every caption burns in with the project default style, so a

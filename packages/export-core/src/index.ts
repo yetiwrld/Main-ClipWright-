@@ -122,6 +122,8 @@ export {
   clipEndSamples,
   applyItemProcessing,
   applyCrossfade,
+  applyDeclick,
+  DECLICK_US,
   equalPowerGain,
   mixClipInto,
   duckingCurve,

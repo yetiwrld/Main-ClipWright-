@@ -87,7 +87,7 @@ agree about which clip is on top, and transitions draw both clips across the
 overlap in the preview and, in the file, crossfade, dip, push, zoom, wipe or
 dissolve them — a wipe is a real per-pixel reveal, masked in the export and clipped in the
 preview, and a dissolve switches whole pixels through a deterministic noise field
-rather than fading them. A zoom scales and crossfades in both, resampled nearest-neighbour so the per-frame cost stays at one multiply per pixel. Linked audio crosses over with the picture through an equal-power envelope (`cos`/`sin` on a quarter turn), so the level stays flat instead of dipping in the middle the way a linear fade would; the transition's "Crossfade audio" flag chooses between that and a hard cut. What is still
+rather than fading them. A zoom scales and crossfades in both, resampled nearest-neighbour so the per-frame cost stays at one multiply per pixel. Linked audio crosses over with the picture through an equal-power envelope (`cos`/`sin` on a quarter turn), so the level stays flat instead of dipping in the middle the way a linear fade would; the transition's "Crossfade audio" flag chooses between that and a hard cut. Hard edges that no transition shapes carry a 2 ms raised-cosine taper, so a cut is not a step and does not click; mute silences a track in the file as well as the preview, and solo silences the others while their picture still renders. What is still
 the nine required effects from §12 §3.2 are implemented in CPU code and applied to
 every exported frame (the preview approximates them with CSS filters and says so
 where it cannot). A clip's chain can be reordered, copied and pasted, and an

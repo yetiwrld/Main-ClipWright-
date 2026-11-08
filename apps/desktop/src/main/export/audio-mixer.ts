@@ -21,6 +21,7 @@ import {
   applyGainCurve,
   applyItemProcessing,
   applyCrossfade,
+  applyDeclick,
   createClip,
   duckingCurve,
   fitLength,
@@ -167,6 +168,18 @@ export async function buildAudioMix(options: {
       startUs: item.timelineStartUs,
       durationUs: item.sourceDurationUs,
     });
+    /*
+      Click-free edits (SPEC 12 §12 item 8). A cut where the two sides are unrelated
+      is a step, and a step is a click. The taper goes only where a crossfade is not
+      already shaping the edge: those envelopes are longer and precisely placed, and
+      multiplying a 2 ms ramp into them would move the crossover point.
+    */
+    const hasIncomingFade = item.crossfades?.some((crossfade) => crossfade.side === 'in') ?? false;
+    const hasOutgoingFade = item.crossfades?.some((crossfade) => crossfade.side === 'out') ?? false;
+    if (!hasIncomingFade || !hasOutgoingFade) {
+      applyDeclick(clip, { head: !hasIncomingFade, tail: !hasOutgoingFade });
+    }
+
     for (const crossfade of item.crossfades ?? []) {
       if (crossfade.durationUs <= 0) continue;
       // Applied after the item's own fades so the two compose: a clip that fades out

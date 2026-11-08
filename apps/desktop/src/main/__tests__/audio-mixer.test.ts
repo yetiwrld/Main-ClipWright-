@@ -77,8 +77,20 @@ function makeConstantToneFile(
       '-hide_banner', '-nostdin',
       '-f', 'lavfi', '-i',
       `sine=frequency=${options.frequency ?? 300}:sample_rate=48000:duration=${seconds}`,
-      '-af', `volume=${volume}`,
-      '-ac', '2', '-c:a', 'aac', '-b:a', '192k',
+      /*
+        `volume=` is a *multiplier*, not a target level: passing 0.6 produced a file
+        peaking at 0.08 rather than 0.6, because the sine the filter generates is
+        already well below full scale. The ratio below is measured — a raw sine
+        peaks around 0.125 — so this lands near 0.6 whatever the frequency.
+      */
+      '-af', `volume=${(volume * 4.8).toFixed(3)}`,
+      /*
+        Lossless PCM on purpose. An AAC source answers a one-second read with 47104
+        frames (46 whole 1024-sample packets) and `fitLength` pads the missing 896
+        with silence, which turns every intended hard cut into a 19 ms gap — no step
+        left to measure. WAV returns exactly the frames asked for.
+      */
+      '-ac', '2', '-c:a', 'pcm_s16le',
       '-y', path,
     ],
     { stdio: 'ignore' },
@@ -436,8 +448,8 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     // incoming clip has handles. Giving it `sourceInUs: 0` — as an earlier version
     // of this test did — leaves nothing to reveal, and the crossfade degenerates to
     // a fade-in from the clip's own first sample by design.
-    const outgoing = makeConstantToneFile('xf-a.mp4', { seconds: 2.5, volume: 0.6, frequency: 300 });
-    const incoming = makeConstantToneFile('xf-b.mp4', { seconds: 2.5, volume: 0.6, frequency: 1500 });
+    const outgoing = makeConstantToneFile('xf-a.wav', { seconds: 2.5, volume: 0.6, frequency: 300 });
+    const incoming = makeConstantToneFile('xf-b.wav', { seconds: 2.5, volume: 0.6, frequency: 1500 });
     const plan = buildExportPlan(
       makeSettings({
         rangeUs: [0, 2_000_000],
@@ -504,6 +516,115 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     // outgoing tone.
     const beforeCut = energyAt(1500, 0.9, 0.96);
     expect(beforeCut, 'the incoming clip is audible before its own start').toBeGreaterThan(1e-3);
+
+    /*
+      Overlap alone does not prove an *equal-power* crossfade: multiplying both clips
+      by 1 leaves them overlapping too, only twice as loud in the middle. The
+      envelope's defining property is that the summed power stays constant, so the
+      RMS through the window has to match the RMS of either clip alone rather than
+      climb to sqrt(2) times it. Measured on the outgoing clip before the window
+      opens, where nothing overlaps.
+    */
+    const rmsIn = (fromSeconds: number, toSeconds: number): number => {
+      const from = Math.round(fromSeconds * MIX_SAMPLE_RATE);
+      const to = Math.round(toSeconds * MIX_SAMPLE_RATE);
+      let sum = 0;
+      for (let i = from; i < to; i += 1) sum += left(i) * left(i);
+      return Math.sqrt(sum / Math.max(1, to - from));
+    };
+    const soloRms = rmsIn(0.5, 0.75);
+    const overlapRms = rmsIn(window[0], window[1]);
+    const ratio = overlapRms / soloRms;
+    expect(ratio, `overlap/solo RMS ${ratio.toFixed(3)} should stay near 1`).toBeGreaterThan(0.85);
+    expect(ratio, `overlap/solo RMS ${ratio.toFixed(3)} should stay near 1`).toBeLessThan(1.15);
+  }, 120_000);
+
+  /**
+   * SPEC 12 §12 item 8 — "click-free edits". A hard cut between two clips whose
+   * audio is unrelated is a step in the mix, and a step is a click. This measures
+   * the largest sample-to-sample jump around the splice.
+   *
+   * Two *unrelated* tones are essential: identical material joins seamlessly and the
+   * test could not fail, which is the trap the earlier crossfade test fell into.
+   */
+  it('tapers a hard cut so it does not click', async () => {
+    /*
+      The two tones both start at phase 0 and the clip is exactly one second, so each
+      ends a whole number of cycles in — meaning the *natural* step at the splice is
+      small whatever the frequencies are. The real click comes from the source not
+      starting at a zero crossing, which `sourceInUs` can produce: offsetting the
+      second clip mid-cycle puts a large discontinuity there for the taper to remove.
+    */
+    // Two seconds of source for a one-second item: the second clip is offset by a
+    // quarter cycle, so it needs to read past where a one-second file would end.
+    const first = makeConstantToneFile('dc-a.wav', { seconds: 2, volume: 0.6, frequency: 300 });
+    const second = makeConstantToneFile('dc-b.wav', { seconds: 2, volume: 0.6, frequency: 100 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 2_000_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+          },
+          {
+            id: 'b', trackId: 'track-audio', type: 'audio', mediaId: 'media-b',
+            startUs: 1_000_000, durationUs: 1_000_000,
+            // 1/400 s into a 100 Hz tone is a quarter cycle — the waveform is at its
+            // peak, so the splice lands on the largest step the material can give.
+            sourceInUs: 2_500, sourceDurationUs: 2_000_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            // No transition at all: this is the hard cut the taper is for.
+          },
+        ] as never,
+      }),
+    );
+    const wavPath = join(TMP, 'declick.wav');
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => (mediaId === 'media-a' ? first : second)),
+      wavPath,
+    });
+
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    const at = (i: number) => decoded.samples[i * 2] ?? 0;
+
+    /** Largest sample-to-sample step in a window, relative to the largest in the programme. */
+    const stepAround = (centreSeconds: number, halfWidthSeconds: number): number => {
+      const centre = Math.round(centreSeconds * MIX_SAMPLE_RATE);
+      const half = Math.round(halfWidthSeconds * MIX_SAMPLE_RATE);
+      let worst = 0;
+      for (let i = centre - half; i < centre + half; i += 1) {
+        worst = Math.max(worst, Math.abs(at(i) - at(i - 1)));
+      }
+      return worst;
+    };
+
+
+    /*
+      The bound is measured from the taper itself rather than derived: compute the
+      largest finite difference a raised-cosine ramp of this length can produce, at
+      the mix rate, for a 0.6-amplitude signal. Deriving it on paper went wrong
+      twice (the closed form is `π/2N` per sample of the *envelope*, which is a
+      different quantity from the second difference), so the test asks the same
+      arithmetic the implementation uses instead of restating it.
+    */
+    const rampSamples = Math.round(0.002 * MIX_SAMPLE_RATE);
+    let envelopeStep = 0;
+    for (let k = 0; k + 1 < rampSamples; k += 1) {
+      const a = 0.5 - 0.5 * Math.cos((Math.PI * (k + 0.5)) / rampSamples);
+      const b = 0.5 - 0.5 * Math.cos((Math.PI * (k + 1.5)) / rampSamples);
+      envelopeStep = Math.max(envelopeStep, Math.abs(b - a));
+    }
+    // The signal is a tone times that envelope, so its own per-sample motion adds
+    // to the ramp's. `ownSlope` measures that directly.
+    const ownSlope = stepAround(0.5, 0.01);
+    const bound = envelopeStep * 0.6 + ownSlope;
+    const atCut = stepAround(1.0, 0.005);
+    expect(atCut, `step at the cut ${atCut.toFixed(4)} vs bound ${bound.toFixed(4)}`).toBeLessThan(
+      bound,
+    );
   }, 120_000);
 
   /**
@@ -511,8 +632,8 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
    * the overlap rather than being carried around and ignored.
    */
   it('cuts the audio when crossfadeAudio is switched off', async () => {
-    const outgoing = makeConstantToneFile('cut-a.mp4', { seconds: 2.5, volume: 0.6, frequency: 300 });
-    const incoming = makeConstantToneFile('cut-b.mp4', { seconds: 2.5, volume: 0.6, frequency: 1500 });
+    const outgoing = makeConstantToneFile('cut-a.wav', { seconds: 2.5, volume: 0.6, frequency: 300 });
+    const incoming = makeConstantToneFile('cut-b.wav', { seconds: 2.5, volume: 0.6, frequency: 1500 });
     const plan = buildExportPlan(
       makeSettings({
         rangeUs: [0, 2_000_000],
