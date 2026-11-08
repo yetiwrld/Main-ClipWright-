@@ -125,6 +125,9 @@ function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) return entry.name === '__tests__' ? [] : walk(full);
+    // `.d.ts` files are ambient declarations: nothing imports them, and the
+    // compiler picks them up by presence. They are not orphan candidates.
+    if (/\.d\.ts$/.test(entry.name)) return [];
     return /\.tsx?$/.test(entry.name) ? [full] : [];
   });
 }
@@ -177,7 +180,54 @@ if (existsSync(REPORT)) {
 }
 
 /* ------------------------------------------------------------------ *
- * 6. The unsigned notice appears everywhere §6.4 and acceptance item 10 say.
+ * 6. No module may exist only for its tests.
+ *
+ * `main/ipc.ts` was reachable only from a test file. It exported six shortcuts
+ * with empty handlers, so the test could assert the keys were listed while
+ * nothing in the app ever pressed them. A module with no production importer is
+ * either dead code or a feature nobody wired up, and both are worth knowing
+ * about before a user finds out.
+ *
+ * Tests are excluded from the importer search on purpose — importing it from a
+ * test is exactly the situation this catches.
+ * ------------------------------------------------------------------ */
+const sourceDirs = [
+  join(ROOT, 'apps', 'desktop', 'src', 'main'),
+  join(ROOT, 'apps', 'desktop', 'src', 'renderer'),
+];
+
+function listSources(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : listSources(full);
+    // `.d.ts` files are ambient declarations: nothing imports them, and the
+    // compiler picks them up by presence. They are not orphan candidates.
+    if (/\.d\.ts$/.test(entry.name)) return [];
+    return /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
+
+const allSources = sourceDirs.flatMap(listSources);
+const productionSources = allSources.filter((file) => !file.includes('__tests__'));
+const ENTRY_POINTS = new Set(['main.ts', 'main.tsx', 'index.ts', 'index.tsx']);
+
+for (const file of productionSources) {
+  if (ENTRY_POINTS.has(file.split('/').pop() ?? '')) continue;
+  const base = (file.split('/').pop() ?? '').replace(/\.tsx?$/, '');
+  const imported = productionSources.some(
+    (other) => other !== file && new RegExp(`from '[^']*/${base}\\.js'`).test(readFileSync(other, 'utf8')),
+  );
+  if (!imported) {
+    fail(
+      `${relative(ROOT, file)} is not imported by any non-test file. ` +
+        `Either wire it up or delete it — a module only a test can reach proves nothing.`,
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 7. The unsigned notice appears everywhere §6.4 and acceptance item 10 say.
  *
  * The spec calls for an automated string check, and the reason is that this is
  * the one thing in the project nobody may quietly drop: an unsigned installer
@@ -209,7 +259,7 @@ for (const surface of UNSIGNED_SURFACES) {
 }
 
 /* ------------------------------------------------------------------ *
- * 7. File-name references in the package config must match package.json.
+ * 8. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';

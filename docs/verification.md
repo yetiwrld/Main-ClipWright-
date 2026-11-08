@@ -179,6 +179,7 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | The unsigned notice is on every surface §6.4 names | `check-repo` asserts it in README, the update dialog, the release-notes generator and the release docs (acceptance item 10's automated string check) |
 | Generated release notes carry the unsigned notice | The generator appends it, and drops it only when `--signed` is passed after a certificate was used |
 | Every relative documentation link resolves | Same check, 17 documents |
+| No module is reachable only from its tests | `check-repo` — written after `main/ipc.ts` turned out to export six shortcuts with empty handlers that only a test could reach |
 | The renderer imports no main-process code | Same check, added after two modules had drifted across the boundary |
 | The signed manifest verifies with only the embedded key | Rehearsed end to end outside CI with a fresh key pair over real files: signature, per-file digests, `SHA256SUMS.txt`, `latest.yml` cross-check, and a single flipped byte rejected |
 | Main process builds to `dist/main/index.cjs` | Yes; 561 KB across 12 files, loads under stubbed Electron |

@@ -11,6 +11,7 @@ import { SetupDialog } from './components/SetupDialog.js';
 import { RecoveryDialog } from './features/updates/RecoveryDialog.js';
 import { UpdateNotice } from './features/updates/UpdateNotice.js';
 import { ShortcutSheet } from './components/ShortcutSheet.js';
+import { createShortcutHandler } from './components/shortcuts.js';
 import { api, isDesktop } from './api.js';
 import type { RecoveryStatePayload } from './global.js';
 
@@ -72,44 +73,42 @@ export default function App() {
   /**
    * Spec 02 §2.6 — global shortcuts.
    *
-   * Handled in the renderer because every one of them is navigation or a dialog,
-   * and the renderer owns both. Ctrl+O and Ctrl+S deliberately do nothing here:
-   * opening a video needs a project to open it into, and saving is continuous
-   * (the top bar reports it), so a manual-save shortcut would be theatre. The
-   * cheat sheet lists them honestly rather than pretending otherwise.
+   * Dispatched through `createShortcutHandler` rather than an inline `switch`:
+   * the dispatch logic (modifier matching, preventDefault only on a match) is
+   * shared and tested, and a shortcut added to the list cannot silently skip it.
+   *
+   * Ctrl+O and Ctrl+S are deliberately absent. Opening a video needs a project
+   * to open it into, and saving is continuous, so both would be theatre — the
+   * cheat sheet lists them with the reason instead.
    */
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const meta = e.ctrlKey || e.metaKey;
-      if (!meta) return;
+    const dispatch = createShortcutHandler([
+      {
+        key: 'k',
+        ctrl: true,
+        handler: () => setPaletteOpen((open) => !open),
+      },
+      {
+        key: ',',
+        ctrl: true,
+        handler: () => navigate({ name: 'settings', section: 'general' }),
+      },
+      {
+        key: 'n',
+        ctrl: true,
+        // Home asks for a name and a source; creating "Untitled project" silently
+        // is the one thing a new-project shortcut must not do.
+        handler: () => navigate({ name: 'home' }),
+      },
+      {
+        key: '/',
+        ctrl: true,
+        handler: () => setShortcutsOpen((open) => !open),
+      },
+    ]);
 
-      switch (e.key) {
-        case 'k':
-        case 'K':
-          e.preventDefault();
-          setPaletteOpen((open) => !open);
-          break;
-        case ',':
-          e.preventDefault();
-          navigate({ name: 'settings', section: 'general' });
-          break;
-        case 'n':
-        case 'N':
-          // Start a project: the panel that asks for a name and a source, not a
-          // silently-created empty project the user then has to rename.
-          e.preventDefault();
-          navigate({ name: 'home' });
-          break;
-        case '/':
-          e.preventDefault();
-          setShortcutsOpen((open) => !open);
-          break;
-        default:
-          break;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', dispatch);
+    return () => window.removeEventListener('keydown', dispatch);
   }, [navigate]);
 
   const isOutsideProject = route.name !== 'project';
