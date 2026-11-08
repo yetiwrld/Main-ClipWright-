@@ -38,14 +38,15 @@ This document tracks architectural scope boundaries and honest limitations per `
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
-6. **The canvas supports moving and cropping; the anchor grid and rotation handles
-   do not exist.** Dragging a selected clip's picture moves it, and dragging one of
-   its edges crops that edge; both are one undo step on release, and the preview
-   follows the pointer before anything is written. What is still missing from SPEC 08
-   §7.2 and SPEC 10 §8 is the *anchor grid* — `transform.anchorX`/`anchorY` are stored
-   and named in the `PropertyPath` union but nothing reads them, so rotation always
-   turns about the centre — and there is no scale or rotate handle, so those stay
-   numeric. A drag also cannot be cancelled mid-gesture with `Esc`.
+6. **The canvas supports moving and cropping; there is no rotate or scale handle, and
+   no crosshair to drag the anchor.** Dragging a selected clip's picture moves it, and
+   dragging one of its edges crops it; both are one undo step on release, and the
+   preview follows the pointer before anything is written. The *anchor* is now a real
+   property — `itemGeometry` resolves it into the offset, so rotation pivots where the
+   user says rather than always at the centre, and it can be keyed like any other
+   property — but it is set by number in the inspector, not by dragging a crosshair on
+   the canvas (SPEC 10 §8's *Show anchor* mode). Rotation and scale are still typed
+   numbers rather than handles, and a drag cannot be cancelled mid-gesture with `Esc`.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
    them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
    snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for
@@ -61,8 +62,8 @@ This document tracks architectural scope boundaries and honest limitations per `
    with a diamond, and a test walks the list so the two cannot drift apart. What is
    canvas drags follow the same rule the sliders do — they route through the same
    function, so dragging a clip whose position is already animated keys both axes at
-   the playhead rather than editing the static value. `transform.anchorX`/`anchorY`
-   are still absent from the list for the reason in item 6: nothing reads them.
+   the playhead rather than editing the static value. The anchor's two paths joined
+   the list once the compositor started resolving them.
 9. **The left panel has the Media and Captions tabs.** Text/Graphics,
    Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
    there.

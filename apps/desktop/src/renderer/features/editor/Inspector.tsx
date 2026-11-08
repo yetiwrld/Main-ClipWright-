@@ -720,6 +720,44 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
         ))}
       </div>
 
+      {/*
+        The anchor grid (SPEC 10 §4, §8.2). `transform.anchorX/anchorY` are the pivot
+        the picture rotates about, as a fraction of the picture — 0.5,0.5 is the
+        middle and 0,0 is its top-left corner. Dragging the crosshair on the canvas is
+        the nicer control and is not built yet; this field pair is what makes the
+        property reachable at all, and the same command backs both.
+      */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+        {(['anchorX', 'anchorY'] as const).map((axis) => (
+          <KeyframeRow
+            key={axis}
+            label={axis === 'anchorX' ? 'Anchor X' : 'Anchor Y'}
+            path={`transform.${axis}`}
+            value={item.transform[axis]}
+            item={item}
+            timeline={timeline}
+          >
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={Math.round(item.transform[axis] * 100)}
+              aria-label={`${axis === 'anchorX' ? 'Horizontal' : 'Vertical'} anchor as a percentage of the picture`}
+              onChange={(event) => {
+                if (event.target.value.trim() === '') return;
+                const percent = Number(event.target.value);
+                if (!Number.isFinite(percent)) return;
+                // 0–1 of the picture: 0 is the top/left edge, 100 the bottom/right.
+                const fraction = Math.min(1, Math.max(0, percent / 100));
+                applyAnimatable(timeline, item, `transform.${axis}`, fraction, () =>
+                  timeline.setItemProperties([item.id], { transform: { [axis]: fraction } }),
+                );
+              }}
+            />
+          </KeyframeRow>
+        ))}
+      </div>
+
       <KeyframeRow
         label="Rotation"
         path="transform.rotation"

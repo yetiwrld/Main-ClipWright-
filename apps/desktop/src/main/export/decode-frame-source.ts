@@ -39,6 +39,7 @@ import {
   effectPassCount,
   effectsForLayer,
   evaluateProperty,
+  itemGeometry,
   transitionAt,
   dissolveAlphaAt,
   wipeAlphaAt,
@@ -257,6 +258,13 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         | undefined;
       const read = (path: Parameters<typeof evaluateProperty>[1], fallback: number) =>
         evaluateProperty(keys as Parameters<typeof evaluateProperty>[0], path, timeUs, fallback);
+      /*
+        The compositor's own resolution of the same instant, used only for the anchor
+        arithmetic. Going through `itemGeometry` rather than repeating the formula
+        keeps one definition of it: the preview calls the same function, so a clip that
+        rotates about its corner turns about the same point in the file.
+      */
+      const resolved = itemGeometry({ ...staticGeometry, keyframes: keys, timeUs } as never);
       return {
         crop: {
           left: read('crop.left', staticGeometry.crop?.left ?? 0),
@@ -270,12 +278,23 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           scaleX: read('transform.scaleX', staticGeometry.transform?.scaleX ?? 1),
           scaleY: read('transform.scaleY', staticGeometry.transform?.scaleY ?? 1),
           rotation: read('transform.rotation', staticGeometry.transform?.rotation ?? 0),
+          anchorX: read('transform.anchorX', staticGeometry.transform?.anchorX ?? 0.5),
+          anchorY: read('transform.anchorY', staticGeometry.transform?.anchorY ?? 0.5),
           flipH: staticGeometry.transform?.flipH ?? false,
           flipV: staticGeometry.transform?.flipV ?? false,
           // The legacy framing field only applies when the axes are untouched; that
           // rule lives in `effectiveScale`, and passing it through keeps one
           // definition of what "scale" means.
           scale: staticGeometry.transform?.scale,
+          /*
+            The anchor's effect on where the picture's centre lands, from the same
+            function the preview uses. The filter chain places the picture by its
+            offset, so an off-centre anchor has to arrive already resolved — and
+            resolving it here, through `itemGeometry`, is what stops the file and the
+            screen from disagreeing about where a rotating clip is.
+          */
+          resolvedOffsetX: resolved.offsetX,
+          resolvedOffsetY: resolved.offsetY,
         },
       };
     };

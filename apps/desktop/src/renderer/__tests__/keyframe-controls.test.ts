@@ -157,6 +157,12 @@ describe('the animatable property list', () => {
       'transform.x',
       'transform.y',
       'transform.rotation',
+      // The anchor became a real property once `itemGeometry` started resolving it
+      // into the offset (SPEC 10 §4, §8.2): before that these two were names in the
+      // `PropertyPath` union that nothing read, and offering a diamond for them
+      // would have animated nothing.
+      'transform.anchorX',
+      'transform.anchorY',
       'crop.left',
       'crop.right',
       'crop.top',

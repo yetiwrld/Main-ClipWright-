@@ -341,6 +341,21 @@ export function sourceFilterChain(options: {
       rotation?: number;
       flipH?: boolean;
       flipV?: boolean;
+      /**
+       * The anchor's effect, already folded into the position by
+       * `itemGeometry` (`@clipwright/compositor`).
+       *
+       * `x`/`y` above are the stored position — where the user put the clip — while
+       * an off-centre anchor needs the picture's *centre* to land somewhere else
+       * (SPEC 10 §4). Rather than repeat that rotation-and-scale arithmetic in an
+       * ffmpeg filter string, the caller passes the resolved offset and this chain
+       * uses it in place of `x`/`y`. Absent means "no anchor", and the stored
+       * position applies unchanged.
+       */
+      resolvedOffsetX?: number;
+      resolvedOffsetY?: number;
+      anchorX?: number;
+      anchorY?: number;
     };
   };
 }): string {
@@ -371,8 +386,14 @@ export function sourceFilterChain(options: {
 
   const scale = geometryScale(options.geometry?.transform);
   const rotation = options.geometry?.transform?.rotation ?? 0;
-  const offsetX = options.geometry?.transform?.x ?? 0;
-  const offsetY = options.geometry?.transform?.y ?? 0;
+  /*
+    The resolved offset when the caller supplied one, otherwise the stored position.
+    The two differ only when the anchor is off-centre, and passing the resolved value
+    is what keeps the file's picture in the same place as the preview's — the anchor
+    arithmetic lives in `itemGeometry` and is not re-derived here.
+  */
+  const offsetX = options.geometry?.transform?.resolvedOffsetX ?? options.geometry?.transform?.x ?? 0;
+  const offsetY = options.geometry?.transform?.resolvedOffsetY ?? options.geometry?.transform?.y ?? 0;
   const flipH = options.geometry?.transform?.flipH ?? false;
   const flipV = options.geometry?.transform?.flipV ?? false;
 
@@ -424,10 +445,30 @@ export function sourceFilterChain(options: {
       filters.push(capToCanvas);
     }
     if (rotation !== 0) {
+      /*
+        `ow`/`oh` grow the frame to the rotated bounding box, filling the corners the
+        turn exposes with black — that part is right. What was wrong is the refit that
+        used to follow: `scale=W:H:force_original_aspect_ratio=decrease` fitted the
+        *rotated* picture to the canvas, so every rotation threw the user's scale away
+        and blew a small clip up to fill the frame. Measured, not guessed: a 0.5-scaled
+        square came out 360×360 unrotated and 480×720 once rotated.
+
+        Scaling by `1/rotw`-style factors is not available in this ffmpeg's expression
+        set, so instead the rotation is done into a frame large enough to hold the
+        rotated picture *at its current size*, and the picture is then placed by the
+        final `pad` exactly like an unrotated one. `c=black` already fills the exposed
+        corners, and the outermost `capToCanvas` keeps the result inside the frame.
+      */
       filters.push(
         `rotate=${fmt(rotationRadians)}:ow=rotw(${fmt(rotationRadians)}):oh=roth(${fmt(rotationRadians)}):c=black`,
       );
-      filters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos`);
+      /*
+        The rotated frame is larger than the canvas whenever the picture is not square
+        at this angle. `capToCanvas` is a `crop`, and a crop *can* shrink where the
+        final `pad` cannot — so capping here is what keeps the pad's centring
+        expression valid, and it is also the honest result: a clip that turns past the
+        edge of the frame is clipped by the frame, not quietly resized to fit inside it.
+      */
       filters.push(capToCanvas);
     }
     // The offset rides on the final pad, which is the last stage before the frame

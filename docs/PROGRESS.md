@@ -76,10 +76,9 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-the anchor grid (so rotation always turns about the centre), scale and rotate
-handles on the canvas, the playback clock is not audio-mastered, and the preview
-does not switch to proxies (so scrubbing 4K is slow). Canvas drag editing *is*
-built — dragging a selected clip moves it, dragging an edge crops it — and so are
+rotate and scale handles on the canvas, the anchor crosshair, the playback clock is
+not audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
+slow). Canvas drag editing *is* built — dragging a selected clip moves it, dragging an edge crops it — and so are
 the keyframe inspector and the curve editor. Numeric editing of opacity, level,
 pan, speed, crop, scale, rotation and flip works, is undoable, and — since the
 preview and the export both apply the same geometry — is visible where it matters:
@@ -139,11 +138,15 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — the anchor grid, rotation and scale handles, and proxy
-playback. Canvas drag editing landed: a selected clip's picture can be dragged to
-move it and its edges dragged to crop, converted from pixels into canvas fractions
-so a gesture means the same at any preview size, and committed once on release so
-the whole drag is one undo step. The keyframe **curve editor** now exists as a bottom drawer
+**1. Finish Phase 4 ⚠️** — rotate and scale handles, a draggable anchor crosshair,
+and proxy playback. Canvas drag editing landed: a selected clip's picture can be
+dragged to move it and its edges dragged to crop, converted from pixels into canvas
+fractions so a gesture means the same at any preview size, and committed once on
+release so the whole drag is one undo step. The anchor point is now real too —
+rotation pivots where the user says instead of always at the centre — and it is
+keyframeable like every other animatable property. Fixing it exposed an older bug:
+the export refitted a rotated picture to the canvas, so any rotation discarded the
+user's scale (a half-scaled square came out 360×360 unrotated and 480×720 rotated). The keyframe **curve editor** now exists as a bottom drawer
 (`Ctrl+Shift+C`): it graphs each keyframed numeric property, lets a control handle
 be dragged and writes it as a single undo step, and it is what made `bezier`
 reachable at all — the schema and the evaluator carried the field while no command

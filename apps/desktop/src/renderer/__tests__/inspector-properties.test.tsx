@@ -707,6 +707,8 @@ describe('the remaining animatable rows (SPEC 12 §2.4)', () => {
     for (const label of [
       'Scale',
       'Rotation',
+      'Anchor X',
+      'Anchor Y',
       'Position X',
       'Position Y',
       'Crop left',
@@ -888,6 +890,8 @@ describe('the animatable-property list is the contract (SPEC 12 §2.4)', () => {
       'transform.x': { label: 'Horizontal position as a percentage of the canvas', value: '25' },
       'transform.y': { label: 'Vertical position as a percentage of the canvas', value: '25' },
       'transform.rotation': { label: 'Rotation in degrees', value: '15' },
+      'transform.anchorX': { label: 'Horizontal anchor as a percentage of the picture', value: '0' },
+      'transform.anchorY': { label: 'Vertical anchor as a percentage of the picture', value: '0' },
       'crop.left': { label: 'Crop left', value: '20' },
       'crop.right': { label: 'Crop right', value: '20' },
       'crop.top': { label: 'Crop top', value: '20' },

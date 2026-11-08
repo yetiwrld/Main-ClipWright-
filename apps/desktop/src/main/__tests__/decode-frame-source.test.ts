@@ -1782,3 +1782,286 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     );
   }, 180_000);
 });
+
+describe.skipIf(!HAS_FFMPEG)('the anchor point in the exported file (SPEC 10 §4, §8.2)', () => {
+  /**
+   * A square white frame with a black vertical strip down its LEFT third.
+   *
+   * Square so that a 90°/180° turn cannot change the picture's outline, and marked on
+   * one side so that a rotation is *visible*: a symmetric mark would look identical
+   * turned by 180° and the test would pass without any rotation happening at all.
+   */
+  function makeMarkedSource(): string {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, 'anchor-marked.mp4');
+    const rawPath = join(TMP, 'anchor-marked.yuv');
+    const size = 400;
+    const frame = Buffer.alloc((size * size * 3) / 2, 128);
+    // Luma only: the colour planes stay neutral, so luma is the whole story.
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        // Left third black, the rest white.
+        frame[y * size + x] = x < size / 3 ? 16 : 235;
+      }
+    }
+    writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'yuv420p',
+        '-s', `${size}x${size}`, '-framerate', '30', '-i', rawPath,
+        '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', path],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+    return path;
+  }
+
+  /**
+   * Mean luma over a rectangle of the exported frame, in output pixels.
+   *
+   * The bounds are floored and ceiled: callers compute them from fractions of the
+   * width, so passing `width * 0.48` straight in would index `frame[y*width + 614.4]`
+   * — a fractional property of a `Buffer`, which is `undefined`, which the `?? 0`
+   * turns into black. That read as "the picture is not there" for a while: every
+   * window came back 0 while the frame was perfectly fine.
+   */
+  const meanLuma = (frame: Buffer, width: number, x0: number, y0: number, x1: number, y1: number) => {
+    const fromX = Math.max(0, Math.floor(x0));
+    const toX = Math.max(fromX + 1, Math.ceil(x1));
+    const fromY = Math.max(0, Math.floor(y0));
+    const toY = Math.max(fromY + 1, Math.ceil(y1));
+    let total = 0;
+    let count = 0;
+    for (let y = fromY; y < toY; y += 1) {
+      for (let x = fromX; x < toX; x += 1) {
+        total += frame[y * width + x] ?? 0;
+        count += 1;
+      }
+    }
+    return count === 0 ? 0 : total / count;
+  };
+
+  /**
+   * Run one still through the decoder with the given transform and return frame 0.
+   *
+   * The composition is 640×360 (16:9) and the source is square, so at scale 0.5 the
+   * picture covers a 180×180 box — small enough that a half turn keeps it wholly
+   * inside the frame, which is what makes the quadrant assertions unambiguous.
+   */
+  async function frameWith(transform: Record<string, unknown>): Promise<{ frame: Buffer; width: number; height: number }> {
+    const source = makeMarkedSource();
+    const plan = buildExportPlan(
+      makeSettings({
+        preset: '720p',
+        aspect: '16:9',
+        rangeUs: [0, 500_000],
+        compositionDurationUs: 500_000,
+        items: [
+          {
+            id: 'item-video',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-1',
+            startUs: 0,
+            durationUs: 500_000,
+            sourceInUs: 0,
+            durationUsFallback: undefined,
+            disabled: false,
+            muted: false,
+            hasAudio: false,
+            geometry: { transform },
+          } as never,
+        ],
+      }),
+    );
+    const frames = createDecodeFrameSource({ plan, resolveMediaPath: () => source });
+    await frames.open?.(plan);
+    const frame = await frames.next(0);
+    await frames.close();
+    return { frame, width: plan.width, height: plan.height };
+  }
+
+  it('leaves a centred anchor unrotated, as the baseline', async () => {
+    // Without this the rotation test below could pass on a decoder that rotated
+    // everything: the marked source has its dark strip on the left and must still be
+    // there when nothing is turned.
+    /*
+      Windows computed rather than estimated. A 400×400 source on a 1280×720 canvas is
+      fitted to 720×720 and then scaled by 0.5, so the picture occupies a 360×360 box
+      centred at (640, 360) — x ∈ [460, 820]. The mark is the source's left third, so
+      it lands on x ∈ [460, 580] and the bright body on [580, 820].
+
+      This test exists because the first version of the rotation test sampled windows
+      that mostly missed the picture and read the black canvas behind it: it would have
+      passed on any rotation, or on none.
+    */
+    const { frame, width, height } = await frameWith({ scaleX: 0.5, scaleY: 0.5 });
+    const mark = meanLuma(frame, width, width * 0.38, 200, width * 0.44, 520);
+    const body = meanLuma(frame, width, width * 0.48, 200, width * 0.60, 520);
+    expect(mark, 'the marked strip should be dark before any rotation').toBeLessThan(80);
+    expect(body, 'the rest of the picture should be bright').toBeGreaterThan(180);
+    // And the canvas beyond the picture is black, which is what distinguishes the
+    // picture's edge from the picture.
+    expect(meanLuma(frame, width, 0, 200, width * 0.2, 520), 'canvas left of the picture').toBeLessThan(40);
+  }, 60_000);
+
+  /**
+   * The frame's centroid of "bright" pixels, in normalised canvas coordinates.
+   *
+   * The absolute position of the picture after a rotation is hard to predict: the
+   * chain refits the rotated picture to the canvas before placing it, so a scale of
+   * 0.5 is not preserved end to end. What *is* predictable is the difference between
+   * two runs that differ only in the anchor — see the test below.
+   */
+  const brightnessCentroid = (frame: Buffer, width: number, height: number) => {
+    let totalWeight = 0;
+    let sumX = 0;
+    let sumY = 0;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const luma = (frame[y * width + x] ?? 0) - 16;
+        if (luma <= 0) continue;
+        totalWeight += luma;
+        sumX += luma * x;
+        sumY += luma * y;
+      }
+    }
+    return totalWeight === 0
+      ? { x: 0.5, y: 0.5 }
+      : { x: sumX / totalWeight / width, y: sumY / totalWeight / height };
+  };
+
+  it('turns an off-centre anchor into a displaced picture, and a centred one into none', async () => {
+    /*
+      Comparing two frames rather than predicting one position, because that is the
+      actual claim the anchor makes: *the pivot moves, everything else is unchanged*.
+
+      Both runs rotate 180° with the same scale. One pivots on the picture's centre,
+      the other on its left edge. A half turn about the left edge must carry the
+      picture's centre half a picture-width to the left of where a centre pivot leaves
+      it — so the bright centroid has to move left by exactly that much.
+
+      The mutation this catches is the one that mattered for every project already on
+      disk: an implementation that ignores the anchor entirely makes the two frames
+      identical, and an implementation that misreads the anchor's *sign* moves the
+      centroid the wrong way.
+    */
+    const centred = await frameWith({ scaleX: 0.5, scaleY: 0.5, rotation: 180, anchorX: 0.5, anchorY: 0.5 });
+    const cornered = await frameWith({ scaleX: 0.5, scaleY: 0.5, rotation: 180, anchorX: 0, anchorY: 0.5 });
+
+    const a = brightnessCentroid(centred.frame, centred.width, centred.height);
+    const b = brightnessCentroid(cornered.frame, cornered.width, cornered.height);
+
+    expect(Math.abs(a.y - b.y), 'a left-edge pivot should not move the picture vertically').toBeLessThan(0.05);
+    expect(b.x, 'the off-centre pivot should pull the picture left').toBeLessThan(a.x - 0.05);
+  }, 90_000);
+});
+
+
+describe.skipIf(!HAS_FFMPEG)('scale and rotation combine (SPEC 10 §4)', () => {
+  /**
+   * Build a 400×400 white source with a black left third, and a 1280×720 plan.
+   *
+   * Square so a quarter or half turn cannot change the outline, and asymmetric so a
+   * rotation is visible at all.
+   */
+  function makeMarkedSquare(): string {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, 'scale-rot.mp4');
+    const rawPath = join(TMP, 'scale-rot.yuv');
+    const size = 400;
+    const frame = Buffer.alloc((size * size * 3) / 2, 128);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) frame[y * size + x] = x < size / 3 ? 16 : 235;
+    }
+    writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'yuv420p',
+        '-s', `${size}x${size}`, '-framerate', '30', '-i', rawPath,
+        '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', path],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+    return path;
+  }
+
+  /** Bounding box of non-canvas pixels, in output pixels. */
+  const extent = (frame: Buffer, width: number, height: number) => {
+    let minX = width;
+    let maxX = -1;
+    let minY = height;
+    let maxY = -1;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        if ((frame[y * width + x] ?? 0) > 40) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return { width: maxX - minX, height: maxY - minY };
+  };
+
+  async function frameFor(transform: Record<string, unknown>) {
+    const source = makeMarkedSquare();
+    const plan = buildExportPlan(
+      makeSettings({
+        preset: '720p',
+        aspect: '16:9',
+        rangeUs: [0, 500_000],
+        compositionDurationUs: 500_000,
+        items: [
+          {
+            id: 'item-video',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-1',
+            startUs: 0,
+            durationUs: 500_000,
+            sourceInUs: 0,
+            durationUsFallback: undefined,
+            disabled: false,
+            muted: false,
+            hasAudio: false,
+            geometry: { transform },
+          } as never,
+        ],
+      }),
+    );
+    const frames = createDecodeFrameSource({ plan, resolveMediaPath: () => source });
+    await frames.open?.(plan);
+    const frame = await frames.next(0);
+    await frames.close();
+    return { frame, width: plan.width, height: plan.height };
+  }
+
+  it('keeps a half-scaled clip half-scaled when it is also rotated', async () => {
+    /*
+      A regression that has been there since rotation was added: the filter chain
+      refits the *rotated* picture to the canvas, so any rotation threw the user's
+      scale away and inflated the clip to fill the frame. Measured: a 0.5-scaled
+      square came out 360×360 unrotated and 480×720 once rotated.
+
+      The two runs differ only by the rotation, so their drawn sizes must match.
+    */
+    const unrotated = await frameFor({ scaleX: 0.5, scaleY: 0.5 });
+    const rotated = await frameFor({ scaleX: 0.5, scaleY: 0.5, rotation: 180 });
+
+    const before = extent(unrotated.frame, unrotated.width, unrotated.height);
+    const after = extent(rotated.frame, rotated.width, rotated.height);
+
+    // A square picture keeps its outline under a half turn, so the drawn extent must
+    // be the same in both runs — within the sampling step.
+    expect(after.width, 'rotation must not change how wide the clip is drawn').toBeLessThanOrEqual(
+      before.width + 10,
+    );
+    expect(after.height, 'rotation must not change how tall the clip is drawn').toBeLessThanOrEqual(
+      before.height + 10,
+    );
+    // And it must still be visibly smaller than the canvas, or the scale was lost.
+    expect(after.height, 'a half-scaled clip should not fill the frame').toBeLessThan(rotated.height - 40);
+  }, 90_000);
+});

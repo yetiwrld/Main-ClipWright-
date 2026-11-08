@@ -523,26 +523,45 @@ describe('sourceFilterChain geometry', () => {
     expect(chain).toContain('trunc(iw*1.4/2)*2');
   });
 
-  it('rotates, then fits the canvas, then pads', () => {
-    // `rotate` produces a canvas large enough for the rotated bounding box, which
-    // is wider than the output for any angle in between — so a fit has to follow it
-    // before the pad, or ffmpeg refuses the pad as a shrink.
+  it('rotates, caps to the canvas, then pads — with no refit that would discard the scale', () => {
+    /*
+      `rotate` produces a frame large enough for the rotated bounding box. It used to
+      be followed by `scale=W:H:force_original_aspect_ratio=decrease`, which fitted
+      that rotated picture *to the canvas* — so rotating a clip threw its scale away
+      and inflated it to fill the frame. Measured: a 0.5-scaled square came out 360×360
+      unrotated and 480×720 when rotated.
+
+      The shrink `pad` needs is done by `capToCanvas` instead: a `crop=w=min(iw,W)` can
+      shrink where `pad` cannot, so the frame reaching `pad` is never oversized. And
+      clipping is the correct result for a rotated clip that genuinely extends past the
+      canvas — the old refit made sure nothing was ever clipped, which is why a 45°
+      turn quietly shrank the picture instead of cropping it.
+    */
     const chain = sourceFilterChain({
       ...base,
       outputWidth: 1920,
       outputHeight: 1080,
       geometry: { transform: { rotation: 90 } },
     });
-    const stages = chain.split(',');
-    const rotateAt = stages.findIndex((stage) => stage.startsWith('rotate='));
-    // The fit *after* the rotate — the first one is the pre-existing letterbox.
-    const fitAt = stages.findIndex(
-      (stage, index) => index > rotateAt && stage.includes('force_original_aspect_ratio'),
-    );
-    const padAt = stages.findIndex((stage) => stage.startsWith('pad=1920:1080'));
+    /*
+      Matched by character offset rather than by splitting on commas: the cap's
+      `min(iw,1920)` contains one, so a naive split breaks the stage into three and a
+      `startsWith` search never finds it. That cost a round of "the cap is missing"
+      before it turned out to be a test bug.
+    */
+    const rotateAt = chain.indexOf('rotate=');
+    const afterRotate = chain.slice(rotateAt);
+    const capAt = chain.indexOf("crop=w='min(iw", rotateAt);
+    const padAt = chain.indexOf('pad=1920:1080');
     expect(rotateAt).toBeGreaterThan(-1);
-    expect(fitAt).toBeGreaterThan(rotateAt);
-    expect(padAt).toBeGreaterThan(fitAt);
+    expect(capAt, 'the cap must follow the rotate').toBeGreaterThan(rotateAt);
+    expect(padAt, 'the pad must follow the cap').toBeGreaterThan(capAt);
+
+    // And no refit: a `force_original_aspect_ratio` after the rotate is the bug.
+    expect(
+      afterRotate.includes('force_original_aspect_ratio'),
+      'a refit after the rotate discards the user scale',
+    ).toBe(false);
   });
 
   it('moves the picture by a fraction of the canvas', () => {

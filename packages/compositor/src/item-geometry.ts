@@ -37,6 +37,17 @@ export interface ItemGeometryInput {
         scaleX?: number;
         scaleY?: number;
         rotation?: number;
+        /** Pivot as a fraction of the picture (0–1), centre is 0.5 (SPEC 10 §4). */
+        anchorX?: number;
+        anchorY?: number;
+        /**
+         * Accepted and ignored on input: the anchor effect is computed here, not
+         * supplied. Declared so a resolved geometry can be passed straight back in
+         * without a cast, which is what the export does when it re-reads geometry for
+         * a later instant.
+         */
+        resolvedOffsetX?: number;
+        resolvedOffsetY?: number;
         flipH?: boolean;
         flipV?: boolean;
       }
@@ -70,6 +81,15 @@ export interface ItemGeometry {
   scaleY: number;
   /** Degrees, clockwise. */
   rotation: number;
+  /**
+   * The pivot, as a fraction of the picture (0–1). The centre is `0.5, 0.5`.
+   *
+   * Returned as well as resolved because the preview draws a crosshair on it: the
+   * offset below already *contains* the anchor's effect, so a caller that wanted to
+   * draw the pivot from the offset would have to invert the maths to find it.
+   */
+  anchorX: number;
+  anchorY: number;
   flipH: boolean;
   flipV: boolean;
   /** True when nothing is set, so a caller can skip the wrapper entirely. */
@@ -140,9 +160,45 @@ export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
     x: at(input.keyframes, timeUs, 'transform.scaleX', staticScale.x),
     y: at(input.keyframes, timeUs, 'transform.scaleY', staticScale.y),
   };
-  const offsetX = at(input.keyframes, timeUs, 'transform.x', input.transform?.x ?? 0);
-  const offsetY = at(input.keyframes, timeUs, 'transform.y', input.transform?.y ?? 0);
   const rotation = at(input.keyframes, timeUs, 'transform.rotation', input.transform?.rotation ?? 0);
+  const anchorX = at(input.keyframes, timeUs, 'transform.anchorX', input.transform?.anchorX ?? 0.5);
+  const anchorY = at(input.keyframes, timeUs, 'transform.anchorY', input.transform?.anchorY ?? 0.5);
+  /*
+    The anchor, folded into the offset (SPEC 10 §4, §8.2).
+
+    The spec's order is `translate(position) · rotate · scale · translate(−anchor)`.
+    Both renderers draw the picture centred and then apply `translate(position)` on
+    the rotated, scaled element — so what they need is not the stored position but
+    where the picture's *centre* must land for the anchor to behave as the pivot:
+
+      offset = position + R · S · (centre − anchor)
+
+    Expressing it this way means neither renderer's transform structure changes: the
+    preview keeps its CSS `rotate(...) scale(...)` and the export keeps its ffmpeg
+    `rotate`/`scale` chain, and the only shared thing is these two numbers. With the
+    anchor at the centre the vector is zero and the offset is exactly `position`, so
+    every project saved before anchors existed renders byte-identically.
+
+    Scale applies *before* rotation, per the spec order — that is why the arm is
+    scaled and then rotated rather than the other way round, and a test pins the
+    difference at an angle where the two orders disagree.
+  */
+  const positionX = at(input.keyframes, timeUs, 'transform.x', input.transform?.x ?? 0);
+  const positionY = at(input.keyframes, timeUs, 'transform.y', input.transform?.y ?? 0);
+  /*
+    The arm is in canvas fractions. The picture occupies `source.width` ×
+    `source.height` of the canvas before scaling, and `source` is already the cropped
+    rectangle — so a cropped clip pivots about the part that is actually visible,
+    which is the only reading that makes the crosshair land on the picture the user
+    is looking at.
+  */
+  const armX = (0.5 - anchorX) * source.width * scale.x;
+  const armY = (0.5 - anchorY) * source.height * scale.y;
+  const radians = (rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const offsetX = positionX + (cos * armX - sin * armY);
+  const offsetY = positionY + (sin * armX + cos * armY);
   const flipH = input.transform?.flipH ?? false;
   const flipV = input.transform?.flipV ?? false;
 
@@ -159,5 +215,23 @@ export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
     !flipH &&
     !flipV;
 
-  return { source, offsetX, offsetY, scaleX: scale.x, scaleY: scale.y, rotation, flipH, flipV, identity };
+  /*
+    An off-centre anchor is *not* an identity even with everything else at rest: it
+    moves the picture by half a frame, so a caller that skipped the wrapper would draw
+    it in the wrong place. `offsetX/Y` already reflect that, so testing them here is
+    both sufficient and the honest expression of what `identity` means.
+  */
+  return {
+    source,
+    offsetX,
+    offsetY,
+    scaleX: scale.x,
+    scaleY: scale.y,
+    rotation,
+    anchorX,
+    anchorY,
+    flipH,
+    flipV,
+    identity,
+  };
 }

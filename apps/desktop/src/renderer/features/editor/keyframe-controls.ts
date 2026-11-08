@@ -56,6 +56,8 @@ export const ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   { path: 'transform.x', label: 'Position X' },
   { path: 'transform.y', label: 'Position Y' },
   { path: 'transform.rotation', label: 'Rotation' },
+  { path: 'transform.anchorX', label: 'Anchor X' },
+  { path: 'transform.anchorY', label: 'Anchor Y' },
   { path: 'crop.left', label: 'Crop left' },
   { path: 'crop.right', label: 'Crop right' },
   { path: 'crop.top', label: 'Crop top' },
