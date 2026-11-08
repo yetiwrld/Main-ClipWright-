@@ -16,7 +16,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const problems = [];
@@ -227,7 +227,83 @@ for (const file of productionSources) {
 }
 
 /* ------------------------------------------------------------------ *
- * 7. The unsigned notice appears everywhere §6.4 and acceptance item 10 say.
+ * 7. No renderer dependency may reach a node: builtin.
+ *
+ * The renderer is bundled for a sandboxed context where `node:crypto` and
+ * friends do not exist. When `UPDATE_PRIVACY_NOTE` moved into update-core, the
+ * renderer started importing the package root, which also pulls in the Ed25519
+ * signing module and therefore `node:crypto`. `tsc --noEmit` passed and 1063
+ * tests passed; only `pnpm build` failed, with
+ *   "createPublicKey" is not exported by "__vite-browser-external"
+ *
+ * Checking the *transitive* import graph is what would have caught it, so that
+ * is what this does: walk the renderer's local imports (including workspace
+ * packages) and fail on any node: builtin or `electron` in the closure.
+ *
+ * `@clipwright/update-core/browser` is the sanctioned way to reach the pure
+ * parts of that package; the root entry includes signing on purpose.
+ * ------------------------------------------------------------------ */
+const NODE_BUILTIN = /^node:/;
+const RENDERER_ROOT = join(ROOT, 'apps', 'desktop', 'src', 'renderer');
+const WORKSPACE_PACKAGES = join(ROOT, 'packages');
+
+function resolveLocal(fromFile, specifier) {
+  if (!specifier.startsWith('.')) return null;
+  const base = resolve(dirname(fromFile), specifier.replace(/\.js$/, ''));
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+const packageEntries = new Map();
+for (const name of readdirSync(WORKSPACE_PACKAGES)) {
+  const manifestPath = join(WORKSPACE_PACKAGES, name, 'package.json');
+  if (!existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const exportsMap = manifest.exports ?? { '.': { default: manifest.main } };
+  for (const [subpath, target] of Object.entries(exportsMap)) {
+    const file = typeof target === 'string' ? target : (target.default ?? target.import);
+    if (file) packageEntries.set(`${manifest.name}${subpath === '.' ? '' : subpath}`, join(WORKSPACE_PACKAGES, name, file));
+  }
+}
+
+function* importClosure(entry, seen = new Set()) {
+  if (seen.has(entry) || !existsSync(entry)) return;
+  seen.add(entry);
+  yield { file: entry };
+  const text = readFileSync(entry, 'utf8');
+  // `import type` is erased by the compiler and never reaches the bundle, so a
+  // type-only import of a Node-using module is fine — and the renderer relies on
+  // that for every payload shape it shares with the main process.
+  for (const match of text.matchAll(/^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)) {
+    if (/^\s*(?:import|export)\s+type\b/m.test(match[0])) continue;
+    const specifier = match[1];
+    if (NODE_BUILTIN.test(specifier) || specifier === 'electron') {
+      yield { file: entry, forbidden: specifier };
+      continue;
+    }
+    const local = resolveLocal(entry, specifier);
+    const pkg = packageEntries.get(specifier);
+    const next = local ?? pkg ?? null;
+    if (next) yield* importClosure(next, seen);
+  }
+}
+
+const rendererEntries = allSources.filter((file) => file.startsWith(RENDERER_ROOT));
+for (const entry of rendererEntries) {
+  for (const hit of importClosure(entry)) {
+    if (!hit.forbidden) continue;
+    fail(
+      `${relative(ROOT, hit.file)} reaches "${hit.forbidden}" from renderer code (` +
+        `${relative(ROOT, entry)}). The renderer is bundled for a context without Node ` +
+        `builtins; import '@clipwright/update-core/browser' rather than the package root.`,
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 8. The unsigned notice appears everywhere §6.4 and acceptance item 10 say.
  *
  * The spec calls for an automated string check, and the reason is that this is
  * the one thing in the project nobody may quietly drop: an unsigned installer
@@ -259,7 +335,7 @@ for (const surface of UNSIGNED_SURFACES) {
 }
 
 /* ------------------------------------------------------------------ *
- * 8. File-name references in the package config must match package.json.
+ * 9. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';

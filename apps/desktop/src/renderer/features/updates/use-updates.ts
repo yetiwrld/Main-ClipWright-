@@ -12,8 +12,8 @@ import {
   formatDownloadProgress,
   shouldPrompt,
   shouldShowChip,
-} from '@clipwright/update-core';
-import type { UpdateState } from '@clipwright/update-core';
+} from '@clipwright/update-core/browser';
+import type { UpdateState } from '@clipwright/update-core/browser';
 import type { UpdateStatePayload } from '../../global.js';
 import { getBridge, isDesktop } from '../../api.js';
 

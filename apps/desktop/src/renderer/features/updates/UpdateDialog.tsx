@@ -9,7 +9,7 @@
  */
 import React, { useMemo } from 'react';
 import { Button, Chip, Dialog, ProgressLinear } from '@clipwright/design-system';
-import { formatDownloadSize } from '@clipwright/update-core';
+import { formatDownloadSize } from '@clipwright/update-core/browser';
 import type { UpdateStatePayload } from '../../global.js';
 
 export interface UpdateDialogProps {

@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "verify:exports": "tsx scripts/verify/export-matrix.ts",
     "dev": "pnpm --filter @clipwright/desktop dev",
-    "dist:win": "pnpm --filter @clipwright/desktop dist:win"
+    "dist:win": "pnpm --filter @clipwright/desktop dist:win",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && node scripts/check-repo.mjs"
   },
   "devDependencies": {
     "@ffmpeg-installer/linux-x64": "4.1.0",

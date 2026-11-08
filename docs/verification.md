@@ -156,6 +156,7 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 
 | Gap | Why |
 |---|---|
+| A packaged Windows installer has been produced | No installer exists: packaging needs Windows binaries this environment cannot download (see §5). The build that produces the app bundle is verified; the step after it is not |
 | A real GitHub release, end to end | No published release exists yet; the tests use a fake network with real cryptography |
 | `electron-updater` driving an actual download | `electron-updater` is injected and faked in tests; the real library is exercised only in a packaged build |
 | Installing an update and relaunching | Needs Windows and a published release |
@@ -181,6 +182,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | Every relative documentation link resolves | Same check, 17 documents |
 | No module is reachable only from its tests | `check-repo` — written after `main/ipc.ts` turned out to export six shortcuts with empty handlers that only a test could reach |
 | The renderer imports no main-process code | Same check, added after two modules had drifted across the boundary |
+| No renderer dependency reaches a `node:` builtin | Same check, following the import graph including workspace packages. Added after the production build failed on `node:crypto` while 1063 tests and `tsc` passed |
+| **The application actually builds** | `pnpm build` produces `dist/main/index.cjs` and `dist/renderer/index.html`; `pnpm verify` runs lint, typecheck, tests, build and the repo check in that order |
 | The signed manifest verifies with only the embedded key | Rehearsed end to end outside CI with a fresh key pair over real files: signature, per-file digests, `SHA256SUMS.txt`, `latest.yml` cross-check, and a single flipped byte rejected |
 | Main process builds to `dist/main/index.cjs` | Yes; 561 KB across 12 files, loads under stubbed Electron |
 | Renderer uses relative URLs (`file://` safe) | `index.html` references `./assets/...` |

@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Chip, Select, Toggle } from '@clipwright/design-system';
-import { UPDATE_PRIVACY_NOTE } from '@clipwright/update-core';
+import { UPDATE_PRIVACY_NOTE } from '@clipwright/update-core/browser';
 import { YtDlpSection } from './YtDlpSection.js';
 import { getBridge } from '../../api.js';
 import { useUpdates } from './use-updates.js';
