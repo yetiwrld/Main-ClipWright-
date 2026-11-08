@@ -16,22 +16,22 @@ pnpm test:unit
 ```
 
 ```
-Test Files  46 passed (46)
-     Tests  1056 passed (1056)
+Test Files  47 passed (47)
+     Tests  1063 passed (1063)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
 | `apps/desktop/src/main` | 243 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
-| `apps/desktop/src/renderer` | 170 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
+| `apps/desktop/src/renderer` | 177 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 92 | Commands, invariants, undo/redo |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1056** | 46 files |
+| **Total** | **1063** | 47 files |
 
 ### Tests that run real processes
 
@@ -135,6 +135,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | The recovery text warns that a migration also rolls back databases | `journal.test.ts` on `recoveryMessage` (§7.5) |
 | The update dialog cannot install before backups are taken | `update-service.test.ts` — a failing `prepareInstall` aborts the install |
 | The chip and dialog are actually mounted | `update-notice.test.tsx`; the snapshot is reachable from `App` |
+| Ctrl+K, Ctrl+N, Ctrl+, and Ctrl+/ do what the cheat sheet says | `command-palette.test.ts` drives the real dispatch handler; `shortcut-sheet.test.tsx` covers the sheet |
+| Shortcuts that are listed but not implemented say so | `shortcut-sheet.test.tsx` — Ctrl+O and Ctrl+S are marked rather than implied |
 | An export's history row is written before `whenIdle()` resolves | `export-service.test.ts` — a race that made history intermittently miss the export that had just finished |
 | A portable build refuses to install its own update, and says to swap the file | `update-service.test.ts` (§6.3); the guard sits before preparation so no journal entry claims an install started |
 | A download resumes from a `.part` file left by an interrupted run | `update-service.test.ts` asserts the `Range` header and a byte-identical result (§11) |

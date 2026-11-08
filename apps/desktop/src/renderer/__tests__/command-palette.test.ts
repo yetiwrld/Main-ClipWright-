@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-// The palette search now lives beside the component; the shortcut helpers are
-// still main-process concerns (Spec 02 §2.6) and stay in main/ipc.ts.
+// Both now live in the renderer, where they are used.
 import { fuzzySearch, type CommandPaletteItem } from '../components/command-palette-search.js';
-import { parseShortcut, createShortcutHandler, DEFAULT_SHORTCUTS } from '../../main/ipc.js';
+import { parseShortcut, createShortcutHandler, type ShortcutDef } from '../components/shortcuts.js';
 
 function item(label: string, category = 'Test'): CommandPaletteItem {
   return { id: label.toLowerCase().replace(/\s+/g, '-'), label, category, action: () => {} };
@@ -84,9 +83,56 @@ describe('createShortcutHandler', () => {
   });
 });
 
-describe('DEFAULT_SHORTCUTS', () => {
-  it('binds the documented shortcuts', () => {
-    const keys = DEFAULT_SHORTCUTS.map((s) => `${s.ctrl ? 'Ctrl+' : ''}${s.key}`);
-    expect(keys).toEqual(['Ctrl+K', 'Ctrl+N', 'Ctrl+O', 'Ctrl+,', 'Ctrl+/', 'Ctrl+S']);
+describe('createShortcutHandler', () => {
+  // The old DEFAULT_SHORTCUTS test compared a list of keys against a constant
+  // whose handlers were all empty — it asserted the shape of something that did
+  // nothing. These drive a real handler and check the handler runs.
+  const makeEvent = (init: Partial<KeyboardEvent>) =>
+    ({ preventDefault: vi.fn(), ...init }) as unknown as KeyboardEvent;
+
+  it('runs the handler for a matching shortcut', () => {
+    const palette = vi.fn();
+    const settings = vi.fn();
+    const shortcuts: ShortcutDef[] = [
+      { key: 'k', ctrl: true, handler: palette },
+      { key: ',', ctrl: true, handler: settings },
+    ];
+    const dispatch = createShortcutHandler(shortcuts);
+
+    const handled = dispatch(makeEvent({ key: 'k', ctrlKey: true }));
+    expect(handled).toBe(true);
+    expect(palette).toHaveBeenCalledTimes(1);
+    expect(settings).not.toHaveBeenCalled();
+  });
+
+  it('prevents the browser default only when it handles the key', () => {
+    const dispatch = createShortcutHandler([{ key: 'k', ctrl: true, handler: vi.fn() }]);
+    const matched = makeEvent({ key: 'k', ctrlKey: true });
+    dispatch(matched);
+    expect(matched.preventDefault).toHaveBeenCalled();
+
+    const unmatched = makeEvent({ key: 'q', ctrlKey: true });
+    dispatch(unmatched);
+    expect(unmatched.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('does not fire a Ctrl shortcut when Ctrl is not held', () => {
+    const handler = vi.fn();
+    const dispatch = createShortcutHandler([{ key: 'k', ctrl: true, handler }]);
+    expect(dispatch(makeEvent({ key: 'k' }))).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes Ctrl+K from Ctrl+Shift+K', () => {
+    const plain = vi.fn();
+    const shifted = vi.fn();
+    const dispatch = createShortcutHandler([
+      { key: 'k', ctrl: true, handler: plain },
+      { key: 'k', ctrl: true, shift: true, handler: shifted },
+    ]);
+
+    dispatch(makeEvent({ key: 'K', ctrlKey: true, shiftKey: true }));
+    expect(shifted).toHaveBeenCalledTimes(1);
+    expect(plain).not.toHaveBeenCalled();
   });
 });

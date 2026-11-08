@@ -1,7 +1,11 @@
 /**
- * Spec 02 §2.5 — Ctrl+K Command Palette
- * Spec 02 §2.6 — Global Shortcuts
- * Spec 02 §2.7 — First Run Setup
+ * Spec 02 §2.5–§2.7 — shortcut parsing and dispatch.
+ *
+ * These two functions used to live in `main/ipc.ts`, a module no production file
+ * imported: its `DEFAULT_SHORTCUTS` list paired six shortcuts with empty
+ * handlers, so it proved nothing. They are pure functions over a KeyboardEvent,
+ * which means they belong in the renderer — where the shortcuts are actually
+ * handled — rather than next to the IPC layer they have nothing to do with.
  */
 
 export interface ShortcutDef {
@@ -29,22 +33,14 @@ export function createShortcutHandler(shortcuts: ShortcutDef[]) {
         ...(s.ctrl ? ['Ctrl'] : []),
         ...(s.alt ? ['Alt'] : []),
         ...(s.shift ? ['Shift'] : []),
-        s.key,
+        s.key.toUpperCase(),
       ].join('+');
       if (shortcut === expected) {
-        s.handler();
         event.preventDefault();
-        return;
+        s.handler();
+        return true;
       }
     }
+    return false;
   };
 }
-
-export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
-  { key: 'K', ctrl: true, handler: () => {} },
-  { key: 'N', ctrl: true, handler: () => {} },
-  { key: 'O', ctrl: true, handler: () => {} },
-  { key: ',', ctrl: true, handler: () => {} },
-  { key: '/', ctrl: true, handler: () => {} },
-  { key: 'S', ctrl: true, handler: () => {} },
-];

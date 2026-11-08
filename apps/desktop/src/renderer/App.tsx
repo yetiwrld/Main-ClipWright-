@@ -10,6 +10,7 @@ import { CommandPalette } from './components/CommandPalette.js';
 import { SetupDialog } from './components/SetupDialog.js';
 import { RecoveryDialog } from './features/updates/RecoveryDialog.js';
 import { UpdateNotice } from './features/updates/UpdateNotice.js';
+import { ShortcutSheet } from './components/ShortcutSheet.js';
 import { api, isDesktop } from './api.js';
 import type { RecoveryStatePayload } from './global.js';
 
@@ -31,6 +32,7 @@ export default function App() {
   const [recovery, setRecovery] = useState<RecoveryStatePayload | null>(null);
   // Bumping this tells the update notice to open its dialog (SPEC 15 §3).
   const [showUpdateDialog, setShowUpdateDialog] = useState(0);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const navigate = useCallback((r: Route) => {
     setRoute(r);
@@ -67,16 +69,48 @@ export default function App() {
     };
   }, []);
 
+  /**
+   * Spec 02 §2.6 — global shortcuts.
+   *
+   * Handled in the renderer because every one of them is navigation or a dialog,
+   * and the renderer owns both. Ctrl+O and Ctrl+S deliberately do nothing here:
+   * opening a video needs a project to open it into, and saving is continuous
+   * (the top bar reports it), so a manual-save shortcut would be theatre. The
+   * cheat sheet lists them honestly rather than pretending otherwise.
+   */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+
+      switch (e.key) {
+        case 'k':
+        case 'K':
+          e.preventDefault();
+          setPaletteOpen((open) => !open);
+          break;
+        case ',':
+          e.preventDefault();
+          navigate({ name: 'settings', section: 'general' });
+          break;
+        case 'n':
+        case 'N':
+          // Start a project: the panel that asks for a name and a source, not a
+          // silently-created empty project the user then has to rename.
+          e.preventDefault();
+          navigate({ name: 'home' });
+          break;
+        case '/':
+          e.preventDefault();
+          setShortcutsOpen((open) => !open);
+          break;
+        default:
+          break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [navigate]);
 
   const isOutsideProject = route.name !== 'project';
 
@@ -148,6 +182,8 @@ export default function App() {
           onNavigate={navigate}
         />
       )}
+
+      {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
 
       <RecoveryDialog
         open={recovery !== null}
