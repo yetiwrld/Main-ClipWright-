@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { builtInStyle } from '@clipwright/caption-styles';
 import { ExportDialog, collectExportItems } from '../features/export/ExportDialog.js';
 import type { TimelineState } from '@clipwright/timeline-engine';
 
-// The dialog talks to the desktop bridge; without it, exports must not pretend.
+// The dialog talks to the desktop bridge; without it, exports must not pretend. The
+// flag is mutable so one block can exercise the real export path.
+const bridge = vi.hoisted(() => ({ desktop: false }));
+
 vi.mock('../api.js', () => ({
-  isDesktop: () => false,
+  isDesktop: () => bridge.desktop,
   api: {
     startExport: vi.fn(),
     getExportQueue: vi.fn(async () => ({ jobs: [], running: 0, maxConcurrent: 1 })),
@@ -240,5 +244,66 @@ describe('ExportDialog', () => {
     const selects = screen.getAllByRole('combobox');
     fireEvent.change(selects[0], { target: { value: '720p' } });
     expect(screen.getByText(/720×1280/)).toBeTruthy();
+  });
+});
+
+describe('ExportDialog caption styles', () => {
+  it('passes the project copies on to the export', async () => {
+    bridge.desktop = true;
+    // This is the contract that makes the style editor worth anything: a saved
+    // copy has to reach the burn-in, or the export silently renders the preset the
+    // copy started from (SPEC 11 §6).
+    const startExport = (await import('../api.js')).api.startExport as unknown as ReturnType<typeof vi.fn>;
+    startExport.mockReset();
+    startExport.mockResolvedValue({
+      ok: true,
+      job: { id: 'job-1', status: 'queued' },
+    });
+    const house = { ...builtInStyle('bold-creator')!, id: 'house', name: 'House', font: { ...builtInStyle('bold-creator')!.font, sizePctOfShortSide: 9 } };
+
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+        captionStyles={{ house }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('export-button'));
+    await waitFor(() => expect(startExport).toHaveBeenCalled());
+    const payload = startExport.mock.calls[0]![0] as { captionStyles?: Record<string, unknown> };
+    expect(payload.captionStyles).toBeDefined();
+    expect((payload.captionStyles as Record<string, typeof house>).house!.name).toBe('House');
+  });
+
+  it('omits nothing when the project has no copies', async () => {
+    bridge.desktop = true;
+    // An absent map and an empty map mean the same thing to the main process; what
+    // must not happen is the dialog inventing a preset map of its own, which would
+    // override a copy the export runner could have resolved itself.
+    const startExport = (await import('../api.js')).api.startExport as unknown as ReturnType<typeof vi.fn>;
+    startExport.mockReset();
+    startExport.mockResolvedValue({ ok: true, job: { id: 'job-2', status: 'queued' } });
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('export-button'));
+    await waitFor(() => expect(startExport).toHaveBeenCalled());
+    const payload = startExport.mock.calls[0]![0] as { captionStyles?: unknown };
+    expect(payload.captionStyles).toBeUndefined();
   });
 });

@@ -12,6 +12,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createCaptionItem, createDefaultTimeline, type TimelineState } from '@clipwright/timeline-engine';
+import { builtInStyle } from '@clipwright/caption-styles';
 import type { TimelineApi } from '../features/editor/use-timeline.js';
 import { CaptionPanel, CaptionWordView, activeCaptionRow, captionRows } from '../features/editor/CaptionPanel.js';
 
@@ -257,5 +258,64 @@ describe('CaptionWordView', () => {
     const state = makeState();
     render(<CaptionWordView state={state} timeline={fakeTimeline(state)} itemId="cap-1" />);
     expect(screen.getByText('Generated from the transcript.')).toBeTruthy();
+  });
+});
+
+describe('project-local styles in the caption list', () => {
+  const house = {
+    ...builtInStyle('bold-creator')!,
+    id: 'house',
+    name: 'House style',
+  };
+
+  it('names a caption by the copy it actually uses', () => {
+    // The row said "Bold Creator" while the overlay painted the copy — two
+    // different looks with one name, which is exactly the confusion the style
+    // editor's "save a copy" rule is supposed to avoid.
+    const state = makeState();
+    state.items['cap-1']!.captionStyleId = 'house';
+    render(<CaptionPanel state={state} timeline={fakeTimeline(state)} projectStyles={{ house }} />);
+    expect(screen.getAllByText(/House style/).length).toBeGreaterThan(0);
+  });
+
+  it('offers the project copies alongside the presets', () => {
+    const state = makeState();
+    render(<CaptionPanel state={state} timeline={fakeTimeline(state)} projectStyles={{ house }} />);
+    const picker = screen.getAllByLabelText('Caption style')[0]! as HTMLSelectElement;
+    const values = Array.from(picker.options).map((option) => option.value);
+    expect(values).toContain('house');
+    expect(values).toContain('bold-creator');
+  });
+
+  it('does not list a copy twice when its id matches a preset', () => {
+    // A copy that kept a preset's id would otherwise appear twice in the picker,
+    // and which of the two a user picked would be unanswerable.
+    const state = makeState();
+    const shadow = { ...house, id: 'karaoke', name: 'Karaoke (mine)' };
+    render(<CaptionPanel state={state} timeline={fakeTimeline(state)} projectStyles={{ karaoke: shadow }} />);
+    const picker = screen.getAllByLabelText('Caption style')[0]! as HTMLSelectElement;
+    expect(Array.from(picker.options).filter((option) => option.value === 'karaoke')).toHaveLength(1);
+  });
+
+  it('asks to edit the style the row uses', () => {
+    const onEditStyle = vi.fn();
+    const state = makeState();
+    state.items['cap-1']!.captionStyleId = 'house';
+    render(
+      <CaptionPanel
+        state={state}
+        timeline={fakeTimeline(state)}
+        projectStyles={{ house }}
+        onEditStyle={onEditStyle}
+      />,
+    );
+    fireEvent.click(screen.getAllByLabelText('Edit this caption style')[0]!);
+    expect(onEditStyle).toHaveBeenCalledWith('house');
+  });
+
+  it('has no edit button when the panel cannot host the editor', () => {
+    const state = makeState();
+    render(<CaptionPanel state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.queryByLabelText('Edit this caption style')).toBeNull();
   });
 });

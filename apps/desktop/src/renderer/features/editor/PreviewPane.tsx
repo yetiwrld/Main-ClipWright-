@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
+import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
@@ -13,7 +14,16 @@ const MEDIA_ORIGIN = 'clipwright-media://media/';
  * the main-track item, scaled into the project canvas. Playback advances the
  * playhead from a real clock and lets the video element follow it.
  */
-export function PreviewPane({ state, fps }: { state: TimelineState; fps: 30 | 60 }) {
+export function PreviewPane({
+  state,
+  fps,
+  captionStyles = {},
+}: {
+  state: TimelineState;
+  fps: 30 | 60;
+  /** Project-local caption styles, so the preview shows what the export will. */
+  captionStyles?: Readonly<Record<string, CaptionStyle>>;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -182,7 +192,12 @@ export function PreviewPane({ state, fps }: { state: TimelineState; fps: 30 | 60
             "nothing under the playhead" message, because a caption track can be
             the only track with content in a range.
           */}
-          <CaptionOverlay state={state} width={canvas.width} height={canvas.height} />
+          <CaptionOverlay
+            state={state}
+            width={canvas.width}
+            height={canvas.height}
+            projectCopies={captionStyles}
+          />
         </div>
       </div>
 

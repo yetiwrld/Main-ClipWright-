@@ -10,9 +10,14 @@
  * directly, which is what keeps an edit undoable and the autosave honest.
  */
 import React, { useMemo, useState } from 'react';
-import { Captions, Pencil, Sparkles, Type, Wand2 } from 'lucide-react';
+import { Captions, Palette, Pencil, Sparkles, Type, Wand2 } from 'lucide-react';
 import { Button, Card, Chip, EmptyState, IconButton, Input, TextArea } from '@clipwright/design-system';
-import { BUILT_IN_STYLES, DEFAULT_STYLE_ID, builtInStyle } from '@clipwright/caption-styles';
+import {
+  BUILT_IN_STYLES,
+  DEFAULT_STYLE_ID,
+  builtInStyle,
+  type CaptionStyle,
+} from '@clipwright/caption-styles';
 import type { TimelineItem } from '@clipwright/project-schema/schemas';
 import { formatTimecode, type TimelineState } from '@clipwright/timeline-engine';
 import { playheadStore } from './playhead-store.js';
@@ -53,9 +58,14 @@ export function activeCaptionRow(rows: CaptionRow[], timeUs: number): CaptionRow
 export function CaptionPanel({
   state,
   timeline,
+  projectStyles = {},
+  onEditStyle,
 }: {
   state: TimelineState;
   timeline: TimelineApi;
+  /** Project-local styles, so a caption saved as a copy shows its own name. */
+  projectStyles?: Readonly<Record<string, CaptionStyle>>;
+  onEditStyle?: (styleId: string) => void;
 }) {
   const rows = useMemo(() => captionRows(state), [state]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -133,6 +143,8 @@ export function CaptionPanel({
           }}
           onCancel={() => setEditing(null)}
           onStyle={(styleId) => timeline.applyCaptionStyle([row.item.id], styleId, true)}
+          projectStyles={projectStyles}
+          onEditStyle={onEditStyle}
         />
       ))}
     </div>
@@ -169,6 +181,8 @@ function CaptionRowView({
   onCommit,
   onCancel,
   onStyle,
+  projectStyles,
+  onEditStyle,
 }: {
   row: CaptionRow;
   active: boolean;
@@ -181,9 +195,23 @@ function CaptionRowView({
   onCommit: () => void;
   onCancel: () => void;
   onStyle: (styleId: string) => void;
+  projectStyles: Readonly<Record<string, CaptionStyle>>;
+  onEditStyle?: (styleId: string) => void;
 }) {
   const styleId = row.item.captionStyleId ?? DEFAULT_STYLE_ID;
-  const styleName = builtInStyle(styleId)?.name ?? styleId;
+  // A project copy shadows the preset it came from, exactly as `resolveStyle` does
+  // for rendering — a row must never claim to use "Bold Creator" while painting a
+  // copy of it.
+  const styleName = projectStyles[styleId]?.name ?? builtInStyle(styleId)?.name ?? styleId;
+
+  // Presets first, then this project's copies, so the list reads as "the library,
+  // then mine" instead of interleaving the two.
+  const styles = [...BUILT_IN_STYLES.map((style) => ({ id: style.id, name: style.name }))];
+  for (const style of Object.values(projectStyles)) {
+    if (!styles.some((candidate) => candidate.id === style.id)) {
+      styles.push({ id: style.id, name: style.name });
+    }
+  }
 
   return (
     <Card
@@ -271,12 +299,20 @@ function CaptionRowView({
             color: 'var(--text-primary)',
           }}
         >
-          {BUILT_IN_STYLES.map((style) => (
+          {styles.map((style) => (
             <option key={style.id} value={style.id}>
               {style.name}
             </option>
           ))}
         </select>
+        {onEditStyle && (
+          <IconButton
+            label="Edit this caption style"
+            size={28}
+            icon={<Palette size={12} />}
+            onClick={() => onEditStyle(styleId)}
+          />
+        )}
       </div>
     </Card>
   );

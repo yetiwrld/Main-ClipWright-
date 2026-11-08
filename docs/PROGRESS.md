@@ -44,9 +44,10 @@ That is Phase 1, 2 and 3 complete plus most of Phase 4.
 
 ## What is missing
 
-**Phase 5 is built, minus the style editor.** The last sessions finished the
-caption engine, the frame builder, the preview overlay, the caption list and the
-per-word editor, and put styled captions into the export path:
+**Phase 5 is built, minus the style editor's remaining polish.** The last sessions
+finished the caption engine, the frame builder, the preview overlay, the caption
+list, the per-word editor and a style editor, and put styled captions into the
+export path:
 
 - `packages/caption-styles` — the `.cwstyle` v1 schema, ten presets, resolution.
 - `packages/audio-core` — the gain envelope the preview and the export both use.
@@ -56,13 +57,18 @@ per-word editor, and put styled captions into the export path:
 - The editor — a Captions tab listing every caption in order with an `edited` chip,
   click-to-emphasise per word, and a canvas overlay in the preview painted by the
   same code the export uses.
+- The style editor — a dialog over font, case, alignment, line height, fill,
+  outline, shadow, highlight and position, where editing a preset saves a
+  project-local copy instead of overwriting it. The copies live in the project's
+  settings and reach the overlay, the caption list and the burn-in.
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
-Still open in Phase 5: the full style editor (colour pickers, anchor grid, drag on
-canvas), text and shape items, brand kits, the audio tools beyond the envelope
-(equaliser, metering UI, voiceover recorder), and keyframes/effects/transitions in
-the inspector.
+Still open in Phase 5: the style editor's colour pickers and anchor grid (colours
+are entered as hex today, and position is a slider rather than drag-on-canvas),
+text and shape items, brand kits, the audio tools beyond the envelope (equaliser,
+metering UI, voiceover recorder), and keyframes/effects/transitions in the
+inspector.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
 canvas editing and the keyframe editor are missing, the playback clock is not
@@ -112,8 +118,9 @@ Also found and fixed two real security holes along the way:
 the keyframe editor, and proxy playback. The inspector's numeric controls, including
 the volume slider that used to be a read-only placeholder, now work.
 
-**2. Finish Phase 5 ⚠️** — the style editor dialog, text and shape items, brand
-kits, and the audio tools beyond the envelope. Captions themselves are done:
+**2. Finish Phase 5 ⚠️** — the style editor's colour pickers and anchor grid,
+text and shape items, brand kits, and the audio tools beyond the envelope.
+Captions themselves are done:
 engine, frame builder, preview, list, word editor, burn-in.
 
 **3. Make the export render the rest of the timeline** — the video compositor:

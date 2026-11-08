@@ -12,6 +12,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Dialog } from '@clipwright/design-system';
 import type { TimelineState } from '@clipwright/timeline-engine';
+import type { CaptionStyle } from '@clipwright/caption-styles';
 import type { ExportJobPayload } from '../../global.js';
 import { isDesktop } from '../../api.js';
 import { DEFAULT_EXPORT_STATE, ExportPanel, type ExportPanelState } from './ExportPanel.js';
@@ -31,6 +32,12 @@ export interface ExportDialogProps {
   workAreaUs?: [number, number] | null;
   /** Duration of the whole composition. */
   durationUs: number;
+  /**
+   * Project-local caption styles. Without these a burn-in falls back to the preset
+   * each caption's style started from, silently ignoring every edit made in the
+   * style editor (SPEC 11 §6).
+   */
+  captionStyles?: Readonly<Record<string, CaptionStyle>>;
 }
 
 /** Range choices offered by §3.1. */
@@ -46,6 +53,7 @@ export function ExportDialog({
   fps,
   workAreaUs,
   durationUs,
+  captionStyles,
 }: ExportDialogProps) {
   const [panel, setPanel] = useState<ExportPanelState>(DEFAULT_EXPORT_STATE);
   const [rangeChoice, setRangeChoice] = useState<RangeChoice>(workAreaUs ? 'work-area' : 'whole');
@@ -81,13 +89,14 @@ export function ExportDialog({
       items,
       clashPolicy: 'auto-number',
       fullDecode: true,
+      captionStyles,
     });
     if (!result.ok) {
       setMessage(result.error);
       return;
     }
     setMessage('Export queued. Rendering starts now and the editor stays usable.');
-  }, [exports, panel, compositionName, projectId, compositionId, rangeUs, durationUs, fps, items]);
+  }, [exports, panel, compositionName, projectId, compositionId, rangeUs, durationUs, fps, items, captionStyles]);
 
   const activeRunning = running.length > 0;
   const etaLine = useMemo(() => {

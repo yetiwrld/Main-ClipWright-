@@ -69,10 +69,13 @@ This document tracks architectural scope boundaries and honest limitations per `
    the preview. Everything the ten presets ask for is expressible. The per-caption
    `rotationJitterDeg` tilt is not applied — ASS has no per-event rotation, so the
    tilt exists in the preview and the editable style but not in the burned-in file.
-3. **Project-local style copies are not stored yet.** The resolver supports
-   preset → project copy → item overrides (SPEC 11 §6), and the export path accepts
-   a style map, but nothing writes one to the project file, so `styleOverrides` on
-   an item is the only per-caption customisation that currently survives to export.
+3. **Project-local style copies live in the project's settings blob.** The style
+   editor saves a copy into `settings.captionStyles`, and the overlay, the caption
+   list and the burn-in all resolve through it, so an edited style now survives to
+   export. It is not a first-class table: styles are not listed separately, cannot
+   be renamed or deleted from a dedicated manage screen (a copy can only be
+   replaced by editing it again), and a project opened in a build that predates the
+   style editor shows the presets — the copies are simply invisible to it, not lost.
 4. **No frame blending.** Frame-rate conversion uses nearest-time selection.
 5. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).

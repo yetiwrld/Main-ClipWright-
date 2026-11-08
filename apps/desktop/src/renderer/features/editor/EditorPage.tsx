@@ -5,11 +5,15 @@ import { api, describeError, isDesktop } from '../../api.js';
 import type { TimelineApi } from './use-timeline.js';
 import { useTimeline } from './use-timeline.js';
 import { TimelinePanel } from './TimelinePanel.js';
-import { projectDurationUs } from '@clipwright/timeline-engine';
+import { projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import { PreviewPane } from './PreviewPane.js';
 import { ItemInspector, MediaLibrary, type MediaAsset } from './Inspector.js';
 import { CaptionPanel, CaptionWordView } from './CaptionPanel.js';
 import { ExportDialog } from '../export/ExportDialog.js';
+import { CaptionStyleEditor } from './CaptionStyleEditor.js';
+import { playheadStore } from './playhead-store.js';
+import { useCaptionStyles } from './use-caption-styles.js';
+import { DEFAULT_STYLE_ID } from '@clipwright/caption-styles';
 
 export function EditorPage({
   projectId,
@@ -30,6 +34,8 @@ export function EditorPage({
   const [resizing, setResizing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [leftTab, setLeftTab] = useState<'media' | 'captions'>('media');
+  const captionStyles = useCaptionStyles(projectId);
+  const [styleEditorOpen, setStyleEditorOpen] = useState(false);
 
   useEffect(() => {
     if (!isDesktop()) {
@@ -231,7 +237,12 @@ export function EditorPage({
                   error={mediaError}
                 />
               ) : state ? (
-                <CaptionPanel state={state} timeline={timeline} />
+                <CaptionPanel
+                  state={state}
+                  timeline={timeline}
+                  projectStyles={captionStyles.styles}
+                  onEditStyle={() => setStyleEditorOpen(true)}
+                />
               ) : (
                 <div style={{ padding: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                   Loading…
@@ -252,7 +263,7 @@ export function EditorPage({
             }}
           >
             {state ? (
-              <PreviewPane state={state} fps={timeline.fps} />
+              <PreviewPane state={state} fps={timeline.fps} captionStyles={captionStyles.styles} />
             ) : (
               <div style={{ padding: 'var(--space-3)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 {timeline.loadError || 'Loading the preview…'}
@@ -347,6 +358,18 @@ export function EditorPage({
         fps={timeline.fps}
         workAreaUs={state?.workArea ? [state.workArea.inUs, state.workArea.outUs] : null}
         durationUs={state ? projectDurationUs(state) : 0}
+        captionStyles={captionStyles.styles}
+      />
+
+      <CaptionStyleEditor
+        open={styleEditorOpen}
+        styleId={editingStyleId(state, timeline.selection) ?? DEFAULT_STYLE_ID}
+        projectStyles={captionStyles.styles}
+        onClose={() => setStyleEditorOpen(false)}
+        onSave={(style) => {
+          void captionStyles.save(style);
+          setStyleEditorOpen(false);
+        }}
       />
     </div>
   );
@@ -363,4 +386,27 @@ function SaveBadge({ saveState }: { saveState: TimelineApi['saveState'] }) {
           : 'Not saved';
   const variant = saveState === 'error' ? 'error' : saveState === 'saved' ? 'success' : 'neutral';
   return <Chip variant={variant}>{label}</Chip>;
+}
+
+/**
+ * The style the style editor opens on: the selected caption's, else the caption
+ * under the playhead. Editing "the current look" is what a user means by opening
+ * the style editor, and picking the first caption in the timeline instead would
+ * silently edit a different clip's look.
+ */
+export function editingStyleId(
+  state: TimelineState | null,
+  selection: readonly string[],
+): string | null {
+  if (!state) return null;
+  for (const id of selection) {
+    const item = state.items[id];
+    if (item?.type === 'caption' && item.captionStyleId) return item.captionStyleId;
+  }
+  const us = playheadStore.get();
+  const under = Object.values(state.items)
+    .filter((item) => item.type === 'caption' && item.captionStyleId)
+    .filter((item) => us >= item.startUs && us < item.startUs + item.durationUs)
+    .sort((a, b) => b.startUs - a.startUs)[0];
+  return under?.captionStyleId ?? null;
 }
