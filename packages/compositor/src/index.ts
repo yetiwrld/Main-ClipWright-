@@ -20,3 +20,19 @@ export {
   type MeasureText,
   type WordRect,
 } from './text-layout.js';
+
+/**
+ * SPEC 11 §5 — the frame builder, shared by preview and export.
+ *
+ * `layoutText` decides where words go; this decides what they look like at a
+ * given instant. Splitting them is what lets one drawing path serve both.
+ */
+export {
+  captionFrameAt,
+  captionItemAt,
+  type CaptionFrame,
+  type CaptionFrameInput,
+  type CaptionFrameWord,
+  type CaptionWordOverride,
+  type CaptionWordTiming,
+} from './caption-frame.js';
