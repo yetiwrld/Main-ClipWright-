@@ -38,8 +38,14 @@ This document tracks architectural scope boundaries and honest limitations per `
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. **Not implemented yet:** linked audio detach/unlink, transitions, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
-6. **Inspector edits are limited to start, ±1 frame duration and a read-only volume readout.** Transform/opacity/crop editing, keyframes and the section set from SPEC 08 §7.2 arrive with Phase 5.
-7. **Left panel has only the Media tab.** Captions, Text/Graphics, Effects/Transitions, Audio and AI tabs are Phase 5; nothing pretends to be there.
+6. **The inspector edits by number, not on the canvas.** Opacity, volume, pan,
+   speed, crop edges, scale and rotation are all editable and undoable, and the
+   volume slider is no longer a read-only placeholder. What is missing is the canvas
+   interaction from SPEC 08 §7.2 and SPEC 10 §8 — dragging to crop, dragging the
+   framing, the anchor grid — plus the keyframe editor.
+7. **The left panel has the Media and Captions tabs.** Text/Graphics,
+   Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
+   there.
 8. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.
 
 ---

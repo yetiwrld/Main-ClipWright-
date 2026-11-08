@@ -2218,6 +2218,129 @@ export function updateEffectParams(
   };
 }
 /**
+ * SPEC 09 §17, SPEC 12 §6.2 — edit the properties the inspector shows.
+ *
+ * Opacity, volume, gain, pan, speed, blend mode, fades, crop and transform all live
+ * on the item, and until this command existed none of them could be changed: the
+ * inspector showed volume disabled and the rest not at all. A property with no
+ * command is a property the file format supports and the app cannot reach.
+ *
+ * One command rather than fourteen, because they share every piece of machinery —
+ * track locking, the patch pair, the clamp — and separate commands would drift on
+ * the first one that forgot the lock check.
+ *
+ * Values are validated here rather than trusted from the caller, because the
+ * inspector's slider can be dragged and a bad value reaching the file is worse than
+ * a rejected edit: the schema would refuse on load, and the user would lose the
+ * whole composition instead of one gesture.
+ */
+export function setItemProperties(
+  state: TimelineState,
+  params: {
+    itemIds: string[];
+    patch: {
+      opacity?: number;
+      volumeDb?: number;
+      gainDb?: number;
+      pan?: number;
+      speed?: number;
+      muted?: boolean;
+      blendMode?: TimelineItem['blendMode'];
+      fadeInUs?: number;
+      fadeOutUs?: number;
+      fadeCurve?: TimelineItem['fadeCurve'];
+      crop?: Partial<TimelineItem['crop']>;
+      transform?: Partial<TimelineItem['transform']>;
+    };
+    fps: Fps;
+  },
+): CommandResult {
+  const targets = params.itemIds.filter((id) => state.items[id]);
+  if (targets.length === 0) return fail('not_found', 'No clips were selected.');
+
+  const lockedTrack = state.tracks.find(
+    (track) => track.locked && targets.some((id) => state.items[id]!.trackId === track.id),
+  );
+  if (lockedTrack) return fail('locked', `"${lockedTrack.name}" is locked.`);
+
+  const { patch } = params;
+
+  if (patch.opacity !== undefined && (patch.opacity < 0 || patch.opacity > 1)) {
+    return fail('invalid', 'Opacity must be between 0 and 100%.');
+  }
+  if (patch.volumeDb !== undefined && (patch.volumeDb < -60 || patch.volumeDb > 12)) {
+    return fail('invalid', 'Volume must be between −60 and +12 dB.');
+  }
+  if (patch.gainDb !== undefined && (patch.gainDb < -24 || patch.gainDb > 24)) {
+    return fail('invalid', 'Gain must be between −24 and +24 dB.');
+  }
+  if (patch.pan !== undefined && (patch.pan < -100 || patch.pan > 100)) {
+    return fail('invalid', 'Pan must be between −100 and +100.');
+  }
+  if (patch.speed !== undefined && (patch.speed < 0.1 || patch.speed > 8)) {
+    return fail('invalid', 'Speed must be between 0.1× and 8×.');
+  }
+
+  // Crop edges are fractions of the source; opposite edges that sum past 1 would
+  // describe a negative-width frame. Checked per item because the patch may merge
+  // with different existing values.
+  const cropProblem = targets.find((id) => {
+    if (!patch.crop) return false;
+    const crop = { ...state.items[id]!.crop, ...patch.crop };
+    return crop.left + crop.right >= 1 || crop.top + crop.bottom >= 1;
+  });
+  if (cropProblem) return fail('invalid', 'Those crop edges leave no picture.');
+
+  const negativeCrop = patch.crop
+    ? (['left', 'top', 'right', 'bottom'] as const).some(
+        (edge) => patch.crop![edge] !== undefined && (patch.crop![edge] as number) < 0,
+      )
+    : false;
+  if (negativeCrop) return fail('invalid', 'Crop edges cannot be negative.');
+
+  // A crossfade longer than half the clip would overlap itself and, on a very short
+  // clip, produce a fade whose two halves fight each other.
+  const fadeProblem = targets.find((id) => {
+    const item = state.items[id]!;
+    const fadeIn = patch.fadeInUs ?? item.fadeInUs;
+    const fadeOut = patch.fadeOutUs ?? item.fadeOutUs;
+    return (patch.fadeInUs !== undefined || patch.fadeOutUs !== undefined) && fadeIn + fadeOut > item.durationUs / 2;
+  });
+  if (fadeProblem) {
+    return fail('invalid', 'Those fades are longer than half the clip.');
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of targets) {
+      const target = draft.items[id] as TimelineItem;
+      if (patch.opacity !== undefined) target.opacity = patch.opacity;
+      if (patch.volumeDb !== undefined) target.volumeDb = patch.volumeDb;
+      if (patch.gainDb !== undefined) target.gainDb = patch.gainDb;
+      if (patch.pan !== undefined) target.pan = patch.pan;
+      if (patch.speed !== undefined) target.speed = patch.speed;
+      if (patch.muted !== undefined) target.muted = patch.muted;
+      if (patch.blendMode !== undefined) target.blendMode = patch.blendMode;
+      if (patch.fadeInUs !== undefined) target.fadeInUs = Math.max(0, Math.round(patch.fadeInUs));
+      if (patch.fadeOutUs !== undefined) target.fadeOutUs = Math.max(0, Math.round(patch.fadeOutUs));
+      if (patch.fadeCurve !== undefined) target.fadeCurve = patch.fadeCurve;
+      // Crop and transform merge per field: the inspector edits one corner at a
+      // time, and replacing the whole object would reset the other three.
+      if (patch.crop) target.crop = { ...target.crop, ...patch.crop };
+      if (patch.transform) target.transform = { ...target.transform, ...patch.transform };
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: targets,
+    notes: [],
+  };
+}
+
+/**
  * Update a marker's name, note, or color (SPEC 09 §18).
  * Double-click a marker to edit in the app; this is the engine command.
  */

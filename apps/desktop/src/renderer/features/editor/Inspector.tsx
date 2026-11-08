@@ -177,6 +177,18 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
         </div>
       </Field>
 
+      <Field label="Opacity">
+        <Slider
+          value={Math.round(item.opacity * 100)}
+          min={0}
+          max={100}
+          step={1}
+          ariaLabel="Clip opacity as a percentage"
+          formatValue={(value) => `${value}%`}
+          onChange={(value) => timeline.setItemProperties([item.id], { opacity: value / 100 })}
+        />
+      </Field>
+
       <Field label="Volume">
         <Slider
           value={item.volumeDb}
@@ -184,14 +196,102 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           max={12}
           step={1}
           ariaLabel="Clip volume in decibels"
-          formatValue={(value) => `${value} dB`}
-          onChange={() => undefined}
-          disabled
+          formatValue={(value) => (value <= -60 ? 'Silent' : `${value} dB`)}
+          onChange={(value) => timeline.setItemProperties([item.id], { volumeDb: value })}
         />
-        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-          Volume edits arrive with the audio tools; the value is stored on the clip and used for preview muting.
-        </div>
       </Field>
+
+      <Field label="Pan">
+        <Slider
+          value={item.pan}
+          min={-100}
+          max={100}
+          step={1}
+          ariaLabel="Clip pan"
+          formatValue={(value) =>
+            value === 0 ? 'Centre' : `${Math.abs(value)}% ${value < 0 ? 'left' : 'right'}`
+          }
+          onChange={(value) => timeline.setItemProperties([item.id], { pan: value })}
+        />
+      </Field>
+
+      <Field label="Speed">
+        <Slider
+          value={item.speed}
+          min={0.25}
+          max={4}
+          step={0.05}
+          ariaLabel="Playback speed"
+          formatValue={(value) => `${value.toFixed(2)}×`}
+          onChange={(value) => timeline.setItemProperties([item.id], { speed: value })}
+        />
+      </Field>
+
+      {/*
+        Crop and transform are numeric fields rather than canvas drag handles. The
+        canvas interaction is the better tool and it is not built yet; a field that
+        works is more honest than a handle that does not exist, and both go through
+        the same command so the drag can be added without changing the model.
+      */}
+      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Crop (% of source)</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+        {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
+          <Field key={edge} label={edge[0]!.toUpperCase() + edge.slice(1)}>
+            <Input
+              type="number"
+              min={0}
+              max={95}
+              value={Math.round(item.crop[edge] * 100)}
+              aria-label={`Crop ${edge}`}
+              onChange={(event) => {
+                // `Number('')` is 0, so clearing the field would silently crop the
+                // clip to nothing. An empty field means "no edit yet".
+                if (event.target.value.trim() === '') return;
+                const percent = Number(event.target.value);
+                if (!Number.isFinite(percent)) return;
+                timeline.setItemProperties([item.id], { crop: { [edge]: Math.min(95, Math.max(0, percent)) / 100 } });
+              }}
+            />
+          </Field>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Transform</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+        <Field label="Scale">
+          <Input
+            type="number"
+            min={10}
+            max={400}
+            value={Math.round(item.transform.scaleX * 100)}
+            aria-label="Scale as a percentage"
+            onChange={(event) => {
+              if (event.target.value.trim() === '') return;
+              const percent = Number(event.target.value);
+              if (!Number.isFinite(percent)) return;
+              const scale = Math.min(4, Math.max(0.1, percent / 100));
+              timeline.setItemProperties([item.id], { transform: { scaleX: scale, scaleY: scale } });
+            }}
+          />
+        </Field>
+        <Field label="Rotation">
+          <Input
+            type="number"
+            min={-180}
+            max={180}
+            value={Math.round(item.transform.rotation)}
+            aria-label="Rotation in degrees"
+            onChange={(event) => {
+              if (event.target.value.trim() === '') return;
+              const degrees = Number(event.target.value);
+              if (!Number.isFinite(degrees)) return;
+              timeline.setItemProperties([item.id], {
+                transform: { rotation: Math.min(180, Math.max(-180, degrees)) },
+              });
+            }}
+          />
+        </Field>
+      </div>
 
       {/* Effects section (SPEC 09 §17) */}
       {(item.effects && item.effects.length > 0) && (

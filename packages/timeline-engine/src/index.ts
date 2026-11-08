@@ -66,6 +66,7 @@ export {
   updateKeyframe,
   moveKeyframe,
   duplicateKeyframe,
+  setItemProperties,
   splitCaptionSegment,
   mergeCaptionSegments,
   trimCaptionSegment,

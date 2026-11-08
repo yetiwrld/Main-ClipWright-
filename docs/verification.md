@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  59 passed (59)
-     Tests  1382 passed (1382)
+Test Files  61 passed (61)
+     Tests  1415 passed (1415)
 ```
 
 | Area | Tests | What they actually check |
@@ -26,15 +26,15 @@ Test Files  59 passed (59)
 | `packages/compositor` | 70 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios) and the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
 | `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
-| `apps/desktop/src/renderer` | 227 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor (jsdom) |
+| `apps/desktop/src/renderer` | 240 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
-| `packages/timeline-engine` | 124 | Commands, invariants, undo/redo, caption editing (§11 §2.5) |
+| `packages/timeline-engine` | 144 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation (§09 §17) |
 | `packages/audio-core` | 48 | The gain envelope: dB conversion, fade curves, keyframe interpolation and easing, and the preview/export agreement that SPEC 10 §7.1 requires |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1382** | 59 files |
+| **Total** | **1415** | 61 files |
 
 ### Tests that run real processes
 

@@ -34,6 +34,7 @@ import {
   splitCaptionSegment,
   mergeCaptionSegments,
   trimCaptionSegment,
+  setItemProperties,
   editCaptionText,
   retimeCaption,
   trimCaptionWordsToRange,
@@ -124,6 +125,11 @@ export interface TimelineApi {
   splitCaptionSegment: (itemId: string, timeUs: number) => boolean;
   mergeCaptionSegments: (leftItemId: string, rightItemId: string) => boolean;
   trimCaptionSegment: (itemId: string, edge: 'start' | 'end', timeUs: number) => boolean;
+  /** Edit opacity, level, pan, speed, fades, crop or transform (SPEC 09 §17). */
+  setItemProperties: (
+    itemIds: string[],
+    patch: Parameters<typeof setItemProperties>[1]['patch'],
+  ) => boolean;
   editCaptionText: (itemId: string, text: string, maxCharsPerLine?: number, maxLines?: number) => boolean;
   retimeCaption: (itemId: string, startUs?: number, endUs?: number) => boolean;
   trimCaptionWordsToRange: (itemId: string) => boolean;
@@ -456,6 +462,8 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Merge captions', (s) => mergeCaptionSegments(s, { leftItemId, rightItemId, fps })),
       trimCaptionSegment: (itemId, edge, timeUs) =>
         run('Trim caption', (s) => trimCaptionSegment(s, { itemId, edge, timeUs, fps })),
+      setItemProperties: (itemIds, patch) =>
+        run('Edit clip properties', (s) => setItemProperties(s, { itemIds, patch, fps })),
       editCaptionText: (itemId, text, maxCharsPerLine, maxLines) =>
         run('Edit caption', (s) =>
           editCaptionText(s, { itemId, text, maxCharsPerLine, maxLines }),

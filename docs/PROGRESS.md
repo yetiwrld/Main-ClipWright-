@@ -65,9 +65,10 @@ canvas), text and shape items, brand kits, the audio tools beyond the envelope
 the inspector.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-no transform/opacity/crop editing in the inspector, playback clock is not
+canvas editing and the keyframe editor are missing, the playback clock is not
 audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
-slow).
+slow). Numeric editing of opacity, level, pan, speed, crop, scale and rotation
+works and is undoable.
 
 **Phase 6's export is incomplete in one important way.** Captions are rendered;
 the rest of the video compositor is not. Each video/image item is decoded
@@ -107,8 +108,9 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — small, well-defined gaps: inspector controls,
-proxy playback.
+**1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid),
+the keyframe editor, and proxy playback. The inspector's numeric controls, including
+the volume slider that used to be a read-only placeholder, now work.
 
 **2. Finish Phase 5 ⚠️** — the style editor dialog, text and shape items, brand
 kits, and the audio tools beyond the envelope. Captions themselves are done:

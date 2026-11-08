@@ -81,6 +81,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     splitCaptionSegment: vi.fn(() => true),
     mergeCaptionSegments: vi.fn(() => true),
     trimCaptionSegment: vi.fn(() => true),
+    setItemProperties: vi.fn(() => true),
     editCaptionText: vi.fn(() => true),
     retimeCaption: vi.fn(() => true),
     trimCaptionWordsToRange: vi.fn(() => true),
