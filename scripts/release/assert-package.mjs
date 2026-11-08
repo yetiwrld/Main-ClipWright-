@@ -13,7 +13,7 @@
  * Usage: node scripts/release/assert-package.mjs
  */
 import { existsSync } from 'node:fs';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { open, readdir, stat, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -98,6 +98,51 @@ if (existsSync(packagedResources)) {
   problems.push('dist/win-unpacked/resources/bin is missing; no binaries were packaged.');
 }
 
+// ---- 7. The native modules the app cannot start without are inside the asar.
+//
+// `better-sqlite3` is a compiled addon: if it is missing, `require` throws the
+// moment the first database is opened, which happens before the window shows
+// anything useful. Packaged under pnpm it is a symlink into the workspace store,
+// and a symlink that resolves to nothing is exactly as broken as a missing file
+// while looking like it is present.
+//
+// `files` does not control node_modules (electron-builder copies production
+// dependencies through a separate matcher), so this cannot be inferred from the
+// config — it has to be read out of the archive that was actually built.
+const appAsar = join(DIST, 'win-unpacked', 'resources', 'app.asar');
+if (!existsSync(appAsar)) {
+  problems.push('dist/win-unpacked/resources/app.asar is missing; nothing was packaged.');
+} else {
+  const entries = await listAsarEntries(appAsar);
+  if (entries === null) {
+    problems.push('app.asar could not be read; the package cannot be inspected.');
+  } else {
+    const hasSqlite = entries.some((entry) => entry.startsWith('node_modules/better-sqlite3/'));
+    if (!hasSqlite) {
+      problems.push(
+        'better-sqlite3 is not inside app.asar; the app would throw the first time it opens a database.',
+      );
+    }
+
+    // A .node addon cannot be loaded from inside an asar archive, so every one
+    // must also appear under app.asar.unpacked. electron-builder derives that
+    // from `asarUnpack`, and a pattern that stops matching silently produces an
+    // app that loads until it touches SQLite, then dies.
+    const unpackedRoot = join(DIST, 'win-unpacked', 'resources', 'app.asar.unpacked');
+    const unpackedAddons = await findFiles(unpackedRoot, (name) => name.endsWith('.node'));
+    const packagedAddons = entries.filter((entry) => entry.endsWith('.node'));
+    if (packagedAddons.length === 0) {
+      problems.push('No .node addon is inside app.asar, so no native module was packaged.');
+    }
+    if (unpackedAddons.length === 0) {
+      problems.push(
+        'No .node addon was unpacked into app.asar.unpacked; a native module cannot be loaded from an asar.',
+      );
+    }
+    console.log(`   app.asar: ${entries.length} entries, ${unpackedAddons.length} native addon(s) unpacked`);
+  }
+}
+
 if (problems.length > 0) {
   console.error('\nassert-package: the package would not work:\n');
   for (const problem of problems) console.error(`  - ${problem}`);
@@ -106,3 +151,67 @@ if (problems.length > 0) {
 }
 
 console.log('\nassert-package: OK — the package has a launchable app, both artefacts and the binaries.\n');
+
+/**
+ * Reads the file list out of an asar archive by parsing its header.
+ *
+ * asar is `[8-byte size fields][4-byte JSON length][JSON][files...]`, and the
+ * JSON is a flat directory tree where files carry a `size` and directories carry
+ * `files`. `@electron/asar` would do this, but it is only a transitive
+ * dependency here — reaching for it would make this gate fail on a clean
+ * install, which is worse than a thirty-line parser.
+ *
+ * Returns null when the archive is not readable, so the caller can fail loudly
+ * rather than assume the package is fine.
+ */
+async function listAsarEntries(archivePath) {
+  let header;
+  try {
+    const handle = await open(archivePath, 'r');
+    try {
+      const prefix = Buffer.alloc(16);
+      await handle.read(prefix, 0, 16, 0);
+      const jsonLength = prefix.readUInt32LE(12);
+      header = Buffer.alloc(jsonLength);
+      await handle.read(header, 0, jsonLength, 16);
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
+
+  let tree;
+  try {
+    tree = JSON.parse(header.toString('utf8'));
+  } catch {
+    return null;
+  }
+
+  const entries = [];
+  const walk = (node, prefix) => {
+    for (const [name, child] of Object.entries(node.files ?? {})) {
+      const path = `${prefix}${name}`;
+      // `unpacked: true` entries live outside the archive; they are still listed
+      // in the header, which is how app.asar.unpacked is discoverable.
+      entries.push(child.files ? `${path}/` : path);
+      if (child.files) walk(child, `${path}/`);
+    }
+  };
+  walk(tree, '');
+  return entries;
+}
+
+/** Every file under `dir` whose name satisfies `predicate`. */
+async function findFiles(dir, predicate) {
+  const found = [];
+  const visit = async (current) => {
+    for (const name of await readdir(current, { withFileTypes: true }).catch(() => [])) {
+      const full = join(current, name.name);
+      if (name.isDirectory()) await visit(full);
+      else if (predicate(name.name)) found.push(full);
+    }
+  };
+  await visit(dir);
+  return found;
+}
