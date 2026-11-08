@@ -42,11 +42,28 @@ This document tracks architectural scope boundaries and honest limitations per `
    speed, crop edges, scale and rotation are all editable and undoable, and the
    volume slider is no longer a read-only placeholder. What is missing is the canvas
    interaction from SPEC 08 §7.2 and SPEC 10 §8 — dragging to crop, dragging the
-   framing, the anchor grid — plus the keyframe editor.
-7. **The left panel has the Media and Captions tabs.** Text/Graphics,
+   framing, the anchor grid.
+7. **The curve editor draws and shapes curves, but does not zoom or transform
+   them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
+   snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for
+   the selected keys. What is built is the part that made `bezier` reachable at all
+   — a graphed curve per numeric property, draggable control handles written as one
+   undo step on release, and per-property colours. The graph draws a fixed window
+   over the item's duration rather than a pan-and-zoom viewport, so everything that
+   depends on a viewport (zoom, pan, fit) is absent rather than half-working, and
+   the transform tools are not written. There is also no box-select of keys in the
+   drawer: keys are selected by clicking a diamond, one at a time.
+8. **Auto-keyframing is not wired, and keyframe creation has no inspector
+   affordance.** SPEC 12 §2.4 wants a diamond per property row that toggles a key
+   at the playhead with the current evaluated value, ◀ ▶ buttons to jump between
+   keys, and the rule that changing an already-animated property writes a key at
+   the playhead rather than editing the static value. Keys can be added on the
+   timeline lane and shaped in the curve drawer, but the inspector always edits the
+   static value, so an animated property cannot be re-keyed from the sidebar.
+9. **The left panel has the Media and Captions tabs.** Text/Graphics,
    Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
    there.
-8. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.
+10. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.
 
 ---
 

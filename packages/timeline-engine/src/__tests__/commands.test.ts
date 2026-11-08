@@ -30,6 +30,7 @@ import {
   addKeyframe,
   removeKeyframe,
   updateKeyframe,
+  setBezierHandles,
   moveKeyframe,
   duplicateKeyframe,
   splitCaptionSegment,
@@ -1138,6 +1139,77 @@ describe('timeline commands', () => {
           expect(kf.value).toBe(0.8);
         }
       }
+    });
+
+    it('stores bezier handles on a keyframe', () => {
+      // SPEC 12 §2.2: a keyframe's `bezier` holds the control points for the
+      // segment *after* it. The schema has carried the field all along and the
+      // evaluator reads it, but nothing could write one, so the curve editor had
+      // no way to change a curve's shape — only its easing preset.
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = setBezierHandles(added.state, {
+          itemId,
+          property: 'opacity',
+          timeUs: 1_000_000,
+          bezier: { outX: 0.2, outY: 0.0, inX: 0.8, inY: 1.0 },
+          fps: 30,
+        });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const kf = updated.state.items[itemId].keyframes!['opacity'][0];
+          expect(kf.bezier).toEqual({ outX: 0.2, outY: 0.0, inX: 0.8, inY: 1.0 });
+          // Setting handles is only meaningful on a bezier segment, so the
+          // interpolation has to move with it — otherwise the stored handles are
+          // ignored by the evaluator and the edit silently does nothing.
+          expect(kf.interpolation).toBe('bezier');
+        }
+      }
+    });
+
+    it('clamps handle x to 0–1 so the curve cannot run backwards in time', () => {
+      // SPEC 12 §2.6: "Handle x values clamp to 0–1 (no time reversal); y may
+      // overshoot." A non-monotonic x would make the ease multi-valued for a given
+      // time, and the bisection in `cubicBezier` would return whichever branch it
+      // happened to land in.
+      const { state, itemId } = kfFixture();
+      const added = addKeyframe(state, { itemId, property: 'opacity', timeUs: 1_000_000, value: 0.5, fps: 30 });
+      expect(added.ok).toBe(true);
+      if (added.ok) {
+        const updated = setBezierHandles(added.state, {
+          itemId,
+          property: 'opacity',
+          timeUs: 1_000_000,
+          bezier: { outX: -0.5, outY: -2, inX: 1.7, inY: 3 },
+          fps: 30,
+        });
+        expect(updated.ok).toBe(true);
+        if (updated.ok) {
+          const kf = updated.state.items[itemId].keyframes!['opacity'][0];
+          // x is clamped into the unit interval...
+          expect(kf.bezier!.outX).toBe(0);
+          expect(kf.bezier!.inX).toBe(1);
+          // ...while y is free to overshoot, which is what makes ease-back and
+          // ease-elastic curves expressible as handles.
+          expect(kf.bezier!.outY).toBe(-2);
+          expect(kf.bezier!.inY).toBe(3);
+        }
+      }
+    });
+
+    it('refuses handles on a property with no keyframe at that time', () => {
+      const { state, itemId } = kfFixture();
+      const result = setBezierHandles(state, {
+        itemId,
+        property: 'opacity',
+        timeUs: 1_000_000,
+        bezier: { outX: 0.2, outY: 0, inX: 0.8, inY: 1 },
+        fps: 30,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('not_found');
     });
 
     it('moves a keyframe to a new time', () => {

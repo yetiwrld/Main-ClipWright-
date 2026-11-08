@@ -93,6 +93,38 @@ describe('evaluate', () => {
     expect(evaluate(keys, 900_000) as number).toBeGreaterThan(90);
   });
 
+  it('reads handles the curve editor writes, so a dragged shape changes the picture', () => {
+    /*
+      The end-to-end claim behind the curve editor: `setBezierHandles` stores control
+      points, and this is the one evaluator both the preview and the export call, so
+      a handle that survives the command has to move the rendered value.
+
+      The existing bezier test uses symmetric control points (0.42 / 0.58), which are
+      exactly 0.5 at the midpoint — the same answer linear gives. A regression that
+      dropped handles entirely would pass it. These points are asymmetric and read
+      87.5 % at the midpoint, so nothing but a real bezier can produce them.
+    */
+    const keys = [
+      key(0, 0, { interpolation: 'bezier', bezier: { outX: 0, outY: 1, inX: 1, inY: 1 } }),
+      key(1_000_000, 100),
+    ];
+    expect(evaluate(keys, 500_000) as number).toBeCloseTo(87.5, 3);
+    // The endpoints still meet their keys, or the curve would jump at the join.
+    expect(evaluate(keys, 0) as number).toBeCloseTo(0, 6);
+    expect(evaluate(keys, 1_000_000) as number).toBeCloseTo(100, 6);
+  });
+
+  it('ignores handles on a key whose interpolation is not bezier', () => {
+    // A key can carry handles left over from an earlier shape after its
+    // interpolation was switched back to linear. Honouring them would make the
+    // dropdown appear not to work.
+    const keys = [
+      key(0, 0, { interpolation: 'linear', bezier: { outX: 0, outY: 1, inX: 1, inY: 1 } }),
+      key(1_000_000, 100),
+    ];
+    expect(evaluate(keys, 500_000) as number).toBeCloseTo(50, 6);
+  });
+
   it('survives two keys at the same instant', () => {
     // A zero span divides to NaN, and NaN multiplies into every transform the item
     // draws with — the frame goes blank or the export fails without a message.

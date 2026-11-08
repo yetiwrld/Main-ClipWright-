@@ -132,10 +132,13 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid),
-the keyframe **editor** (the evaluator exists and both the preview and the export
-read keyframes now; what is missing is the curve editor that writes them), and
-proxy playback. The inspector's numeric controls, including
+**1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid) and
+proxy playback. The keyframe **curve editor** now exists as a bottom drawer
+(`Ctrl+Shift+C`): it graphs each keyframed numeric property, lets a control handle
+be dragged and writes it as a single undo step, and it is what made `bezier`
+reachable at all — the schema and the evaluator carried the field while no command
+could write it. What it still lacks is the viewport (§2.6's zoom, pan and fit) and
+the numeric transform tools, and auto-keyframing from the inspector is not wired. The inspector's numeric controls, including
 the volume slider that used to be a read-only placeholder, now work, and the values
 they write are drawn by the preview and applied by the export.
 

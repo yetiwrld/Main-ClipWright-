@@ -65,6 +65,7 @@ export {
   addKeyframe,
   removeKeyframe,
   updateKeyframe,
+  setBezierHandles,
   moveKeyframe,
   duplicateKeyframe,
   setItemProperties,

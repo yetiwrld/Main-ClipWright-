@@ -1889,6 +1889,75 @@ export function updateKeyframe(
 }
 
 /**
+ * Set the bezier control handles on a keyframe (SPEC 12 §2.6).
+ *
+ * `bezier` describes the curve *leaving* this key, in the same cubic-bezier form
+ * CSS uses: the two control points are `(outX, outY)` and `(inX, inY)`, with x in
+ * 0–1 measured across the segment and y free to overshoot. Because a key's
+ * interpolation decides how its segment is evaluated, setting handles also sets
+ * `interpolation` to `'bezier'` — storing handles on a `linear` key would leave
+ * them ignored by the evaluator and make the edit appear to do nothing.
+ *
+ * x is clamped into the unit interval and y is not, which is what §2.6 asks for:
+ * a handle dragged before its own key would make the curve non-monotonic in time,
+ * so `evaluate` could not answer "what is the value now" without picking a branch.
+ */
+export function setBezierHandles(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    property: string;
+    timeUs: number;
+    bezier: { outX: number; outY: number; inX: number; inY: number };
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const localTime = quantizeUs(params.timeUs, params.fps);
+  const existing = item.keyframes?.[params.property] ?? [];
+  if (!existing.some((keyframe) => keyframe.timeUs === localTime)) {
+    return fail('not_found', 'No keyframe at that time.');
+  }
+
+  /*
+    Clamp rather than reject. A user dragging a handle past its neighbour's time is
+    making a shape the model has no room for, and snapping the handle to the end of
+    the segment gives the shape they were reaching for; refusing the drag would
+    leave the handle stuck mid-gesture.
+  */
+  const clampX = (value: number) =>
+    Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+  const finiteOr = (value: number, fallback: number) =>
+    Number.isFinite(value) ? value : fallback;
+  const bezier = {
+    outX: clampX(params.bezier.outX),
+    outY: finiteOr(params.bezier.outY, 0),
+    inX: clampX(params.bezier.inX),
+    inY: finiteOr(params.bezier.inY, 1),
+  };
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const kfList = (draft.items[params.itemId] as TimelineItem).keyframes?.[params.property];
+    if (!kfList) return;
+    const keyframe = kfList.find((candidate) => candidate.timeUs === localTime);
+    if (!keyframe) return;
+    keyframe.bezier = bezier;
+    keyframe.interpolation = 'bezier';
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Curve updated.'],
+  };
+}
+
+/**
  * Move a keyframe to a new local time (SPEC 09 §17). Times are quantized and
  * kept within the item's duration.
  */

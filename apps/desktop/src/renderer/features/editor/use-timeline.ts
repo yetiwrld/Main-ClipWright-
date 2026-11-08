@@ -31,6 +31,7 @@ import {
   addKeyframe,
   removeKeyframe,
   updateKeyframe,
+  setBezierHandles,
   moveKeyframe,
   duplicateKeyframe,
   splitCaptionSegment,
@@ -151,6 +152,17 @@ export interface TimelineApi {
   addKeyframe: (itemId: string, property: string, timeUs: number, value: number | [number, number, number, number]) => boolean;
   removeKeyframe: (itemId: string, property: string, timeUs: number) => boolean;
   updateKeyframe: (itemId: string, property: string, timeUs: number, patch: { value?: number | [number, number, number, number]; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset'; easing?: { preset: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeInCubic' | 'easeOutCubic' | 'easeInOutCubic' | 'easeInBack' | 'easeOutBack' | 'easeOutBounce' | 'easeOutElastic' } }) => boolean;
+  /**
+   * Set a keyframe's bezier control handles, making its outgoing segment a bezier
+   * (SPEC 12 §2.6). `outX`/`inX` are clamped to 0–1 by the command; `outY`/`inY`
+   * may overshoot, which is what makes ease-back curves expressible.
+   */
+  setBezierHandles: (
+    itemId: string,
+    property: string,
+    timeUs: number,
+    bezier: { outX: number; outY: number; inX: number; inY: number },
+  ) => boolean;
   moveKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
   duplicateKeyframe: (itemId: string, property: string, fromTimeUs: number, toTimeUs: number) => boolean;
   splitCaptionSegment: (itemId: string, timeUs: number) => boolean;
@@ -499,6 +511,10 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Remove keyframe', (s) => removeKeyframe(s, { itemId, property, timeUs, fps })),
       updateKeyframe: (itemId, property, timeUs, patch) =>
         run('Update keyframe', (s) => updateKeyframe(s, { itemId, property, timeUs, patch, fps })),
+      setBezierHandles: (itemId, property, timeUs, bezier) =>
+        run('Adjust curve', (s) =>
+          setBezierHandles(s, { itemId, property, timeUs, bezier, fps }),
+        ),
       moveKeyframe: (itemId, property, fromTimeUs, toTimeUs) =>
         run('Move keyframe', (s) => moveKeyframe(s, { itemId, property, fromTimeUs, toTimeUs, fps })),
       duplicateKeyframe: (itemId, property, fromTimeUs, toTimeUs) =>

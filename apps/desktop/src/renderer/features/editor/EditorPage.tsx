@@ -5,6 +5,7 @@ import { api, describeError, isDesktop } from '../../api.js';
 import type { TimelineApi } from './use-timeline.js';
 import { useTimeline } from './use-timeline.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { CurveEditor } from './CurveEditor.js';
 import { projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import { PreviewPane } from './PreviewPane.js';
 import { ItemInspector, MediaLibrary, type MediaAsset } from './Inspector.js';
@@ -30,6 +31,7 @@ export function EditorPage({
   const [mediaError, setMediaError] = useState('');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [curveOpen, setCurveOpen] = useState(false);
   const [timelineShare, setTimelineShare] = useState(0.42);
   const [resizing, setResizing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -93,6 +95,11 @@ export function EditorPage({
       if (key === 'j') {
         event.preventDefault();
         setTimelineShare((value) => (value > 0.5 ? 0.42 : 0.66));
+      }
+      // SPEC 12 §2.6: the curve editor toggles with Ctrl+Shift+C.
+      if (key === 'c' && event.shiftKey) {
+        event.preventDefault();
+        setCurveOpen((value) => !value);
       }
       // SPEC 14 §3: Export opens with Ctrl+E.
       if (key === 'e' && !event.shiftKey) {
@@ -344,6 +351,20 @@ export function EditorPage({
           }}
         >
           <TimelinePanel timeline={timeline} />
+          {/*
+            SPEC 12 §2.6 wants the curve editor as a bottom drawer of the timeline.
+            It sits inside the timeline section rather than beside it so the drawer
+            shrinks the timeline instead of stealing width from the preview.
+          */}
+          {curveOpen && (
+            <CurveEditor
+              state={state}
+              timeline={timeline}
+              itemId={timeline.selection.length === 1 ? timeline.selection[0]! : null}
+              fps={timeline.fps}
+              onClose={() => setCurveOpen(false)}
+            />
+          )}
         </section>
       </div>
 
