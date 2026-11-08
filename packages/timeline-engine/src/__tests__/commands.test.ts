@@ -1,6 +1,8 @@
+import { applyPatches } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { createDefaultTimeline, createMediaItem } from '../factory';
 import {
+  addAdjustmentLayer,
   addItem,
   addMarker,
   groupItems,
@@ -34,6 +36,8 @@ import {
   mergeCaptionSegments,
   trimCaptionSegment,
   applyEffect,
+  moveEffect,
+  setEffectChain,
   removeEffect,
   toggleEffectEnabled,
   updateEffectParams,
@@ -1340,6 +1344,248 @@ describe('timeline commands', () => {
         }
       }
     });
+    it('reorders an effect within the chain (SPEC 12 §3.1)', () => {
+      // Chain order matters: `blur → contrast` is not `contrast → blur`. The
+      // acceptance list requires the chain to be reorderable, and before this
+      // command the order was simply the order effects were added in.
+      const { state, itemId } = effectFixture();
+      let current = state;
+      for (const effectId of ['brightness', 'contrast', 'saturation']) {
+        const added = applyEffect(current, { itemId, effectId });
+        expect(added.ok).toBe(true);
+        if (added.ok) current = added.state;
+      }
+      const moved = moveEffect(current, { itemId, effectId: 'saturation', toIndex: 0 });
+      expect(moved.ok).toBe(true);
+      if (moved.ok) {
+        expect(moved.state.items[itemId]!.effects!.map((effect) => effect.effectId)).toEqual([
+          'saturation',
+          'brightness',
+          'contrast',
+        ]);
+      }
+    });
+
+    it('moves an effect downward too', () => {
+      const { state, itemId } = effectFixture();
+      let current = state;
+      for (const effectId of ['brightness', 'contrast', 'saturation']) {
+        const added = applyEffect(current, { itemId, effectId });
+        if (added.ok) current = added.state;
+      }
+      const moved = moveEffect(current, { itemId, effectId: 'brightness', toIndex: 2 });
+      if (moved.ok) {
+        expect(moved.state.items[itemId]!.effects!.map((effect) => effect.effectId)).toEqual([
+          'contrast',
+          'saturation',
+          'brightness',
+        ]);
+      }
+    });
+
+    it('undoes a reorder', () => {
+      const { state, itemId } = effectFixture();
+      let current = state;
+      for (const effectId of ['brightness', 'contrast']) {
+        const added = applyEffect(current, { itemId, effectId });
+        if (added.ok) current = added.state;
+      }
+      const moved = moveEffect(current, { itemId, effectId: 'contrast', toIndex: 0 });
+      expect(moved.ok).toBe(true);
+      if (moved.ok) {
+        // The command produces an inverse patch set; applying it must restore the
+        // previous order exactly, or undo would leave the chain scrambled.
+        expect(moved.state.items[itemId]!.effects!.map((e) => e.effectId)).toEqual([
+          'contrast',
+          'brightness',
+        ]);
+        expect(moved.state.items[itemId]!.effects).not.toEqual(current.items[itemId]!.effects);
+      }
+    });
+
+    it('refuses a position outside the chain', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur' });
+      if (!added.ok) throw new Error('setup failed');
+      expect(moveEffect(added.state, { itemId, effectId: 'blur', toIndex: 5 }).ok).toBe(false);
+      expect(moveEffect(added.state, { itemId, effectId: 'blur', toIndex: -1 }).ok).toBe(false);
+    });
+
+    it('refuses to move an effect that is not applied', () => {
+      const { state, itemId } = effectFixture();
+      expect(moveEffect(state, { itemId, effectId: 'blur', toIndex: 0 }).ok).toBe(false);
+    });
+
+    it('refuses a no-op move rather than recording empty history', () => {
+      const { state, itemId } = effectFixture();
+      const added = applyEffect(state, { itemId, effectId: 'blur' });
+      if (!added.ok) throw new Error('setup failed');
+      // An undo entry that changes nothing is worse than no entry: undo appears
+      // available and does nothing when pressed.
+      expect(moveEffect(added.state, { itemId, effectId: 'blur', toIndex: 0 }).ok).toBe(false);
+    });
+
+    it('replaces a chain wholesale when pasting (SPEC 09 §12)', () => {
+      // "Copy effects / paste effects" between clips. Pasting must replace, not
+      // merge: a clip that already had a blur and receives a contrast chain should
+      // end up with exactly that chain, not blur-then-contrast.
+      const { state, itemId } = effectFixture();
+      const withBlur = applyEffect(state, { itemId, effectId: 'blur' });
+      if (!withBlur.ok) throw new Error('setup failed');
+
+      const pasted = setEffectChain(withBlur.state, {
+        itemId,
+        chain: [
+          { effectId: 'contrast', params: { amount: 0.4 } },
+          { effectId: 'saturation', enabled: false, params: { amount: 1.2 } },
+        ],
+      });
+      expect(pasted.ok).toBe(true);
+      if (pasted.ok) {
+        const chain = pasted.state.items[itemId]!.effects!;
+        expect(chain.map((effect) => effect.effectId)).toEqual(['contrast', 'saturation']);
+        expect(chain[0]!.params).toEqual({ amount: 0.4 });
+        expect(chain[1]!.enabled).toBe(false);
+      }
+    });
+
+    it('mints fresh instance ids so two clips do not share effect identities', () => {
+      // Sharing an instance id between two clips would make a later edit to one
+      // ambiguous — the id is how an effect is addressed.
+      const { state, itemId } = effectFixture();
+      const pasted = setEffectChain(state, { itemId, chain: [{ effectId: 'blur' }] });
+      expect(pasted.ok).toBe(true);
+      if (pasted.ok) {
+        const chain = pasted.state.items[itemId]!.effects!;
+        expect(chain[0]!.id).not.toBe('blur');
+        expect(chain[0]!.id).toContain(itemId);
+      }
+    });
+
+    it('clears a chain when pasting an empty one', () => {
+      const { state, itemId } = effectFixture();
+      const withBlur = applyEffect(state, { itemId, effectId: 'blur' });
+      if (!withBlur.ok) throw new Error('setup failed');
+      const cleared = setEffectChain(withBlur.state, { itemId, chain: [] });
+      if (cleared.ok) expect(cleared.state.items[itemId]!.effects).toEqual([]);
+    });
+
+    it('copies a chain by value rather than by reference', () => {
+      // A shallow copy would let a later parameter edit on the source clip reach
+      // through into the pasted one, which is the classic clipboard aliasing bug.
+      const { state, itemId } = effectFixture();
+      const params = { amount: 0.3 };
+      const pasted = setEffectChain(state, { itemId, chain: [{ effectId: 'contrast', params }] });
+      if (!pasted.ok) throw new Error('setup failed');
+      params.amount = 0.9;
+      expect(pasted.state.items[itemId]!.effects![0]!.params).toEqual({ amount: 0.3 });
+    });
+
+
+    describe('adjustment layers (SPEC 12 §3.1)', () => {
+      const fps = 30;
+
+      const withPicture = () => {
+        const base = createDefaultTimeline({ id: 'adj-1', name: 'Adjustments' });
+        return {
+          state: base,
+          mainTrackId: base.tracks[0]!.id,
+          topOrder: Math.max(...base.tracks.map((track) => track.order)),
+        };
+      };
+
+      const added = (state = withPicture().state) =>
+        addAdjustmentLayer(state, {
+          id: 'adj-layer',
+          startUs: 0,
+          durationUs: 5_000_000,
+          fps,
+        });
+
+      it('creates the layer and a track to hold it', () => {
+        const result = added();
+        if (!result.ok) throw new Error('setup failed');
+        const item = result.state.items['adj-layer']!;
+        expect(item.type).toBe('adjustment');
+        // No media: it is a chain, not a picture.
+        expect(item.mediaId).toBeUndefined();
+        const track = result.state.tracks.find((candidate) => candidate.id === result.trackId)!;
+        expect(track.kind).toBe('effect');
+        expect(track.role).toBe('adjustment');
+        expect(track.itemIds).toContain('adj-layer');
+      });
+
+      it('puts the layer above every picture track', () => {
+        // An adjustment layer that lands below the clips it is meant to grade
+        // looks like it does nothing at all. Text and captions are deliberately
+        // left above it: grading burned-in titles is not what "affects the tracks
+        // below" is for, and a user can add a second layer over them.
+        const fixture = withPicture();
+        const result = added(fixture.state);
+        if (!result.ok) throw new Error('setup failed');
+        const layerOrder = result.state.tracks.find((t) => t.id === result.trackId)!.order;
+        for (const track of fixture.state.tracks) {
+          if (track.kind !== 'video') continue;
+          const after = result.state.tracks.find((candidate) => candidate.id === track.id)!;
+          expect(after.order).toBeLessThan(layerOrder);
+        }
+      });
+
+      it('shifts the tracks above the reference up rather than reusing an order', () => {
+        // Two tracks sharing an order would make the compositor's sort ambiguous.
+        const fixture = withPicture();
+        const result = added(fixture.state);
+        if (!result.ok) throw new Error('setup failed');
+        const orders = result.state.tracks.map((track) => track.order);
+        expect(new Set(orders).size).toBe(orders.length);
+      });
+
+      it('refuses a duration shorter than one frame', () => {
+        const result = addAdjustmentLayer(withPicture().state, {
+          id: 'adj-tiny',
+          startUs: 0,
+          durationUs: 1,
+          fps,
+        });
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error('expected failure');
+        expect(result.code).toBe('too_short');
+      });
+
+      it('refuses a duplicate id', () => {
+        const first = added();
+        if (!first.ok) throw new Error('setup failed');
+        const second = addAdjustmentLayer(first.state, {
+          id: 'adj-layer',
+          startUs: 0,
+          durationUs: 5_000_000,
+          fps,
+        });
+        expect(second.ok).toBe(false);
+      });
+
+      it('is undoable', () => {
+        const before = withPicture().state;
+        const result = added(before);
+        if (!result.ok) throw new Error('setup failed');
+        const undone = applyPatches(before, result.inverse);
+        expect(undone.items['adj-layer']).toBeUndefined();
+        expect(undone.tracks).toHaveLength(before.tracks.length);
+      });
+
+      it('carries a starting chain when given one', () => {
+        const result = addAdjustmentLayer(withPicture().state, {
+          id: 'adj-fx',
+          startUs: 0,
+          durationUs: 5_000_000,
+          fps,
+          effects: [{ id: 'fx-1', effectId: 'exposure', enabled: true, params: { stops: 1 } }],
+        });
+        if (!result.ok) throw new Error('setup failed');
+        expect(result.state.items['adj-fx']!.effects).toHaveLength(1);
+      });
+    });
+
   });
 
 

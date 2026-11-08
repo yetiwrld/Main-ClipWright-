@@ -1077,6 +1077,98 @@ export function addItem(
   };
 }
 
+/**
+ * Add an adjustment layer above the tracks it should grade (SPEC 12 §3.1).
+ *
+ * An adjustment layer has no media and no picture: its only content is an effect
+ * chain, which grades whatever is composited below it while it is on screen. The
+ * command creates the track as well as the item, because an adjustment layer that
+ * shares a track with clips would be ambiguous — a track holds one kind of content.
+ *
+ * It is placed on a new track of kind `effect`, immediately above `aboveTrackId`
+ * (or on top of the stack). Placing it on top by default is the intent: a user who
+ * asks for an adjustment layer wants to grade what is already there, and a layer
+ * underneath everything would appear to do nothing.
+ */
+export function addAdjustmentLayer(
+  state: TimelineState,
+  params: {
+    id: string;
+    /** Timeline position and length; the whole visible range by default. */
+    startUs: number;
+    durationUs: number;
+    fps: Fps;
+    /** Track to sit above. Defaults to the topmost picture track, else the top. */
+    aboveTrackId?: string;
+    /** Chain to start with; usually a single effect added from the inspector. */
+    effects?: TimelineItem['effects'];
+  },
+): CommandResult & { trackId?: string } {
+  if (state.items[params.id]) return fail('invalid', 'That item already exists.');
+  if (params.durationUs < frameDurationUs(params.fps)) {
+    return fail('too_short', 'An adjustment layer must be at least one frame long.');
+  }
+  const startUs = quantizeUs(params.startUs, params.fps);
+
+  /*
+    Above the highest picture track by default. Ordering by `order` rather than by
+    array position matters: the array order is presentation, `order` is what the
+    compositor sorts by, and an adjustment layer inserted between them in the wrong
+    one would grade nothing.
+  */
+  const pictureTracks = state.tracks.filter((track) => track.kind === 'video');
+  const reference =
+    state.tracks.find((track) => track.id === params.aboveTrackId) ??
+    pictureTracks.reduce<typeof pictureTracks[number] | undefined>(
+      (top, track) => (top === undefined || track.order > top.order ? track : top),
+      undefined,
+    );
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    // Everything at or above the reference moves up one, so the new layer can take
+    // the reference's place and grade it rather than sit under it.
+    const referenceOrder = reference?.order ?? draft.tracks.length - 1;
+    for (const track of draft.tracks) {
+      if (track.order > referenceOrder) track.order += 1;
+    }
+    const newOrder = referenceOrder + 1;
+    const trackId = `trk_adj_${params.id}`;
+    draft.tracks.push({
+      id: trackId,
+      role: 'adjustment',
+      kind: 'effect',
+      name: 'Adjustment',
+      order: newOrder,
+      hidden: false,
+      locked: false,
+      muted: false,
+      solo: false,
+      heightPx: 48,
+      itemIds: [params.id],
+      auto: false,
+    } as (typeof draft.tracks)[number]);
+    draft.items[params.id] = {
+      id: params.id,
+      trackId,
+      type: 'adjustment',
+      startUs,
+      durationUs: params.durationUs,
+      sourceInUs: 0,
+      effects: params.effects ?? [],
+    } as TimelineItem;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.id],
+    notes: ['Adjustment layer added — it grades the tracks below it.'],
+    trackId: `trk_adj_${params.id}`,
+  };
+}
+
 export function addMarker(
   state: TimelineState,
   params: { timeUs: number; fps: Fps; name?: string; color?: string },
@@ -2124,6 +2216,92 @@ export function applyEffect(
  * Remove an effect from an item (SPEC 09 §21 — context menu 'Replace
  * transition · Delete' and effects panel remove button).
  */
+/**
+ * Move an effect within an item's chain (SPEC 09 §17, SPEC 12 §3.1).
+ *
+ * Chain order matters — `blur → contrast` is not `contrast → blur` — and the spec's
+ * acceptance list requires the chain to be "reorderable". Without this command the
+ * order was whatever order effects happened to be added in, with no way to change it
+ * short of removing and re-adding each one.
+ */
+export function moveEffect(
+  state: TimelineState,
+  params: { itemId: string; effectId: string; toIndex: number },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const existing = item.effects ?? [];
+  const fromIndex = existing.findIndex((effect) => effect.effectId === params.effectId);
+  if (fromIndex === -1) return fail('not_found', 'That effect is not applied.');
+  if (!Number.isInteger(params.toIndex) || params.toIndex < 0 || params.toIndex >= existing.length) {
+    return fail('invalid', 'That position is not in the effect chain.');
+  }
+  if (fromIndex === params.toIndex) {
+    return fail('invalid', 'The effect is already in that position.');
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.effects) return;
+    const [moved] = target.effects.splice(fromIndex, 1);
+    if (moved) target.effects.splice(params.toIndex, 0, moved);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Effect moved.'],
+  };
+}
+
+/**
+ * Replace an item's effect chain wholesale (SPEC 09 §12, SPEC 12 §3).
+ *
+ * This is the paste half of "copy effects / paste effects": the copied chain is a
+ * value, so pasting is an ordinary assignment rather than a re-application of each
+ * effect. Fresh instance ids are minted so the pasted chain is not tied to the
+ * source item — two clips must be able to hold equivalent chains and then diverge.
+ */
+export function setEffectChain(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    chain: ReadonlyArray<{
+      effectId: string;
+      enabled?: boolean;
+      params?: Record<string, number | boolean | string>;
+    }>;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+
+  const chain = params.chain.map((effect, index) => ({
+    id: `${params.itemId}~fx${index}_${effect.effectId}`,
+    effectId: effect.effectId,
+    enabled: effect.enabled ?? true,
+    params: { ...(effect.params ?? {}) },
+  }));
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    target.effects = chain;
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: [chain.length === 0 ? 'Effects cleared.' : 'Effects pasted.'],
+  };
+}
+
 export function removeEffect(
   state: TimelineState,
   params: { itemId: string; effectId: string },

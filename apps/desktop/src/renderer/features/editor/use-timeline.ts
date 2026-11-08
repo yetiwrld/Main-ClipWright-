@@ -9,6 +9,8 @@ import {
   addItem,
   addMarker,
   createMediaItem,
+  nextId,
+  projectDurationUs,
   deleteItems,
   duplicateItems,
   moveItems,
@@ -46,12 +48,15 @@ import {
   removeEffect,
   toggleEffectEnabled,
   updateEffectParams,
+  moveEffect,
+  setEffectChain,
   updateMarker,
   deleteMarker,
   setViewState,
   renameTrack,
   toggleItemDisabled,
   addTrack,
+  addAdjustmentLayer,
   toggleTrackLock,
   toggleTrackHidden,
   deleteTrack,
@@ -75,6 +80,19 @@ interface ClipboardEntry {
 
 /** One clipboard for the whole session, shared between clips (SPEC 09 §12). */
 let sessionClipboard: ClipboardEntry[] = [];
+
+/**
+ * The effect clipboard — separate from the clip clipboard on purpose (SPEC 09 §12).
+ *
+ * "Copy effects" and "copy clips" are different intents: one duplicates a clip,
+ * the other transfers a grade onto a clip that is already framed. Sharing a buffer
+ * would make the paste command ambiguous.
+ */
+let sessionEffectClipboard: Array<{
+  effectId: string;
+  enabled?: boolean;
+  params?: Record<string, number | boolean | string>;
+}> = [];
 
 interface RecoveryInfo {
   entries: number;
@@ -139,12 +157,26 @@ export interface TimelineApi {
   removeEffect: (itemId: string, effectId: string) => boolean;
   toggleEffectEnabled: (itemId: string, effectId: string) => boolean;
   setEffectParams: (itemId: string, effectId: string, params: Record<string, number | boolean | string>) => boolean;
+  moveEffect: (itemId: string, effectId: string, toIndex: number) => boolean;
+  /** Replace a clip's whole effect chain, for paste. */
+  setEffectChain: (itemId: string, chain: Array<{ effectId: string; enabled?: boolean; params?: Record<string, number | boolean | string> }>) => boolean;
+  /** Copy a clip's effect chain, or paste the copied one onto a clip. */
+  copyEffects: (itemId: string) => number;
+  pasteEffects: (itemId: string) => boolean;
+  /** How many effects are on the effect clipboard, for enabling the paste control. */
+  effectClipboardSize: number;
   updateEffectParams: (itemId: string, effectId: string, params: Record<string, number | boolean | string>) => boolean;
   updateMarker: (markerId: string, patch: { name?: string; note?: string; color?: string }) => boolean;
   deleteMarker: (markerId: string) => boolean;
   setViewState: (patch: { pxPerSecond?: number; scrollX?: number; scrollY?: number; headerWidthPx?: number }) => boolean;
   renameTrack: (trackId: string, name: string) => boolean;
   addTrack: (kind: 'video' | 'audio' | 'text' | 'caption', aboveTrackId?: string) => boolean;
+  /**
+   * Add an adjustment layer over the picture tracks (SPEC 12 §3.1). The layer
+   * spans the whole visible range so the user can see it grade something
+   * immediately, and can be trimmed or moved like any other item afterwards.
+   */
+  addAdjustmentLayer: () => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
   deleteTrack: (trackId: string) => boolean;
@@ -183,6 +215,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
   const [historyTick, setHistoryTick] = useState(0);
   const [recovery, setRecovery] = useState<RecoveryInfo | null>(null);
   const [clipboardSize, setClipboardSize] = useState(sessionClipboard.length);
+  const [effectClipboardSize, setEffectClipboardSize] = useState(sessionEffectClipboard.length);
 
   const historyRef = useRef<TimelineHistory | null>(null);
   const seqRef = useRef(0);
@@ -489,6 +522,39 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Toggle effect', (s) => toggleEffectEnabled(s, { itemId, effectId })),
       setEffectParams: (itemId, effectId, params) =>
         run('Change effect', (s) => updateEffectParams(s, { itemId, effectId, params })),
+      moveEffect: (itemId, effectId, toIndex) =>
+        run('Reorder effect', (s) => moveEffect(s, { itemId, effectId, toIndex })),
+      setEffectChain: (itemId, chain) =>
+        run('Paste effects', (s) => setEffectChain(s, { itemId, chain })),
+      copyEffects: (itemId) => {
+        const item = state?.items[itemId];
+        if (!item) return 0;
+        // Copied by value, and without the instance ids: the ids address effects
+        // on *that* clip, so carrying them across would make the pasted chain a
+        // duplicate rather than an equivalent.
+        sessionEffectClipboard = (item.effects ?? []).map((effect) => ({
+          effectId: effect.effectId,
+          enabled: effect.enabled,
+          params: { ...effect.params },
+        }));
+        setEffectClipboardSize(sessionEffectClipboard.length);
+        setNotes([
+          sessionEffectClipboard.length === 0
+            ? 'That clip has no effects to copy.'
+            : 'Effects copied.',
+        ]);
+        return sessionEffectClipboard.length;
+      },
+      pasteEffects: (itemId) => {
+        if (sessionEffectClipboard.length === 0) {
+          setNotes(['No effects have been copied.']);
+          return false;
+        }
+        return run('Paste effects', (s) =>
+          setEffectChain(s, { itemId, chain: sessionEffectClipboard }),
+        );
+      },
+      effectClipboardSize,
       updateEffectParams: (itemId, effectId, params) =>
         run('Update effect params', (s) => updateEffectParams(s, { itemId, effectId, params })),
       updateMarker: (markerId, patch) =>
@@ -500,6 +566,19 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       renameTrack: (trackId, name) =>
         run('Rename track', (s) => renameTrack(s, { trackId, name })),
       addTrack: (kind, aboveTrackId) => run('Add track', (s) => addTrack(s, { kind, aboveTrackId })),
+      addAdjustmentLayer: () =>
+        run('Add adjustment layer', (s) => {
+          // The layer has to cover something to be useful, so it spans the project.
+          // A zero-length timeline would make the command fail with `too_short`,
+          // which is the honest answer — there is nothing to grade yet.
+          const durationUs = Math.max(projectDurationUs(s), Math.round(1_000_000 / fps));
+          return addAdjustmentLayer(s, {
+            id: nextId('adj'),
+            startUs: 0,
+            durationUs,
+            fps,
+          });
+        }),
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
       deleteTrack: (trackId) => run('Delete track', (s) => deleteTrack(s, { trackId })),

@@ -132,6 +132,22 @@ This document tracks architectural scope boundaries and honest limitations per `
      tap against the textbook Gaussian.
    The export is correct and tested; the preview is honest and approximate, and the
    banner is what makes that acceptable.
+   - **Adjustment layers grade what is below them, with one approximation.** An
+     adjustment layer is implemented as an item of type `adjustment` on an `effect`
+     track whose chain is applied to the composite of every lower track that is
+     live at that instant (SPEC 12 §3.1, §12 item 5). The export applies the chain
+     to the accumulated frame at the moment the walk crosses the layer's track, so
+     the grade lands on the blend of everything below rather than on each layer
+     separately — those give different pictures, and a test distinguishes them.
+     The approximation is the same one as above: the *preview* folds the chain into
+     each layer's CSS filter, so a layer stack under an adjustment layer previews
+     as per-layer CSS filtering rather than as a filtered composite. With one
+     picture layer — the normal case — the two agree.
+   - **An adjustment layer is created from the timeline's empty-area context menu**
+     ("Add adjustment layer"). It is not yet draggable on the canvas, cannot be
+     resized by dragging its edges any differently from a clip, and adding one does
+     not open the effects panel — the user selects it and adds effects from the
+     inspector like any other item.
 8. **No frame blending.** Frame-rate conversion uses nearest-time selection.
 9. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).

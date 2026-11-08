@@ -1,5 +1,5 @@
 import React from 'react';
-import { Film, Plus, Power, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Film, Plus, Power, Trash2 } from 'lucide-react';
 import { Button, Card, EmptyState, IconButton, Input, Select, Slider } from '@clipwright/design-system';
 import {
   formatTimecode,
@@ -373,6 +373,27 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
             to call the command. The menu is generated from the effect catalogue, so a
             new effect appears here without touching this file.
           */}
+          <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+            <Button
+              size={28}
+              variant="secondary"
+              onClick={() => timeline.copyEffects(item.id)}
+              disabled={!item.effects || item.effects.length === 0}
+            >
+              Copy effects
+            </Button>
+            <Button
+              size={28}
+              variant="secondary"
+              onClick={() => timeline.pasteEffects(item.id)}
+              // Disabled rather than silent: pasting with nothing copied would be a
+              // no-op the user cannot distinguish from a broken button.
+              disabled={timeline.effectClipboardSize === 0}
+            >
+              Paste effects
+            </Button>
+          </div>
+
           <Select
             value=""
             ariaLabel="Add an effect to this clip"
@@ -441,6 +462,29 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
                   );
                 })}
               </div>
+              {/*
+                Chain order is user-controlled (§3.1) and the acceptance list
+                requires it to be reorderable. Two arrows rather than drag-and-drop:
+                the inspector is a narrow column and a drag target a few pixels tall
+                is worse than a button for the common case of nudging one effect past
+                its neighbour.
+              */}
+              <IconButton
+                label={`Move ${effectDefinition(effect.effectId)?.name ?? effect.effectId} earlier`}
+                size={28}
+                icon={<ChevronUp size={12} />}
+                onClick={() =>
+                  timeline.moveEffect(item.id, effect.effectId, (item.effects ?? []).indexOf(effect) - 1)
+                }
+              />
+              <IconButton
+                label={`Move ${effectDefinition(effect.effectId)?.name ?? effect.effectId} later`}
+                size={28}
+                icon={<ChevronDown size={12} />}
+                onClick={() =>
+                  timeline.moveEffect(item.id, effect.effectId, (item.effects ?? []).indexOf(effect) + 1)
+                }
+              />
               <IconButton
                 label={`Remove ${effectDefinition(effect.effectId)?.name ?? effect.effectId}`}
                 size={28}

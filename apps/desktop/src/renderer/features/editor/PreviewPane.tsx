@@ -5,7 +5,9 @@ import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwrig
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
 import {
+  activeAdjustmentLayers,
   activeEffects,
+  effectsForLayer,
   itemGeometry,
   transitionAt,
   visibleLayers,
@@ -241,6 +243,31 @@ export function PreviewPane({
   }, [state, playheadUs]);
 
   /**
+   * Adjustment layers live at the playhead (SPEC 12 §3.1).
+   *
+   * They have no picture of their own, so they are not layers — they are chains that
+   * grade the layers underneath. Resolved once here rather than per layer so that
+   * every layer below a given adjustment layer sees exactly the same chain.
+   */
+  const adjustmentLayers = useMemo(
+    () =>
+      activeAdjustmentLayers(
+        Object.values(state.items).map((entry) => ({
+          id: entry.id,
+          type: entry.type,
+          startUs: entry.startUs,
+          durationUs: entry.durationUs,
+          trackOrder: state.tracks.find((track) => track.id === entry.trackId)?.order ?? 0,
+          disabled: entry.disabled,
+          hiddenTrack: state.tracks.find((track) => track.id === entry.trackId)?.hidden,
+          effects: entry.effects,
+        })),
+        playheadUs,
+      ),
+    [state, playheadUs],
+  );
+
+  /**
    * Effects that are active under the playhead but that the preview cannot draw.
    *
    * Collected from every visible layer rather than only the selected one, because
@@ -250,12 +277,16 @@ export function PreviewPane({
   const unpreviewable = useMemo(() => {
     const names = new Set<string>();
     for (const layer of layers) {
-      for (const name of unsupportedEffectNames(activeEffects(state.items[layer.id]?.effects))) {
+      const chain = [
+        ...activeEffects(state.items[layer.id]?.effects),
+        ...effectsForLayer(adjustmentLayers, layer.trackOrder),
+      ];
+      for (const name of unsupportedEffectNames(chain)) {
         names.add(name);
       }
     }
     return [...names];
-  }, [layers, state]);
+  }, [layers, state, adjustmentLayers]);
 
   // Sound comes from the bottom picture layer only — the one `videoRef` points at.
   // Each layer seeks itself; this function must not seek or the two would fight
@@ -335,7 +366,13 @@ export function PreviewPane({
           {layers.length > 0 ? (
             layers.map((layer: VisibleLayer, index: number) => {
               const transition = transitionFor(layer, state, playheadUs);
-              const effects = activeEffects(state.items[layer.id]?.effects);
+              // The item's own chain, then everything grading it from above: the
+              // preview must show an adjustment layer's effect just as the export
+              // renders it, or the two disagree about the picture.
+              const effects = [
+                ...activeEffects(state.items[layer.id]?.effects),
+                ...effectsForLayer(adjustmentLayers, layer.trackOrder),
+              ];
               return (
               <PreviewLayer
                 key={layer.id}

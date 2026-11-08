@@ -91,12 +91,18 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     removeEffect: vi.fn(() => true),
     toggleEffectEnabled: vi.fn(() => true),
     setEffectParams: vi.fn(() => true),
+    moveEffect: vi.fn(() => true),
+    setEffectChain: vi.fn(() => true),
+    copyEffects: vi.fn(() => 0),
+    pasteEffects: vi.fn(() => true),
+    effectClipboardSize: 0,
     updateEffectParams: vi.fn(() => true),
     updateMarker: vi.fn(() => true),
     deleteMarker: vi.fn(() => true),
     setViewState: vi.fn(() => true),
     renameTrack: vi.fn(() => true),
     addTrack: vi.fn(() => true),
+    addAdjustmentLayer: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
     deleteTrack: vi.fn(() => true),
@@ -419,6 +425,19 @@ describe('timeline panel', () => {
     expect(screen.getByText('Paste')).toBeTruthy();
     expect(screen.getByText('Add marker here')).toBeTruthy();
     expect(screen.getByText('Add track')).toBeTruthy();
+    expect(screen.getByText('Add adjustment layer')).toBeTruthy();
+  });
+
+  it('the context menu adds an adjustment layer (SPEC 12 §3.1)', () => {
+    // The renderer resolves adjustment layers, but without a way to create one the
+    // feature is unreachable from the UI — which is indistinguishable from absent.
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    fireEvent.click(screen.getByText('Add adjustment layer'));
+    expect(timeline.addAdjustmentLayer).toHaveBeenCalledTimes(1);
   });
 
   it('Escape closes the context menu', () => {

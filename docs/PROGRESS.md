@@ -87,7 +87,9 @@ agree about which clip is on top, and transitions draw both clips across the
 overlap in the preview and dissolve, slide or zoom them in the file. What is still
 the nine required effects from §12 §3.2 are implemented in CPU code and applied to
 every exported frame (the preview approximates them with CSS filters and says so
-where it cannot). What remains is architectural rather than a missing feature: the
+where it cannot). A clip's chain can be reordered, copied and pasted, and an
+adjustment layer — an item with no picture whose chain grades the tracks below it —
+is created from the timeline menu and graded onto the composite in the export. What remains is architectural rather than a missing feature: the
 shared WebGL2 `renderFrame` that §10 §2.1 asks for, which would replace the current
 CPU-plus-CSS pair with one implementation.
 Keyframed geometry *is* rendered, but as steps: ffmpeg 4.1 evaluates `scale`

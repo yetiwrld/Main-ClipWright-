@@ -29,6 +29,7 @@ import {
   Volume2,
   VolumeX,
   BarChart3,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   Button,
@@ -1593,6 +1594,15 @@ function emptyMenuItems(
     { id: 'paste', label: 'Paste', icon: <ClipboardPaste size={14} />, onSelect: () => timeline.paste(playheadStore.get()) },
     { id: 'marker', label: 'Add marker here', icon: <Flag size={14} />, onSelect: () => timeline.addMarkerAt(playheadStore.get()) },
     { id: 'add-track', label: 'Add track', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },
+    {
+      id: 'add-adjustment',
+      label: 'Add adjustment layer',
+      icon: <SlidersHorizontal size={14} />,
+      // An adjustment layer is not a clip and has nothing to place, so it belongs
+      // here rather than in the media browser: the user adds it to grade what is
+      // already on the timeline.
+      onSelect: () => timeline.addAdjustmentLayer(),
+    },
   ];
 }
 

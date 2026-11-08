@@ -56,6 +56,11 @@ function fakeTimeline(state: TimelineState): TimelineApi {
     removeEffect: vi.fn(),
     toggleEffectEnabled: vi.fn(),
     setEffectParams: vi.fn(() => true),
+    moveEffect: vi.fn(() => true),
+    setEffectChain: vi.fn(() => true),
+    copyEffects: vi.fn(() => 0),
+    pasteEffects: vi.fn(() => true),
+    effectClipboardSize: 0,
     addTransition: vi.fn(() => true),
     updateTransition: vi.fn(() => true),
     removeTransition: vi.fn(() => true),
@@ -369,5 +374,78 @@ describe('ItemInspector effects', () => {
     const before = screen.getAllByText('Blur (Gaussian)').length;
     fireEvent.click(screen.getByLabelText('Add an effect to this clip'));
     expect(screen.getAllByText('Blur (Gaussian)').length).toBe(before);
+  });
+});
+
+describe('ItemInspector effect order', () => {
+  const chain = makeState({
+    effects: [
+      { id: 'a', effectId: 'brightness', enabled: true, params: {} },
+      { id: 'b', effectId: 'contrast', enabled: true, params: {} },
+    ],
+  } as never);
+
+  it('moves an effect earlier through the command', () => {
+    // §12's acceptance list requires the chain to be reorderable; before this the
+    // order was whatever order the effects happened to be added in.
+    const timeline = fakeTimeline(chain);
+    render(<ItemInspector state={chain} timeline={timeline} />);
+    fireEvent.click(screen.getByLabelText('Move Contrast earlier'));
+    expect(timeline.moveEffect).toHaveBeenCalledWith('item-1', 'contrast', 0);
+  });
+
+  it('moves an effect later through the command', () => {
+    const timeline = fakeTimeline(chain);
+    render(<ItemInspector state={chain} timeline={timeline} />);
+    fireEvent.click(screen.getByLabelText('Move Brightness later'));
+    expect(timeline.moveEffect).toHaveBeenCalledWith('item-1', 'brightness', 1);
+  });
+
+  it('names both arrows after the effect, not after the direction', () => {
+    // Two effects would otherwise give four buttons all called "Move up"/"Move
+    // down", which is unusable with a screen reader.
+    render(<ItemInspector state={chain} timeline={fakeTimeline(chain)} />);
+    expect(screen.getByLabelText('Move Brightness earlier')).toBeTruthy();
+    expect(screen.getByLabelText('Move Contrast later')).toBeTruthy();
+  });
+});
+
+describe('ItemInspector copy and paste effects', () => {
+  const withEffects = makeState({
+    effects: [{ id: 'a', effectId: 'brightness', enabled: true, params: { amount: 0.2 } }],
+  } as never);
+
+  it('copies the chain through the command', () => {
+    const timeline = fakeTimeline(withEffects);
+    render(<ItemInspector state={withEffects} timeline={timeline} />);
+    fireEvent.click(screen.getByText('Copy effects'));
+    expect(timeline.copyEffects).toHaveBeenCalledWith('item-1');
+  });
+
+  it('disables Copy when the clip has no effects', () => {
+    const state = makeState();
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    // `getByText` finds the label span inside the button, so the closest button is
+    // what carries `disabled`.
+    const button = screen.getByText('Copy effects').closest('button')!;
+    expect(button.disabled).toBe(true);
+  });
+
+  it('disables Paste until something has been copied', () => {
+    // A paste button that does nothing when the clipboard is empty is
+    // indistinguishable from a broken one.
+    const timeline = fakeTimeline(withEffects);
+    render(<ItemInspector state={withEffects} timeline={timeline} />);
+    expect(screen.getByText('Paste effects').closest('button')!.disabled).toBe(true);
+  });
+
+  it('pastes when the effect clipboard has entries', () => {
+    const timeline = fakeTimeline(withEffects);
+    (timeline as { effectClipboardSize: number }).effectClipboardSize = 2;
+    render(<ItemInspector state={withEffects} timeline={timeline} />);
+    const paste = screen.getByText('Paste effects').closest('button')!;
+    expect(paste.disabled).toBe(false);
+    fireEvent.click(paste);
+    expect(timeline.pasteEffects).toHaveBeenCalledWith('item-1');
   });
 });

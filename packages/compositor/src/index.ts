@@ -156,3 +156,17 @@ export {
   type LinearRgb,
   type ParamSpec,
 } from './effects.js';
+
+/**
+ * SPEC 12 §3.1 — adjustment layers.
+ *
+ * An item with no picture that grades every layer below it. The schema carried the
+ * type and the chain; nothing resolved one to the layers it affects.
+ */
+export {
+  activeAdjustmentLayers,
+  effectsForLayer,
+  isAdjustmentItem,
+  type AdjustmentItem,
+  type AdjustmentLayer,
+} from './adjustment-layers.js';

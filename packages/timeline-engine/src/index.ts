@@ -45,6 +45,7 @@ export {
   pasteItems,
   groupItems,
   ungroupItems,
+  addAdjustmentLayer,
   addMarker,
   setTrackMuted,
   setTrackMagnetic,
@@ -78,7 +79,9 @@ export {
   syncCaptionsWithTranscript,
   trimCaptionWordsToRange,
   applyEffect,
+  moveEffect,
   removeEffect,
+  setEffectChain,
   toggleEffectEnabled,
   updateEffectParams,
   updateMarker,
@@ -95,4 +98,4 @@ export {
 
 export { TimelineHistory, type HistoryStep, type UndoResult } from './history';
 export { checkInvariants } from './invariants';
-export { createCaptionItem, createDefaultTimeline, createMediaItem, type CreateCaptionItemParams } from './factory';
+export { createCaptionItem, createDefaultTimeline, createMediaItem, nextId, type CreateCaptionItemParams } from './factory';

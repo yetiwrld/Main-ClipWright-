@@ -953,4 +953,144 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(red).toBeGreaterThan(118);
     expect(red).toBeLessThan(138);
   }, 120_000);
+  /**
+   * SPEC 12 §3.1 — an adjustment layer grades the tracks below it.
+   *
+   * The module's unit tests prove the *resolution* rules; these prove the pixels,
+   * because a chain that resolves correctly and is then applied to nothing looks
+   * exactly like a feature that works.
+   */
+  describe('adjustment layers during export', () => {
+    /**
+     * A clip on the main track with an adjustment layer above it must come out
+     * graded. Saturation 0 is the discriminating case: the source is strongly
+     * coloured and the output's channels must converge.
+     */
+    it('grades a clip below it', async () => {
+      const source = makeSolidSource('adj-source.mp4', [200, 60, 40]);
+      const settings = makeSettings({
+        items: [
+          {
+            id: 'graded', trackId: 'track-main', type: 'video', mediaId: 'media-adj',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          },
+          {
+            id: 'adj', trackId: 'track-adjustment', type: 'adjustment',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 10,
+            effects: [{ id: 'fx1', effectId: 'saturation', enabled: true, params: { amount: 0 } }],
+          },
+        ] as never,
+        rangeUs: [0, 500_000],
+      });
+      const plan = buildExportPlan(settings);
+      const outputPath = join(TMP, 'adj-graded.mp4');
+
+      const result = await runExportJob({
+        jobId: 'job-adj',
+        settings,
+        outputPath,
+        frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+        fullDecode: true,
+      });
+      expect(result.status).toBe('verified');
+
+      const [red, green, blue] = decodedChannelMeans(outputPath);
+      // Ungraded this source is (200, 60, 40) — a spread of 160.
+      expect(Math.abs(red - green)).toBeLessThan(8);
+      expect(Math.abs(green - blue)).toBeLessThan(8);
+    }, 120_000);
+
+    /**
+     * The other half of "only the tracks below": an adjustment layer under the clip
+     * must leave it alone. Getting this wrong grades everything unconditionally,
+     * which is a global filter wearing an adjustment layer's name.
+     */
+    it('leaves a clip above it ungraded', async () => {
+      const source = makeSolidSource('adj-above.mp4', [200, 60, 40]);
+      const settings = makeSettings({
+        items: [
+          {
+            id: 'adj', trackId: 'track-adjustment', type: 'adjustment',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+            effects: [{ id: 'fx1', effectId: 'saturation', enabled: true, params: { amount: 0 } }],
+          },
+          {
+            id: 'above', trackId: 'track-main', type: 'video', mediaId: 'media-above',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 10,
+          },
+        ] as never,
+        rangeUs: [0, 500_000],
+      });
+      const plan = buildExportPlan(settings);
+      const outputPath = join(TMP, 'adj-ungraded.mp4');
+
+      await runExportJob({
+        jobId: 'job-adj-above',
+        settings,
+        outputPath,
+        frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+        fullDecode: true,
+      });
+
+      const [red, green] = decodedChannelMeans(outputPath);
+      expect(red - green).toBeGreaterThan(100);
+    }, 120_000);
+
+    /**
+     * An adjustment layer grades the *composite*, not each layer separately.
+     *
+     * This uses exposure rather than saturation deliberately: desaturating an
+     * already-desaturated picture changes nothing, so a double-grade is invisible
+     * and the test would pass against a broken implementation. Exposure doubles
+     * linear values, so grading twice squares the gain and the two answers separate.
+     *
+     * A red (220,40,40) clip at 50 % over a blue canvas composites to (110,20,147).
+     * One +1 stop gives (152,31,201); grading each layer and then the frame again
+     * gives (176,43,213). Grading the composite also has to leave the blue canvas
+     * *raised*, which per-layer grading leaves untouched.
+     */
+    it('grades the composite rather than each layer', async () => {
+      const source = makeSolidSource('adj-composite.mp4', [220, 40, 40]);
+      const settings = makeSettings({
+        backgroundColor: '#0000FF',
+        items: [
+          {
+            id: 'red', trackId: 'track-main', type: 'video', mediaId: 'media-composite',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+            opacity: 0.5,
+          },
+          {
+            id: 'adj', trackId: 'track-adjustment', type: 'adjustment',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0,
+            disabled: false, muted: false, hasAudio: false, trackOrder: 10,
+            effects: [{ id: 'fx1', effectId: 'exposure', enabled: true, params: { stops: 1 } }],
+          },
+        ] as never,
+        rangeUs: [0, 500_000],
+      });
+      const plan = buildExportPlan(settings);
+      const outputPath = join(TMP, 'adj-composite.mp4');
+
+      await runExportJob({
+        jobId: 'job-adj-composite',
+        settings,
+        outputPath,
+        frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+        fullDecode: true,
+      });
+
+      const [red, green, blue] = decodedChannelMeans(outputPath);
+      // Blue was 255 in the canvas and is clipped at 255 either way, so the
+      // discriminator is red: 152 when the composite is graded once, 176 when the
+      // layer is graded and the result graded again.
+      expect(red).toBeGreaterThan(140);
+      expect(red).toBeLessThan(165);
+      expect(green).toBeLessThan(40);
+    }, 120_000);
+  });
 });

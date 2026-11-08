@@ -30,10 +30,12 @@ import {
   type PlannedItem,
 } from '@clipwright/export-core';
 import {
+  activeAdjustmentLayers,
   activeEffects,
   applyEffectsToFrame,
   compositeRgb,
   effectPassCount,
+  effectsForLayer,
   evaluateProperty,
   transitionAt,
   joinYuv,
@@ -404,7 +406,29 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         opacity: number;
         blendMode: BlendMode;
         effects: ActiveEffect[];
+        /** Stacking order of the layer's track; decides which adjustment layers grade it. */
+        trackOrder: number;
       }> = [];
+
+      /*
+        Adjustment layers at this frame (SPEC 12 §3.1). They are not layers
+        themselves — they have no picture — so they never enter `stack`; they only
+        contribute a chain to the layers below them. Resolved once per frame: every
+        layer under one adjustment layer must see the same chain, and re-resolving it
+        per layer would let them drift apart if the filter were order-dependent.
+      */
+      const adjustmentLayers = activeAdjustmentLayers(
+        plan.items.map((item) => ({
+          id: item.itemId,
+          type: item.type,
+          startUs: item.startUs,
+          durationUs: item.durationUs,
+          trackOrder: item.trackOrder ?? 0,
+          effects: item.effects,
+        })),
+        index * frameDurationUs,
+      );
+
       for (const item of visible) {
         const decoder = decoders.get(item.itemId);
         if (!decoder) continue;
@@ -431,6 +455,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               opacity: clampOpacity(item.opacity) * transition.opacity,
               blendMode: asBlendMode(item.blendMode),
               effects: activeEffects(item.effects),
+              trackOrder: item.trackOrder ?? 0,
             });
           }
           continue;
@@ -450,6 +475,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           opacity: clampOpacity(item.opacity) * transition.opacity,
           blendMode: asBlendMode(item.blendMode),
           effects,
+          trackOrder: item.trackOrder ?? 0,
         });
       }
 
@@ -464,7 +490,9 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         stack.length === 1 &&
         stack[0]!.opacity >= 1 &&
         stack[0]!.blendMode === 'normal' &&
-        stack[0]!.effects.length === 0;
+        stack[0]!.effects.length === 0 &&
+        // A live adjustment layer above this layer has to grade it, which needs RGB.
+        adjustmentLayers.length === 0;
       if (simple) return Buffer.from(stack[0]!.frame);
 
       /*
@@ -491,7 +519,32 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         height: plan.height,
         data: new Uint8ClampedArray(base.data.length),
       };
+      /*
+        An adjustment layer grades the *composite* of everything below it, not each
+        layer separately. The difference is not academic: an adjustment layer over two
+        half-opaque layers must grade their blend, and grading each at full strength
+        first would double the correction and halve the blending's authority.
+
+        So the layers are composited bottom-up into `base` as they always were, and
+        the pending chains are flushed onto `base` at the moment the walk crosses the
+        adjustment layer's track. `applyToBase` is that flush.
+      */
+      let pendingAdjustment = 0;
+      const applyToBase = (upTo: number) => {
+        while (
+          pendingAdjustment < adjustmentLayers.length &&
+          adjustmentLayers[pendingAdjustment]!.trackOrder < upTo
+        ) {
+          const chain = adjustmentLayers[pendingAdjustment]!.effects;
+          applyEffectsToFrame(base.data, plan.width, plan.height, chain);
+          pendingAdjustment += 1;
+        }
+      };
       for (const layer of stack) {
+        // Anything below this layer has already been composited, so any adjustment
+        // layer at or below it is due now. Doing this *before* the layer blends in
+        // is what keeps an adjustment layer from grading a clip above it.
+        applyToBase(layer.trackOrder);
         const rgb = yuvToRgb(splitYuv(layer.frame, plan.width, plan.height), scratch);
         // Effects run on the layer's own picture, before it is blended into the
         // frame below (SPEC 12 §3.1). Applying them after compositing would grade
@@ -502,6 +555,9 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         }
         compositeRgb(base, rgb, layer.opacity, layer.blendMode);
       }
+      // Adjustment layers stacked above everything on the canvas still grade what
+      // was painted; `Infinity` flushes whatever is left.
+      applyToBase(Number.POSITIVE_INFINITY);
       return joinYuv(rgbToYuv(base));
     },
     async close() {
