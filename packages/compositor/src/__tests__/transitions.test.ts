@@ -149,13 +149,18 @@ describe('transitionState', () => {
     expect(transitionState('dip-color', 0.5, {}).dipColor).toBe('#000000');
   });
 
-  it('dissolve keeps the outgoing side at full strength', () => {
-    // A dissolve reveals the incoming clip *against the outgoing one*, so the
-    // outgoing side must not fade — that is a crossfade.
+  it('dissolve keeps both sides at full strength and reports its noise field', () => {
+    // Neither side fades. §4.2 defines a dissolve as a noise-thresholded mix, so
+    // every pixel belongs entirely to one clip and the switch is decided by a fixed
+    // noise field. An earlier version of this test asserted `toOpacity ≈ p`, which
+    // described exactly the crossfade the spec distinguishes a dissolve from — a
+    // test can hold an incorrect contract in place just as easily as a comment can.
     for (const p of [0.1, 0.5, 0.9]) {
       const state = transitionState('dissolve', p);
       expect(state.fromOpacity).toBe(1);
-      expect(state.toOpacity).toBeCloseTo(p, 6);
+      expect(state.toOpacity).toBe(1);
+      expect(state.dissolve).toBeDefined();
+      expect(state.dissolve!.progress).toBeCloseTo(p, 6);
     }
   });
 

@@ -39,6 +39,7 @@ import {
   effectsForLayer,
   evaluateProperty,
   transitionAt,
+  dissolveAlphaAt,
   wipeAlphaAt,
   joinYuv,
   rgbToYuv,
@@ -47,6 +48,7 @@ import {
   type ActiveEffect,
   type BlendMode,
   type WipeShape,
+  type DissolveShape,
   type ItemGeometryInput,
   type RgbFrame,
 } from '@clipwright/compositor';
@@ -144,7 +146,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
   const transitionOpacityFor = (
     item: PlannedItem,
     timeUs: number,
-  ): { opacity: number; active: boolean; wipe?: WipeShape } => {
+  ): { opacity: number; active: boolean; wipe?: WipeShape; dissolve?: DissolveShape } => {
     if (item.transitionIn) {
       const at = transitionAt(item.startUs, asTransition(item.transitionIn), timeUs);
       if (at) {
@@ -154,6 +156,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           active: true,
           // The incoming clip is the one the wipe reveals.
           wipe: at.state.wipe,
+          dissolve: at.state.dissolve,
         };
       }
     }
@@ -420,6 +423,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         trackOrder: number;
         /** Set while a wipe is revealing this layer (SPEC 12 §4.2). */
         wipe?: WipeShape;
+        /** Set while a dissolve is switching this layer's pixels in (SPEC 12 §4.2). */
+        dissolve?: DissolveShape;
       }> = [];
 
       /*
@@ -469,6 +474,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               effects: activeEffects(item.effects),
               trackOrder: item.trackOrder ?? 0,
               wipe: transition.wipe,
+              dissolve: transition.dissolve,
             });
           }
           continue;
@@ -490,6 +496,7 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
           effects,
           trackOrder: item.trackOrder ?? 0,
           wipe: transition.wipe,
+          dissolve: transition.dissolve,
         });
       }
 
@@ -566,6 +573,19 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         // useful — operation.
         if (layer.effects.length > 0) {
           applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
+        }
+        if (layer.dissolve) {
+          // A dissolve switches whole pixels from one clip to the other through a
+          // fixed noise field, so it needs a mask for the same reason a wipe does —
+          // an opacity would blend every pixel instead of choosing between them.
+          compositeRgbMasked(
+            base,
+            rgb,
+            layer.opacity,
+            layer.blendMode,
+            dissolveMaskFor(layer.dissolve, plan.width, plan.height),
+          );
+          continue;
         }
         if (layer.wipe) {
           // A wipe is the one transition that is not an opacity: which pixels show
@@ -659,6 +679,21 @@ export function blankFrame(width: number, height: number): Buffer {
  * therefore sweeps the full width, and a diagonal one sweeps corner to corner at a
  * constant speed rather than arriving at one side first.
  */
+/** The per-pixel mask for a dissolve (SPEC 12 §4.2): 1 where the pixel has switched. */
+function dissolveMaskFor(
+  shape: DissolveShape,
+  width: number,
+  height: number,
+): Float32Array {
+  const mask = new Float32Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      mask[y * width + x] = dissolveAlphaAt(x, y, width, height, shape);
+    }
+  }
+  return mask;
+}
+
 function wipeMaskFor(shape: WipeShape, width: number, height: number): Float32Array {
   const mask = new Float32Array(width * height);
   // Projection bounds, so `t` is normalised to [0, 1] for any direction.

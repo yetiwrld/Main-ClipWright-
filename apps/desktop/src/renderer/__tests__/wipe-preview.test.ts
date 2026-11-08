@@ -1,3 +1,4 @@
+import type React from 'react';
 /**
  * SPEC 12 §4.2 — a wipe must actually wipe on screen.
  *
@@ -10,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { transitionState, wipeAlphaAt, wipeDirection } from '@clipwright/compositor';
-import { wipeClipPath } from '../features/editor/PreviewPane.js';
+import { dissolveMaskStyle, wipeClipPath } from '../features/editor/PreviewPane.js';
 
 /** Parse `inset(t r b l)` percentages. */
 function parseInset(path: string): [number, number, number, number] {
@@ -104,3 +105,35 @@ function shapeFor(direction: string, position: number) {
   if (!state.wipe) throw new Error('no wipe shape');
   return state.wipe;
 }
+
+describe('dissolve in the preview (SPEC 12 §4.2)', () => {
+  it('produces a pattern mask rather than a flat opacity', () => {
+    // A dissolve that used opacity would be the fade this replaced. The preview
+    // cannot run the export's per-pixel threshold, but it must at least not render
+    // as an even blend.
+    const style = dissolveMaskStyle({ seed: 1, grain: 0.1, progress: 0.5 });
+    expect(style.maskImage).toContain('repeating-conic-gradient');
+    expect(style.maskImage).toContain('50%');
+    // The stop is a hard one: the same colour on both sides of the position would
+    // be a smooth gradient, i.e. a fade.
+    expect(style.maskImage).not.toContain('gradient(rgba');
+  });
+
+  it('scales the patch size with the grain', () => {
+    const fine = dissolveMaskStyle({ seed: 1, grain: 0.02, progress: 0.5 });
+    const coarse = dissolveMaskStyle({ seed: 1, grain: 0.2, progress: 0.5 });
+    // `maskSize` is a union in the DOM types because it accepts a number too.
+    const size = (style: React.CSSProperties) => Number(String(style.maskSize).split('%')[0]);
+    expect(size(fine)).toBeLessThan(size(coarse));
+  });
+
+  it('clamps progress into 0–100 %', () => {
+    // A NaN or out-of-range stop makes CSS drop the whole mask, which would show
+    // the incoming clip in full from the first frame.
+    for (const progress of [-1, 0, 0.5, 1, 2, Number.NaN]) {
+      const style = dissolveMaskStyle({ seed: 1, grain: 0.1, progress });
+      expect(style.maskImage).toMatch(/[\d.]+%/);
+      expect(style.maskImage).not.toContain('NaN');
+    }
+  });
+});

@@ -106,6 +106,27 @@ export interface TransitionState {
    * extra steps.
    */
   wipe?: WipeShape;
+  /**
+   * For `dissolve`: a per-pixel threshold, `0`–`1`, and the seed its noise was
+   * generated from.
+   *
+   * §4.2 defines a dissolve as a noise-thresholded mix rather than a fade: each
+   * pixel switches from the outgoing picture to the incoming one when a fixed noise
+   * field at that pixel falls below the progress. That makes the two pictures
+   * interleave in patches — film-grain dissolve — instead of blending everywhere at
+   * once. Reporting it as a shape keeps the renderers from guessing.
+   */
+  dissolve?: DissolveShape;
+}
+
+/** The noise field a `dissolve` thresholds (SPEC 12 §4.2). */
+export interface DissolveShape {
+  /** Seed of the deterministic noise. Fixed so two exports match frame for frame. */
+  seed: number;
+  /** Feature size of the noise, in fractions of the frame. Larger is coarser. */
+  grain: number;
+  /** Progress, 0–1. */
+  progress: number;
 }
 
 /** The moving edge of a wipe, in normalised frame coordinates (0–1). */
@@ -215,11 +236,16 @@ export function transitionState(
       // separately rather than folded in.
       return { ...base, fromOpacity: 1 - progress, toOpacity: progress };
 
-    case 'dissolve':
-      // A dissolve ramps the incoming side against the *canvas*, not against the
-      // outgoing picture: the outgoing clip is still drawn at full strength, so
-      // grain or transparency in the incoming material reads through.
-      return { ...base, fromOpacity: 1, toOpacity: progress };
+    case 'dissolve': {
+      // §4.2: a noise-thresholded mix, not a fade. Both sides stay fully opaque
+      // and each pixel belongs entirely to one of them, chosen by a fixed noise
+      // field — which is what makes the cut read as grain rather than as a
+      // transparency ramp. A plain fade here would be an unremarkable crossfade
+      // wearing the dissolve's name.
+      const grain = typeof params.grain === 'number' ? Math.max(0.001, params.grain) : 0.5;
+      const seed = typeof params.seed === 'number' ? params.seed : DISSOLVE_SEED;
+      return { ...base, dissolve: { seed, grain, progress } };
+    }
 
     case 'fade-black': {
       // Down to black at the midpoint, then up again. Each half is a fade against
@@ -326,4 +352,126 @@ export function transitionBezier(easing: Transition['easing']): [number, number,
 /** Evaluate a bezier easing at `x`; exported so renderers share one implementation. */
 export function easeWithBezier(points: [number, number, number, number], x: number): number {
   return cubicBezier(points[0], points[1], points[2], points[3], x);
+}
+
+/**
+ * The fixed seed a dissolve uses when the transition does not name one (§4.2:
+ * "deterministic noise texture, fixed seed").
+ *
+ * Determinism is a requirement, not a nicety: two exports of the same project must
+ * produce identical frames, and a noise field seeded from the clock would fail that
+ * the moment the same dissolve was rendered twice.
+ */
+export const DISSOLVE_SEED = 0x5eed_1234;
+
+/**
+ * A deterministic value in `[0, 1)` for a pixel, given the dissolve's grain and seed.
+ *
+ * This is value noise: a hash of the coarse cell the pixel falls in, smoothly
+ * interpolated between neighbouring cells so the patches have soft edges rather
+ * than looking like a checkerboard. A hash of the exact pixel would give
+ * salt-and-pepper noise, which reads as static and looks wrong at video scale.
+ */
+export function dissolveNoiseAt(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  shape: Pick<DissolveShape, 'seed' | 'grain'>,
+): number {
+  // Grain is in frame fractions; converting to cells keeps a dissolve looking the
+  // same at any export resolution, which §12 item 6 requires of effects generally.
+  const cellsX = Math.max(1, Math.round(1 / shape.grain));
+  const cellsY = Math.max(1, Math.round((height / Math.max(1, width)) / shape.grain));
+  const gx = (x / width) * cellsX;
+  const gy = (y / height) * cellsY;
+  const x0 = Math.floor(gx);
+  const y0 = Math.floor(gy);
+  const fx = gx - x0;
+  const fy = gy - y0;
+  // Smoothstep the interpolation so the patch edges fade instead of banding.
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const sample = (cx: number, cy: number) => hash2(cx, cy, shape.seed);
+  const top = sample(x0, y0) * (1 - sx) + sample(x0 + 1, y0) * sx;
+  const bottom = sample(x0, y0 + 1) * (1 - sx) + sample(x0 + 1, y0 + 1) * sx;
+  return top * (1 - sy) + bottom * sy;
+}
+
+/** A stable 32-bit hash of a cell, mapped into `[0, 1)`. */
+function hash2(x: number, y: number, seed: number): number {
+  let h = (x * 0x27d4eb2d) ^ (y * 0x165667b1) ^ seed;
+  h = Math.imul(h ^ (h >>> 15), 0x2545f491);
+  h ^= h >>> 13;
+  return (h >>> 0) / 0x1_0000_0000;
+}
+
+/**
+ * The noise value below which `progress` of the field lies.
+ *
+ * Thresholding the raw noise against the progress looks right and is not: the field
+ * is bilinear interpolation of hashed cells, so its values cluster around the middle
+ * and a quarter of the way through the transition only ~15 % of pixels had switched
+ * — the dissolve stalls at the start and the end and rushes through the middle.
+ * Mapping progress through the field's own quantiles makes the switched fraction
+ * equal the progress, which is what a dissolve is supposed to do.
+ *
+ * The quantiles depend only on the seed, so they are computed once and cached.
+ */
+const thresholdCache = new Map<number, Float32Array>();
+
+function dissolveThresholds(seed: number): Float32Array {
+  const cached = thresholdCache.get(seed);
+  if (cached) return cached;
+  const samples: number[] = [];
+  // Sampling one cell's worth of fractional positions covers the whole
+  // distribution: every pixel's noise is a bilinear blend of four hashes at some
+  // (fx, fy), and those are uniform inside a cell.
+  const steps = 32;
+  let h = seed;
+  const next = () => {
+    h = Math.imul(h ^ (h >>> 15), 0x2545f491);
+    h ^= h >>> 13;
+    return (h >>> 0) / 0x1_0000_0000;
+  };
+  for (let iy = 0; iy < steps; iy += 1) {
+    for (let ix = 0; ix < steps; ix += 1) {
+      const fx = (ix + 0.5) / steps;
+      const fy = (iy + 0.5) / steps;
+      const sx = fx * fx * (3 - 2 * fx);
+      const sy = fy * fy * (3 - 2 * fy);
+      const top = next() * (1 - sx) + next() * sx;
+      const bottom = next() * (1 - sx) + next() * sx;
+      samples.push(top * (1 - sy) + bottom * sy);
+    }
+  }
+  samples.sort((a, b) => a - b);
+  const table = Float32Array.from(samples);
+  thresholdCache.set(seed, table);
+  return table;
+}
+
+/**
+ * Which side a dissolve's pixel belongs to at the current progress.
+ *
+ * Returns the incoming clip's alpha: `1` once the pixel's noise value has fallen
+ * below the threshold for this progress. There is deliberately no partial value — a
+ * dissolve switches pixels, it does not fade them — so the frame never shows a blend
+ * of the two.
+ */
+export function dissolveAlphaAt(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  shape: DissolveShape,
+): number {
+  if (shape.progress <= 0) return 0;
+  if (shape.progress >= 1) return 1;
+  const thresholds = dissolveThresholds(shape.seed);
+  const index = Math.min(
+    thresholds.length - 1,
+    Math.max(0, Math.round(shape.progress * (thresholds.length - 1))),
+  );
+  return dissolveNoiseAt(x, y, width, height, shape) < thresholds[index]! ? 1 : 0;
 }

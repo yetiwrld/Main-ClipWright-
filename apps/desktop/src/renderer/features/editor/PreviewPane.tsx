@@ -15,6 +15,7 @@ import {
   type ItemGeometry,
   type VisibleLayer,
   type WipeShape,
+  type DissolveShape,
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
@@ -138,6 +139,41 @@ export function wipeClipPath(shape: WipeShape): string {
   const fx = shape.axisX > 0 ? p * 100 : 100 - p * 100;
   const fy = shape.axisY > 0 ? p * 100 : 100 - p * 100;
   return `polygon(${x}% ${y}%, ${fx}% ${y}%, ${x}% ${fy}%)`;
+}
+
+/**
+ * The CSS approximation of a dissolve on screen (SPEC 12 §4.2).
+ *
+ * The export thresholds a real value-noise field per pixel, which CSS cannot
+ * express: `mask-image` can take a gradient or an image URL, not a procedural
+ * field. What is achievable is a *pattern* mask at the dissolve's grain scale whose
+ * coverage rises with progress, so the preview shows the incoming clip arriving in
+ * patches rather than as an even fade. It is an approximation and is documented as
+ * one — the file is authoritative.
+ *
+ * The two-stop gradient is what makes it a threshold rather than a blend: the hard
+ * stop at `progress` puts each patch entirely on one side.
+ */
+export function dissolveMaskStyle(shape: DissolveShape): React.CSSProperties {
+  // `Math.min`/`Math.max` pass NaN straight through, and a NaN in a mask stop makes
+  // the browser drop the whole mask — which shows the incoming clip in full from the
+  // first frame. Check for it rather than trusting the clamp.
+  const raw = Number.isFinite(shape.progress) ? shape.progress : 0;
+  const p = Math.min(1, Math.max(0, raw));
+  const grain = Number.isFinite(shape.grain) ? shape.grain : 0.1;
+  // Grain is a fraction of the frame; sizing the repeating cell in the same units
+  // keeps the patches looking alike at any window size.
+  const cellPct = Math.max(0.5, grain * 100);
+  return {
+    // A mask only reads alpha, so the colour is irrelevant — but it still has to
+    // be a token rather than a literal (`01` §12.2), and `currentColor` is the one
+    // that expresses "any opaque colour" without inventing a palette entry.
+    WebkitMaskImage: `repeating-conic-gradient(from 45deg, currentColor ${p * 100}%, transparent 0)`,
+    maskImage: `repeating-conic-gradient(from 45deg, currentColor ${p * 100}%, transparent 0)`,
+    // Size the repeating cell so the patches read at the dissolve's grain.
+    WebkitMaskSize: `${cellPct}% ${cellPct}%`,
+    maskSize: `${cellPct}% ${cellPct}%`,
+  };
 }
 
 export function unsupportedEffectNames(effects: readonly ActiveEffect[]): string[] {
@@ -421,6 +457,7 @@ export function PreviewPane({
                 transitionOffsetX={transition?.offsetX ?? 0}
                 transitionScale={transition?.scale ?? 1}
                 transitionWipe={transition?.wipe}
+                transitionDissolve={transition?.dissolve}
                 effectFilter={cssFiltersFor(effects)}
                 initialAspect={canvas.width / canvas.height}
                 muted={muted}
@@ -572,6 +609,8 @@ function transitionFor(
   scale: number;
   /** Set on the incoming side of a running wipe (SPEC 12 §4.2). */
   wipe?: WipeShape;
+  /** Set on the incoming side of a running dissolve (SPEC 12 §4.2). */
+  dissolve?: DissolveShape;
 } | null {
   const item = state.items[layer.id];
   if (!item) return null;
@@ -590,6 +629,7 @@ function transitionFor(
       offsetX: at.state.toOffsetX,
       scale: at.state.toScale,
       wipe: at.state.wipe,
+      dissolve: at.state.dissolve,
     };
   }
 
@@ -631,6 +671,7 @@ const PreviewLayer = memo(function PreviewLayer({
   transitionOffsetX,
   transitionScale,
   transitionWipe,
+  transitionDissolve,
   effectFilter,
   muted,
   playing,
@@ -652,6 +693,8 @@ const PreviewLayer = memo(function PreviewLayer({
   transitionScale: number;
   /** The sweeping edge of a running `wipe` (SPEC 12 §4.2). */
   transitionWipe?: WipeShape;
+  /** The noise field of a running `dissolve` (SPEC 12 §4.2). */
+  transitionDissolve?: DissolveShape;
   muted: boolean;
   playing: boolean;
   onPlayRejected: () => void;
@@ -716,6 +759,7 @@ const PreviewLayer = memo(function PreviewLayer({
         // wrapper's own transform and would clip the wrong edge on a slid layer.
         // A soft edge is a two-stop gradient mask instead of a hard inset.
         ...(transitionWipe ? { clipPath: wipeClipPath(transitionWipe) } : {}),
+        ...(transitionDissolve ? dissolveMaskStyle(transitionDissolve) : {}),
       }}
     >
       <div

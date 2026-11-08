@@ -135,7 +135,14 @@ This document tracks architectural scope boundaries and honest limitations per `
    - a **wipe's soft edge is exact in the export and hard in the preview**: the
      export ramps alpha across the edge as §4.2 specifies, while CSS has no
      gradient clip, so the preview shows the hard-edged version. Setting softness to
-     0 — the default — makes the two identical.
+     0 — the default — makes the two identical;
+   - a **dissolve's noise field is exact in the export and patterned in the
+     preview**: the export thresholds a real value-noise field per pixel, with a
+     quantile mapping so the switched fraction equals the progress. CSS can express
+     a repeating gradient mask but not a procedural field, so the preview shows
+     patches on a regular grid whose coverage follows the progress. The file is
+     authoritative; the preview conveys the character of the transition, not its
+     exact pixel pattern.
    The export is correct and tested; the preview is honest and approximate, and the
    banner is what makes that acceptable.
    - **Adjustment layers grade what is below them, with one approximation.** An

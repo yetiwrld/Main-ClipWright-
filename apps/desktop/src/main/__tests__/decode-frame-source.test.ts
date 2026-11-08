@@ -1184,4 +1184,88 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(rightRed, 'right quarter should still be the outgoing clip').toBeGreaterThan(150);
     expect(rightBlue, 'right quarter should not yet be the incoming clip').toBeLessThan(90);
   }, 180_000);
+  /**
+   * SPEC 12 §4.2 — `dissolve`: a noise-thresholded mix, not a fade.
+   *
+   * The measurement is per-pixel *bimodality*: at mid-transition a dissolve shows
+   * most pixels as pure outgoing or pure incoming with almost none blended, whereas
+   * the fade it used to be shows almost every pixel blended. A mean cannot tell
+   * them apart — both average to the same mix — which is why this counts pixels
+   * rather than averaging.
+   */
+  it('dissolves between two clips through a noise field in the exported file', async () => {
+    const first = makeSolidSource('dis-first.mp4', [220, 30, 30]); // red, outgoing
+    const second = makeSolidSource('dis-second.mp4', [30, 30, 220]); // blue, incoming
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a', trackId: 'track-main', type: 'video', mediaId: 'dis-a',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+        {
+          id: 'b', trackId: 'track-main', type: 'video', mediaId: 'dis-b',
+          startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          transitionIn: {
+            id: 'tr', type: 'dissolve', durationUs: 400_000, alignment: 'center',
+            params: { grain: 0.05 }, easing: 'linear', crossfadeAudio: true,
+          },
+        },
+      ] as never,
+      rangeUs: [0, 1_600_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'transition-dissolve.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-dissolve',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({
+        plan,
+        resolveMediaPath: (mediaId) => (mediaId === 'dis-a' ? first : second),
+      }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const rgbPath = join(TMP, 'dis-probe.rgb');
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-loglevel', 'error', '-nostdin',
+        '-ss', '1.0', '-i', outputPath, '-frames:v', '1',
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+      { stdio: 'ignore' },
+    );
+    const raw = readFileSync(rgbPath);
+    rmSync(rgbPath, { force: true });
+
+    /*
+      Classify each pixel by hue. The pure clips are (220,30,30) and (30,30,220);
+      4:2:0 chroma subsampling pulls them toward each other a little, so "pure"
+      is generous — but the blended middle is a wide band, and a fade at 50 % puts
+      *every* pixel near (125,30,125), which no generous threshold can call pure.
+    */
+    let red = 0;
+    let blue = 0;
+    let mixed = 0;
+    let total = 0;
+    for (let index = 0; index < raw.length; index += 3) {
+      const r = raw[index]!;
+      const b = raw[index + 2]!;
+      total += 1;
+      if (r > 120 && b < 110) red += 1;
+      else if (b > 120 && r < 110) blue += 1;
+      else mixed += 1;
+    }
+
+    // Both clips must be present — a hard cut would show only one.
+    expect(red / total, 'outgoing clip visible').toBeGreaterThan(0.15);
+    expect(blue / total, 'incoming clip visible').toBeGreaterThan(0.15);
+    // ...and most pixels must belong cleanly to one side. A fade at this point
+    // would put nearly every pixel in `mixed`.
+    expect(mixed / total, 'pixels blended between the clips').toBeLessThan(0.25);
+  }, 180_000);
 });

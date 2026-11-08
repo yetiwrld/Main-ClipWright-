@@ -85,7 +85,9 @@ blended bottom-first at its own opacity and blend mode, and written out. The
 preview and the export resolve the layer stack through the same function, so they
 agree about which clip is on top, and transitions draw both clips across the
 overlap in the preview and dissolve, slide, zoom or wipe them in the file — a wipe
-is a real per-pixel reveal, masked in the export and clipped in the preview. What is still
+is a real per-pixel reveal, masked in the export and clipped in the preview, and a
+dissolve switches whole pixels through a deterministic noise field rather than
+fading them. What is still
 the nine required effects from §12 §3.2 are implemented in CPU code and applied to
 every exported frame (the preview approximates them with CSS filters and says so
 where it cannot). A clip's chain can be reordered, copied and pasted, and an
