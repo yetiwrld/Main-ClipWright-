@@ -822,7 +822,10 @@ function asTransition(
     alignment,
     params: transition.params,
     easing: transition.easing as Transition['easing'],
-    crossfadeAudio: true,
+    // Carried through rather than assumed: the flag is what decides whether the
+    // linked audio crossfades or cuts (SPEC 12 §4.2), and hard-coding `true` here
+    // silently discarded the user's setting.
+    crossfadeAudio: transition.crossfadeAudio ?? true,
   };
 }
 

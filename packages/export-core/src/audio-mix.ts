@@ -205,6 +205,56 @@ export function applyGainCurve(clip: PcmClip, curve: Float32Array): void {
 }
 
 /**
+ * The equal-power crossfade gain for one side of a transition (SPEC 12 §4.2).
+ *
+ * Both clips are multiplied by a half-cosine: `cos(π/2 · t)` for the outgoing side
+ * and `sin(π/2 · t)` for the incoming one, where `t` runs 0 → 1 across the window.
+ * Squaring them and adding gives 1 at every point — that is what "equal power"
+ * means, and it is why the level does not dip in the middle the way a linear
+ * crossfade would. For two uncorrelated sources (different footage, different
+ * tones) the summed loudness then stays flat.
+ *
+ * `side` is `out` for the clip leaving and `in` for the clip arriving.
+ */
+export function equalPowerGain(side: 'in' | 'out', t: number): number {
+  const clamped = Math.min(1, Math.max(0, t));
+  const angle = (Math.PI / 2) * clamped;
+  return side === 'in' ? Math.sin(angle) : Math.cos(angle);
+}
+
+/**
+ * Apply an equal-power crossfade to a clip that joins another at a cut.
+ *
+ * `atCutSamples` is where this clip's audio starts on the mix timeline, which for
+ * the incoming side of a transition is also where the window is centred when the
+ * transition is `center`-aligned. The window is the transition's own
+ * `durationUs`, so the fade always matches what the picture does.
+ *
+ * The gain extends *outside* the incoming clip's nominal span in one direction and
+ * inside it in the other, so the caller passes the range it should be applied over
+ * rather than having this function guess.
+ */
+export function applyCrossfade(
+  clip: PcmClip,
+  options: {
+    /** First sample of the window, relative to `clip`'s own first sample. */
+    fromSamples: number;
+    /** Length of the window in samples. */
+    lengthSamples: number;
+    side: 'in' | 'out';
+  },
+): void {
+  const length = Math.max(1, options.lengthSamples);
+  for (let offset = 0; offset < length; offset += 1) {
+    const index = options.fromSamples + offset;
+    if (index < 0 || index >= clip.length) continue;
+    const gain = equalPowerGain(options.side, offset / (length - 1 || 1));
+    clip.samples[index * MIX_CHANNELS] *= gain;
+    clip.samples[index * MIX_CHANNELS + 1] *= gain;
+  }
+}
+
+/**
  * Peak level of a clip, linear.
  * Used by the limiter and by the silence check in validation.
  */

@@ -105,7 +105,22 @@ export interface PlannedItem {
     alignment: 'center' | 'start' | 'end';
     params: Record<string, number | boolean | string>;
     easing: string;
+    /**
+     * Whether the linked audio crossfades across the transition (SPEC 12 §4.2).
+     * Off means a hard audio cut even though the picture transitions.
+     */
+    crossfadeAudio?: boolean;
   };
+  /**
+   * The transition this item is *leaving* through: its successor's, when the two
+   * abut on a track.
+   *
+   * Filled in by `buildExportPlan` rather than passed in, because a transition is
+   * stored on the incoming item and the outgoing one carries no record of it. The
+   * mixer needs both halves to crossfade audio over the same window the picture
+   * crossfades over (SPEC 12 §4.2).
+   */
+  transitionOut?: PlannedItem['transitionIn'];
   /**
    * Track stacking order, larger is nearer the viewer. Needed to composite: two
    * visible items are otherwise an unordered set, and the export would have to
@@ -342,6 +357,34 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
       };
     })
     .filter((item) => item.active);
+
+  /*
+    Link each item to the transition it leaves through (SPEC 12 §4.2).
+
+    A transition is stored on the *incoming* item, so the outgoing one has no record
+    of it. The mixer needs both halves to crossfade audio, and looking the successor
+    up there would duplicate the "next item on this track" rule the renderers
+    already implement — with a different idea of what "next" means once a track has
+    a gap. Resolving it once here keeps one definition.
+  */
+  const byTrack = new Map<string, PlannedItem[]>();
+  for (const item of items) {
+    const list = byTrack.get(item.trackId) ?? [];
+    list.push(item);
+    byTrack.set(item.trackId, list);
+  }
+  for (const list of byTrack.values()) {
+    list.sort((a, b) => a.startUs - b.startUs);
+    for (let index = 0; index + 1 < list.length; index += 1) {
+      const successor = list[index + 1]!;
+      // Only an abutting pair shares a transition; a gap between them means they
+      // are not joined and the successor's transition belongs to another cut.
+      const current = list[index]!;
+      if (successor.transitionIn && successor.startUs === current.startUs + current.durationUs) {
+        current.transitionOut = successor.transitionIn;
+      }
+    }
+  }
 
   // Quality settings lookup.
   const quality = QUALITY_PRESETS_LOOKUP[settings.quality];

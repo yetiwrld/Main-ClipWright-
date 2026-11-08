@@ -148,6 +148,15 @@ This document tracks architectural scope boundaries and honest limitations per `
      diagonals. All four axis directions push — both pictures travel together, which
      is the mode most people mean — and the diagonals fall back to horizontal travel
      rather than doing nothing. `cover` and `reveal` are not implemented.
+   - **A transition's audio crossfade needs handles on the incoming clip.** §4.2
+     asks for an equal-power audio crossfade over the transition's own range. The
+     incoming clip's half of a centred window begins *before* the clip does, so the
+     mixer decodes earlier material and starts the clip early — which is only
+     possible if the source has footage before the in-point. With no handles the
+     crossfade degenerates to a fade-in from the clip's first sample, which is
+     audible as a slight step at the cut on material that started at a source's
+     very beginning. Padding with silence was rejected: it would put a silent hole
+     in the middle of the mix.
    - **`zoom` resamples with nearest-neighbour.** The scale changes every frame, so
      a bilinear sample would be re-filtered on each one; nearest keeps it to a
      multiply per pixel, and the error it adds is far below the 4:2:0 rounding the
@@ -179,9 +188,9 @@ This document tracks architectural scope boundaries and honest limitations per `
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-11. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
-   normalisation are; the equaliser, reverb and other audio-rack effects are not
-   yet in the mix.
+11. **Audio effects are not applied.** Gain, fades, panning, ducking, loudness
+   normalisation and transition crossfades are; the equaliser, reverb and other
+   audio-rack effects are not yet in the mix.
 12. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 

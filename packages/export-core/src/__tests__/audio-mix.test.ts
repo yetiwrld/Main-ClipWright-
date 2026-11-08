@@ -5,8 +5,10 @@ import {
   MIX_CHANNELS,
   MIX_SAMPLE_RATE,
   amplitudeToDb,
+  applyCrossfade,
   applyGainCurve,
   applyItemProcessing,
+  equalPowerGain,
   createClip,
   duckingCurve,
   fitLength,
@@ -374,5 +376,115 @@ describe('the mix uses the shared envelope (SPEC 12 §6.1)', () => {
       const observed = clip.samples[frame * 2]! / (Math.cos(Math.PI / 4) * Math.SQRT2);
       expect(observed, `frame ${frame}`).toBeCloseTo(gainAt(envelope, timeUs), 4);
     }
+  });
+});
+
+/**
+ * SPEC 12 §4.2 — "linked audio gets an equal-power crossfade over the same range".
+ *
+ * Equal *power* is the part worth testing directly: a linear crossfade sums to one
+ * at every point, which for uncorrelated material is a 3 dB dip in the middle. The
+ * half-cosine pair sums to one in power instead, which is what keeps the level flat.
+ */
+describe('equal-power crossfade (SPEC 12 §4.2)', () => {
+  it('keeps the summed power constant across the window', () => {
+    // power = gain², and the two sides must add to 1 at every progress.
+    for (let i = 0; i <= 100; i += 1) {
+      const t = i / 100;
+      const outgoing = equalPowerGain('out', t);
+      const incoming = equalPowerGain('in', t);
+      expect(outgoing * outgoing + incoming * incoming, `t=${t}`).toBeCloseTo(1, 6);
+    }
+  });
+
+  it('does not dip to half amplitude in the middle the way a linear fade does', () => {
+    // The distinguishing number: two mid-cross fade, a linear pair would give
+    // 0.5 + 0.5 = 1.0 in amplitude but 0.25 + 0.25 = 0.5 in power. Equal power
+    // gives ~0.707 each, so the *power* sum stays 1.
+    const mid = equalPowerGain('in', 0.5);
+    expect(mid).toBeCloseTo(Math.SQRT1_2, 6);
+    expect(mid * mid * 2).toBeCloseTo(1, 6);
+  });
+
+  it('starts fully on the outgoing side and ends fully on the incoming one', () => {
+    expect(equalPowerGain('out', 0)).toBeCloseTo(1, 6);
+    expect(equalPowerGain('in', 0)).toBeCloseTo(0, 6);
+    expect(equalPowerGain('out', 1)).toBeCloseTo(0, 6);
+    expect(equalPowerGain('in', 1)).toBeCloseTo(1, 6);
+  });
+
+  it('clamps a progress outside the window', () => {
+    // A transition's easing can hand a value slightly past the end; playing it
+    // backwards would be an audible jump.
+    expect(equalPowerGain('in', -1)).toBe(0);
+    expect(equalPowerGain('in', 2)).toBe(1);
+    // `cos(π/2)` is 6.1e-17, not 0 — snapping to zero here would hide a real
+    // regression behind a floating-point constant.
+    expect(equalPowerGain('out', 2)).toBeCloseTo(0, 10);
+  });
+
+  describe('applyCrossfade', () => {
+    const tone = (seconds: number): PcmClip => {
+      const clip = createClip(Math.round(seconds * MIX_SAMPLE_RATE));
+      for (let i = 0; i < clip.length; i += 1) {
+        clip.samples[i * 2] = 1;
+        clip.samples[i * 2 + 1] = 1;
+      }
+      return clip;
+    };
+
+    it('ramps the outgoing side down to silence', () => {
+      const clip = tone(1);
+      applyCrossfade(clip, { fromSamples: 0, lengthSamples: clip.length, side: 'out' });
+      expect(Math.abs(clip.samples[0]!)).toBeCloseTo(1, 6);
+      expect(Math.abs(clip.samples[(clip.length - 1) * 2]!)).toBeLessThan(0.01);
+    });
+
+    it('ramps the incoming side up from silence', () => {
+      const clip = tone(1);
+      applyCrossfade(clip, { fromSamples: 0, lengthSamples: clip.length, side: 'in' });
+      expect(Math.abs(clip.samples[0]!)).toBeLessThan(0.01);
+      expect(Math.abs(clip.samples[(clip.length - 1) * 2]!)).toBeCloseTo(1, 2);
+    });
+
+    it('leaves everything outside the window untouched', () => {
+      // A clip whose window covers only its middle: the head and tail must survive.
+      const clip = tone(1);
+      const quarter = Math.round(clip.length / 4);
+      applyCrossfade(clip, { fromSamples: quarter, lengthSamples: quarter, side: 'out' });
+      expect(clip.samples[0]).toBe(1);
+      expect(Math.abs(clip.samples[(clip.length - 1) * 2]!)).toBe(1);
+    });
+
+    it('ignores a window that runs off either end of the clip', () => {
+      // The incoming half of a centred crossfade starts before the clip does when
+      // there are no handles; the part that exists must still be shaped, and the
+      // part that does not must not throw.
+      const clip = tone(1);
+      expect(() =>
+        applyCrossfade(clip, { fromSamples: -5000, lengthSamples: clip.length, side: 'in' }),
+      ).not.toThrow();
+      expect(() =>
+        applyCrossfade(clip, { fromSamples: clip.length - 10, lengthSamples: 5000, side: 'out' }),
+      ).not.toThrow();
+    });
+
+    it('composes with the item\'s own fades rather than replacing them', () => {
+      // The mixer applies the item's fade-out first and the crossfade after; both
+      // envelopes multiply, which is what an editor does. Applying only one would
+      // make a clip that fades out into a transition fade out twice as fast.
+      const clip = tone(1);
+      applyItemProcessing(clip, {
+        startUs: 0,
+        durationUs: 1_000_000,
+        fadeOutUs: 500_000,
+        gain: 1,
+      });
+      const halfwayBefore = Math.abs(clip.samples[Math.round(clip.length * 0.75) * 2]!);
+      applyCrossfade(clip, { fromSamples: 0, lengthSamples: clip.length, side: 'out' });
+      const halfwayAfter = Math.abs(clip.samples[Math.round(clip.length * 0.75) * 2]!);
+      expect(halfwayAfter).toBeLessThan(halfwayBefore);
+      expect(halfwayAfter).toBeGreaterThan(0);
+    });
   });
 });

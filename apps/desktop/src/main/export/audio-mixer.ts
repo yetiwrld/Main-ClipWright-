@@ -20,6 +20,7 @@ import {
   MIX_SAMPLE_RATE,
   applyGainCurve,
   applyItemProcessing,
+  applyCrossfade,
   createClip,
   duckingCurve,
   fitLength,
@@ -55,6 +56,27 @@ export interface AudioItemRequest {
   muted?: boolean;
   /** Set for a music bed that should duck under the other items (§12 §6.7). */
   duckUnderSpeech?: boolean;
+  /**
+   * The audio crossfade this item needs at a cut (SPEC 12 §4.2), if any.
+   *
+   * Both halves are described from the item's own point of view so the mixer does
+   * not have to look at neighbouring items: it decodes and places exactly this item
+   * and then shapes its envelope.
+   */
+  crossfades?: AudioCrossfade[];
+}
+
+/**
+ * One side of an equal-power audio crossfade.
+ *
+ * Offsets are in microseconds relative to the item's own timeline start, and may be
+ * negative — the incoming half of a centred crossfade begins *before* the clip does,
+ * which is why the mixer has to decode earlier material than it plays at full level.
+ */
+export interface AudioCrossfade {
+  side: 'in' | 'out';
+  startOffsetUs: number;
+  durationUs: number;
 }
 
 export interface AudioMixResult {
@@ -145,6 +167,17 @@ export async function buildAudioMix(options: {
       startUs: item.timelineStartUs,
       durationUs: item.sourceDurationUs,
     });
+    for (const crossfade of item.crossfades ?? []) {
+      if (crossfade.durationUs <= 0) continue;
+      // Applied after the item's own fades so the two compose: a clip that fades out
+      // into a transition gets both envelopes multiplied, which is what a real
+      // editor does rather than one silently winning.
+      applyCrossfade(clip, {
+        fromSamples: usToSamples(crossfade.startOffsetUs),
+        lengthSamples: usToSamples(crossfade.durationUs),
+        side: crossfade.side,
+      });
+    }
     const at = usToSamples(item.timelineStartUs);
     if (item.duckUnderSpeech) {
       beds.push({ clip, start: at });
@@ -348,12 +381,90 @@ export function planAudioItems(
     if (!item.hasAudio || !item.mediaId) continue;
     const path = resolveMediaPath(item.mediaId);
     if (!path) continue;
+
+    /*
+      An equal-power crossfade needs material on both sides of the cut (SPEC 12
+      §4.2), and the incoming clip's half starts *before* the clip does. So the
+      incoming item is decoded from earlier in its source and placed earlier on the
+      timeline, then its envelope is shaped so the extra material is what the
+      crossfade reveals rather than something that plays at full level.
+
+      A `center` transition reaches back `durationUs / 2`; `start` and `end` reach
+      back not at all and forward respectively, so only `center` (and `start`, whose
+      window begins at the cut) needs the incoming clip pulled earlier.
+    */
+    const crossfades: AudioCrossfade[] = [];
+
+    /*
+      An equal-power crossfade needs material on both sides of the cut (SPEC 12
+      §4.2), and the incoming clip's half of a `center` window begins *before* the
+      clip does. So the incoming item is decoded from earlier in its source and
+      placed earlier on the timeline; its envelope then reveals that extra material
+      rather than playing it at full level.
+    */
+    let leadUs = 0;
+    const transitionIn = item.transitionIn;
+    if (transitionIn && transitionIn.crossfadeAudio !== false && transitionIn.durationUs > 0) {
+      // Only a centred window reaches back past the cut. `start` and `end` place the
+      // window entirely on the incoming clip's side, where no extra material is
+      // needed.
+      if (transitionIn.alignment === 'center') leadUs = Math.round(transitionIn.durationUs / 2);
+      crossfades.push({ side: 'in', startOffsetUs: 0, durationUs: transitionIn.durationUs });
+    }
+
+    /*
+      The lead the source can actually give: never more than the handles before the
+      in-point, and never so much that the clip would begin before the export range.
+      Missing material is not padded with silence — that would put a silent gap in
+      the middle of the mix — the window simply starts at the clip's first sample.
+    */
+    const availableLeadUs = Math.max(
+      0,
+      Math.min(leadUs, item.sourceInUs, item.startUs - plan.rangeStartUs),
+    );
+    const sourceInUs = item.sourceInUs - availableLeadUs;
+    const timelineStartUs = item.startUs - plan.rangeStartUs - availableLeadUs;
+
+    // Offsets are relative to the clip's own decoded start, which has moved earlier
+    // by `availableLeadUs`. With the full lead available the window opens on the
+    // clip's first sample; with none, the ramp's first half is clipped away and the
+    // clip fades in from its opening sample.
+    if (crossfades.length > 0) {
+      crossfades[0]!.startOffsetUs = availableLeadUs - (leadUs > 0 ? leadUs : 0);
+      if (crossfades[0]!.startOffsetUs < 0) {
+        // A shortfall shortens the ramp instead of starting it part-way in, so the
+        // incoming clip still reaches full level exactly at the cut.
+        crossfades[0]!.durationUs = Math.max(
+          1,
+          crossfades[0]!.durationUs + crossfades[0]!.startOffsetUs,
+        );
+        crossfades[0]!.startOffsetUs = 0;
+      }
+    }
+
+    const transitionOut = item.transitionOut;
+    if (transitionOut && transitionOut.crossfadeAudio !== false && transitionOut.durationUs > 0) {
+      // The window is measured back from the cut at the item's end.
+      const back =
+        transitionOut.alignment === 'center'
+          ? Math.round(transitionOut.durationUs / 2)
+          : transitionOut.alignment === 'end'
+            ? transitionOut.durationUs
+            : 0;
+      crossfades.push({
+        side: 'out',
+        startOffsetUs: availableLeadUs + item.durationUs - back,
+        durationUs: transitionOut.durationUs,
+      });
+    }
+
     items.push({
       itemId: item.itemId,
       sourcePath: path,
-      sourceInUs: item.sourceInUs,
-      sourceDurationUs: item.durationUs,
-      timelineStartUs: item.startUs - plan.rangeStartUs,
+      sourceInUs,
+      sourceDurationUs: item.durationUs + availableLeadUs,
+      timelineStartUs,
+      crossfades,
     });
   }
   return items;

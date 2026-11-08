@@ -199,3 +199,85 @@ describe('buildExportPlan', () => {
     expect(captionItem.hasAudio).toBe(false);
   });
 });
+
+/**
+ * SPEC 12 §4.2 — the planner links each item to the transition it leaves through.
+ *
+ * A transition is stored on the *incoming* item, so the outgoing one carries no
+ * record of it. The audio mixer needs both halves to crossfade over one window, and
+ * resolving the pair here keeps a single definition of "the next item on this track"
+ * rather than a second one inside the mixer.
+ */
+describe('transition linking', () => {
+  const twoClips = (overrides: Record<string, unknown> = {}) => [
+    {
+      id: 'a', trackId: 'track-main', type: 'video', mediaId: 'media-a',
+      startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 2_000_000,
+      disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+    },
+    {
+      id: 'b', trackId: 'track-main', type: 'video', mediaId: 'media-b',
+      startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_000_000,
+      disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+      transitionIn: {
+        type: 'crossfade', durationUs: 400_000, alignment: 'center',
+        params: {}, easing: 'linear', crossfadeAudio: true,
+        ...overrides,
+      },
+    },
+  ];
+
+  it('gives the outgoing clip the transition it is leaving through', () => {
+    const plan = buildExportPlan(makeSettings({ items: twoClips() as never }));
+    const outgoing = plan.items.find((item) => item.itemId === 'a')!;
+    expect(outgoing.transitionOut).toBeDefined();
+    expect(outgoing.transitionOut!.type).toBe('crossfade');
+    expect(outgoing.transitionOut!.durationUs).toBe(400_000);
+  });
+
+  it('leaves the incoming clip without a transitionOut of its own', () => {
+    // Nothing follows it, so it is not leaving through anything.
+    const plan = buildExportPlan(makeSettings({ items: twoClips() as never }));
+    expect(plan.items.find((item) => item.itemId === 'b')!.transitionOut).toBeUndefined();
+  });
+
+  it('does not link clips that are not touching', () => {
+    // A gap means the two are not joined: the transition belongs to a different cut
+    // and the first clip's audio must end where it ends, not fade into nothing.
+    const items = twoClips();
+    (items[1] as { startUs: number }).startUs = 1_500_000;
+    const plan = buildExportPlan(makeSettings({ items: items as never }));
+    expect(plan.items.find((item) => item.itemId === 'a')!.transitionOut).toBeUndefined();
+  });
+
+  it('carries the crossfadeAudio flag rather than assuming true', () => {
+    // The flag is the user's choice to cut the audio while the picture transitions;
+    // hard-coding `true` downstream silently discarded it.
+    const plan = buildExportPlan(
+      makeSettings({ items: twoClips({ crossfadeAudio: false }) as never }),
+    );
+    expect(plan.items.find((item) => item.itemId === 'b')!.transitionIn!.crossfadeAudio).toBe(
+      false,
+    );
+  });
+
+  it('links across a third clip in a chain', () => {
+    // Each clip in the middle of a run leaves through one transition and arrives
+    // through another; a mixer that only handled the leading pair would crossfade
+    // the first cut and cut the rest.
+    const items = twoClips();
+    items.push({
+      id: 'c', trackId: 'track-main', type: 'video', mediaId: 'media-c',
+      startUs: 2_000_000, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_000_000,
+      disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+      transitionIn: {
+        type: 'crossfade', durationUs: 400_000, alignment: 'center',
+        params: {}, easing: 'linear', crossfadeAudio: true,
+      },
+    } as never);
+    const plan = buildExportPlan(makeSettings({ items: items as never }));
+    const middle = plan.items.find((item) => item.itemId === 'b')!;
+    expect(middle.transitionIn).toBeDefined();
+    expect(middle.transitionOut).toBeDefined();
+  });
+});

@@ -55,6 +55,37 @@ function makeAudioFile(name: string, options: { seconds?: number; volume?: numbe
   return path;
 }
 
+/**
+ * A steady tone whose *phase* differs from `makeAudioFile`'s.
+ *
+ * Two clips decoded from the same synthesised sine would be sample-identical, so a
+ * cut between them would have no step at all and the test could not tell a cut from
+ * a crossfade. Offsetting the frequency gives each file its own waveform, which is
+ * what real footage does.
+ */
+function makeConstantToneFile(
+  name: string,
+  options: { seconds?: number; volume?: number; frequency?: number } = {},
+): string {
+  mkdirSync(TMP, { recursive: true });
+  const path = join(TMP, name);
+  const seconds = options.seconds ?? 1;
+  const volume = options.volume ?? 0.6;
+  execFileSync(
+    ffmpegPath(),
+    [
+      '-hide_banner', '-nostdin',
+      '-f', 'lavfi', '-i',
+      `sine=frequency=${options.frequency ?? 300}:sample_rate=48000:duration=${seconds}`,
+      '-af', `volume=${volume}`,
+      '-ac', '2', '-c:a', 'aac', '-b:a', '192k',
+      '-y', path,
+    ],
+    { stdio: 'ignore' },
+  );
+  return path;
+}
+
 function makeSettings(overrides: Partial<ExportSettings> = {}): ExportSettings {
   return {
     compositionId: 'comp-a',
@@ -459,4 +490,153 @@ describe('planAudioItems', () => {
     );
     expect(planAudioItems(plan, () => undefined)).toHaveLength(0);
   });
+
+  /**
+   * SPEC 12 §4.2 — "linked audio gets an equal-power crossfade over the same range
+   * by default (toggle 'Crossfade audio' on the transition; off = cut)".
+   *
+   * Detecting a crossfade by loudness does not work, and that is the whole point of
+   * *equal power*: across the window the summed level stays flat, so RMS looks
+   * identical whether the two clips overlap or butt together. What differs is
+   * *content* — during a crossfade both clips are sounding at once, so both tones
+   * are present in the same window, and a cut can only ever contain one.
+   *
+   * So each clip is a different frequency and the test measures the energy at each
+   * with a Goertzel filter, which is a single-frequency DFT in a dozen lines.
+   */
+  it('crossfades linked audio across a transition rather than cutting it', async () => {
+    // Two and a half seconds of source, of which each item uses the middle second:
+    // a centred crossfade reaches back past the cut and can only do that if the
+    // incoming clip has handles. Giving it `sourceInUs: 0` — as an earlier version
+    // of this test did — leaves nothing to reveal, and the crossfade degenerates to
+    // a fade-in from the clip's own first sample by design.
+    const outgoing = makeConstantToneFile('xf-a.mp4', { seconds: 2.5, volume: 0.6, frequency: 300 });
+    const incoming = makeConstantToneFile('xf-b.mp4', { seconds: 2.5, volume: 0.6, frequency: 1500 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_500_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+          },
+          {
+            id: 'b', trackId: 'track-audio', type: 'audio', mediaId: 'media-b',
+            startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_500_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            transitionIn: {
+              id: 'tr', type: 'crossfade', durationUs: 400_000, alignment: 'center',
+              params: {}, easing: 'linear', crossfadeAudio: true,
+            },
+          },
+        ] as never,
+      }),
+    );
+    const wavPath = join(TMP, 'xf-audio.wav');
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => (mediaId === 'media-a' ? outgoing : incoming)),
+      wavPath,
+    });
+
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    const left = (index: number) => decoded.samples[index * 2] ?? 0;
+
+    /** Magnitude at `freq` in [fromSeconds, toSeconds), via a Goertzel filter. */
+    const energyAt = (freq: number, fromSeconds: number, toSeconds: number): number => {
+      const from = Math.round(fromSeconds * MIX_SAMPLE_RATE);
+      const to = Math.round(toSeconds * MIX_SAMPLE_RATE);
+      const k = (2 * Math.PI * freq) / MIX_SAMPLE_RATE;
+      const coeff = 2 * Math.cos(k);
+      let s1 = 0;
+      let s2 = 0;
+      for (let i = from; i < to; i += 1) {
+        const s0 = left(i) + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      const power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+      return Math.sqrt(Math.max(0, power)) / Math.max(1, to - from);
+    };
+
+    // The crossfade is centred on 1.0 s and 400 ms long: [0.8, 1.2). Sample well
+    // inside it, where both clips should be sounding together.
+    const window = [0.85, 1.15] as const;
+    const outgoingTone = energyAt(300, window[0], window[1]);
+    const incomingTone = energyAt(1500, window[0], window[1]);
+
+    // Both clips present in the same window is the crossfade. A cut puts one or the
+    // other here and never both: before 1.0 s only the 300 Hz tone, after only the
+    // 1500 Hz one — and the window straddles the cut, so a cut would average the two
+    // halves rather than overlapping them.
+    expect(outgoingTone, 'the outgoing clip should still be sounding').toBeGreaterThan(1e-3);
+    expect(incomingTone, 'the incoming clip should already be sounding').toBeGreaterThan(1e-3);
+
+    // And they really are overlapping rather than each half being one tone: sample a
+    // 0.06 s window entirely *before* the cut, where a cut can only contain the
+    // outgoing tone.
+    const beforeCut = energyAt(1500, 0.9, 0.96);
+    expect(beforeCut, 'the incoming clip is audible before its own start').toBeGreaterThan(1e-3);
+  }, 120_000);
+
+  /**
+   * The other half of §4.2's sentence: "off = cut". The flag must actually silence
+   * the overlap rather than being carried around and ignored.
+   */
+  it('cuts the audio when crossfadeAudio is switched off', async () => {
+    const outgoing = makeConstantToneFile('cut-a.mp4', { seconds: 2.5, volume: 0.6, frequency: 300 });
+    const incoming = makeConstantToneFile('cut-b.mp4', { seconds: 2.5, volume: 0.6, frequency: 1500 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_500_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+          },
+          {
+            id: 'b', trackId: 'track-audio', type: 'audio', mediaId: 'media-b',
+            startUs: 1_000_000, durationUs: 1_000_000, sourceInUs: 500_000, sourceDurationUs: 2_500_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            transitionIn: {
+              id: 'tr', type: 'crossfade', durationUs: 400_000, alignment: 'center',
+              params: {}, easing: 'linear', crossfadeAudio: false,
+            },
+          },
+        ] as never,
+      }),
+    );
+    const wavPath = join(TMP, 'cut-audio.wav');
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => (mediaId === 'media-a' ? outgoing : incoming)),
+      wavPath,
+    });
+
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    const left = (index: number) => decoded.samples[index * 2] ?? 0;
+    const energyAt = (freq: number, fromSeconds: number, toSeconds: number): number => {
+      const from = Math.round(fromSeconds * MIX_SAMPLE_RATE);
+      const to = Math.round(toSeconds * MIX_SAMPLE_RATE);
+      const k = (2 * Math.PI * freq) / MIX_SAMPLE_RATE;
+      const coeff = 2 * Math.cos(k);
+      let s1 = 0;
+      let s2 = 0;
+      for (let i = from; i < to; i += 1) {
+        const s0 = left(i) + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - coeff * s1 * s2)) / Math.max(1, to - from);
+    };
+
+    // A window entirely before the cut: with the toggle off, the incoming clip must
+    // not be audible there at all.
+    expect(energyAt(1500, 0.9, 0.96)).toBeLessThan(1e-4);
+    // ...and the outgoing clip's own tone is still present, so this is a cut rather
+    // than the mixer having dropped both sides.
+    expect(energyAt(300, 0.9, 0.96)).toBeGreaterThan(1e-3);
+  }, 120_000);
 });

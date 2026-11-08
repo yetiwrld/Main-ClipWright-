@@ -121,6 +121,8 @@ export {
   createClip,
   clipEndSamples,
   applyItemProcessing,
+  applyCrossfade,
+  equalPowerGain,
   mixClipInto,
   duckingCurve,
   applyGainCurve,
