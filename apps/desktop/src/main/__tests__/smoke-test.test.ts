@@ -8,7 +8,7 @@
  * that decides pass or fail, which is the part that can quietly lie.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { isSmokeTest, runSmokeTest } from '../smoke-test.js';
@@ -17,6 +17,12 @@ import { ffmpegPath, ffprobePath } from '../export/ffmpeg-runner.js';
 const BIN_DIR = join(process.cwd(), 'resources', 'bin');
 const RENDERER = join(process.cwd(), 'apps', 'desktop', 'dist', 'renderer', 'index.html');
 const TMP = join(process.cwd(), '.tmp-smoke');
+
+// Same guard as every other suite that needs a real encoder. CI checks out a
+// clean tree with no binaries fetched (they are gitignored, and the release job
+// downloads them separately), so without this the suite passes on a developer's
+// machine and fails on CI for a reason that has nothing to do with the code.
+const HAS_FFMPEG = existsSync(ffmpegPath()) && existsSync(ffprobePath());
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
@@ -31,7 +37,7 @@ describe('isSmokeTest', () => {
   });
 });
 
-describe('runSmokeTest', () => {
+describe.skipIf(!HAS_FFMPEG)('runSmokeTest against the bundled binaries', () => {
   it('passes against the bundled binaries and a real renderer bundle', async () => {
     const report = await runSmokeTest({
       binDir: BIN_DIR,
@@ -55,7 +61,13 @@ describe('runSmokeTest', () => {
     const ffmpeg = report.checks.find((check) => check.name === 'ffmpeg.exe');
     expect(ffmpeg?.detail).toMatch(/ffmpeg version/i);
   });
+});
 
+// These need no working encoder: each one asserts that the smoke test *fails*,
+// which a missing or unexecutable binary produces just as well. Keeping them
+// outside the guard matters — on CI there are no binaries, so gating them too
+// would leave the failure paths untested on the only machine that runs them.
+describe('runSmokeTest failure paths', () => {
   it('fails when a binary is missing', async () => {
     mkdirSync(TMP, { recursive: true });
     const report = await runSmokeTest({
@@ -96,6 +108,14 @@ describe('runSmokeTest', () => {
     expect(ffmpeg?.detail).toMatch(/failed to run/);
   });
 
+  it('uses the real ffmpeg the export path uses', () => {
+    // The smoke test and the exporter must agree on which binary is "the" ffmpeg.
+    expect(ffmpegPath()).toBeTruthy();
+    expect(ffprobePath()).toBeTruthy();
+  });
+});
+
+describe.skipIf(!HAS_FFMPEG)('runSmokeTest workspace hygiene', () => {
   it('cleans up the workspace it created', async () => {
     const before = execFileSync('node', ['-e', `require('fs').readdirSync(${JSON.stringify(process.cwd())}, {withFileTypes:true}).filter(d=>d.name.startsWith('cw-smoke-')).length`], { encoding: 'utf8' }).trim();
     const report = await runSmokeTest({
@@ -107,11 +127,5 @@ describe('runSmokeTest', () => {
     expect(report.checks.find((check) => check.name === 'workspace')?.ok).toBe(true);
     const after = execFileSync('node', ['-e', `require('fs').readdirSync(${JSON.stringify(process.cwd())}, {withFileTypes:true}).filter(d=>d.name.startsWith('cw-smoke-')).length`], { encoding: 'utf8' }).trim();
     expect(after).toBe(before);
-  });
-
-  it('uses the real ffmpeg the export path uses', () => {
-    // The smoke test and the exporter must agree on which binary is "the" ffmpeg.
-    expect(ffmpegPath()).toBeTruthy();
-    expect(ffprobePath()).toBeTruthy();
   });
 });

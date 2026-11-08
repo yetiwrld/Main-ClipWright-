@@ -42,21 +42,14 @@ jobs:
           # retrievable, and "exit code 1" with no reason is not something anyone
           # can act on from the pull request page.
           #
-          # Annotations truncate, so this emits a few targeted annotations rather
-          # than one blob: the test summary always, then the failures if any line
-          # is recognisable. An earlier version grepped for "FAIL " alone and
-          # emitted nothing at all, which is worse than emitting too much.
+          # The vitest JSON report is the source, not the console output: the
+          # console is colourised, wrapped and truncated, and grepping it once
+          # produced an empty annotation list — a failure report that reports
+          # nothing is worse than none.
           set -o pipefail
           pnpm verify 2>&1 | tee verify.log || {
             status=$?
-            clean=$(sed 's/\x1b\[[0-9;]*m//g' verify.log)
-            esc() { sed 's/%/%25/g' | sed 's/\r//g'; }
-            echo "::error title=pnpm verify failed::$(echo "$clean" | grep -E '^ *(Test Files|Tests) ' | tail -2 | tr '\n' ' ' | esc | cut -c1-800)"
-            # The last 12 lines describe the final failure even without a marker.
-            echo "$clean" | grep -vE '^\s*$' | tail -12 | cut -c1-900 | while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              echo "::error title=tail::$(echo "$line" | esc)"
-            done
+            node scripts/ci-annotate-failures.mjs .vitest-report.json || true
             exit $status
           }
 
