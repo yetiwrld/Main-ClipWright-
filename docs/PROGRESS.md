@@ -49,6 +49,7 @@ caption engine, the frame builder, the preview overlay, the caption list and the
 per-word editor, and put styled captions into the export path:
 
 - `packages/caption-styles` — the `.cwstyle` v1 schema, ten presets, resolution.
+- `packages/audio-core` — the gain envelope the preview and the export both use.
 - `packages/compositor` — `layoutText` (where words go) and `captionFrameAt` (what
   they look like at an instant): karaoke sweeps, word-by-word, keyword emphasis,
   palette cycling, in/out and per-word animation.
@@ -59,7 +60,9 @@ per-word editor, and put styled captions into the export path:
   file matches the preview.
 
 Still open in Phase 5: the full style editor (colour pickers, anchor grid, drag on
-canvas), text and shape items, brand kits, and the audio tools in `audio-core`.
+canvas), text and shape items, brand kits, the audio tools beyond the envelope
+(equaliser, metering UI, voiceover recorder), and keyframes/effects/transitions in
+the inspector.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
 no transform/opacity/crop editing in the inspector, playback clock is not
@@ -108,8 +111,8 @@ Also found and fixed two real security holes along the way:
 proxy playback.
 
 **2. Finish Phase 5 ⚠️** — the style editor dialog, text and shape items, brand
-kits, and the audio tools (`audio-core` is still a placeholder). Captions
-themselves are done: engine, frame builder, preview, list, word editor, burn-in.
+kits, and the audio tools beyond the envelope. Captions themselves are done:
+engine, frame builder, preview, list, word editor, burn-in.
 
 **3. Make the export render the rest of the timeline** — the video compositor:
 effects, transitions, keyframed transforms and blend modes. Captions already

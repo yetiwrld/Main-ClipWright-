@@ -8,6 +8,7 @@
  * Timing is in samples. Everything the timeline describes in microseconds is
  * converted once, at the edges, so rounding cannot accumulate mid-mix.
  */
+import { gainAt, gainToDb } from '@clipwright/audio-core';
 
 /** Samples per second for every mix (SPEC 14 §5.1). */
 export const MIX_SAMPLE_RATE = 48_000;
@@ -46,6 +47,14 @@ export interface ItemMixParams {
   startUs: number;
   /** Length of the (already decoded) source, in microseconds. */
   durationUs: number;
+  /**
+   * Fade shape. Defaults to `equal-power`, which is the same default the preview
+   * uses — a linear fade here would make the exported fade sound different from the
+   * one the user auditioned.
+   */
+  fadeCurve?: 'linear' | 'equal-power' | 'exponential';
+  /** Volume keyframes in dB, in mix time, evaluated by `@clipwright/audio-core`. */
+  keyframes?: ReadonlyArray<{ timeUs: number; valueDb: number; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset'; easing?: { preset: string } }>;
 }
 
 /** A decoded source clip: interleaved stereo float32 at the mix rate. */
@@ -79,28 +88,39 @@ export function applyItemProcessing(clip: PcmClip, params: ItemMixParams): void 
     clip.samples.fill(0);
     return;
   }
-  const gain = (params.gain ?? 1) * (params.trackVolume ?? 1);
   const pan = clamp(params.pan ?? 0, -1, 1);
   // Constant-power pan: centre → both channels at 1/√2 ≈ 0.707 relative to the
   // chosen convention, edges → one channel at 1.
   const leftGain = Math.cos(((pan + 1) * Math.PI) / 4);
   const rightGain = Math.sin(((pan + 1) * Math.PI) / 4);
 
-  const fadeInSamples = usToSamples(params.fadeInUs ?? 0);
-  const fadeOutSamples = usToSamples(params.fadeOutUs ?? 0);
-  const total = clip.length;
+  // The envelope comes from `@clipwright/audio-core`, the same function the preview
+  // schedules as Web Audio automation (SPEC 12 §6.1). Evaluating it here rather than
+  // re-deriving a fade in this loop is the whole contract: two implementations of
+  // "gain at time t" drift, and the symptom is a preview that sounds right and an
+  // export that clips.
+  const envelope = {
+    startUs: params.startUs,
+    durationUs: params.durationUs,
+    gainDb: gainToDb(params.gain ?? 1),
+    trackVolumeDb: gainToDb(params.trackVolume ?? 1),
+    fadeInUs: params.fadeInUs,
+    fadeOutUs: params.fadeOutUs,
+    fadeCurve: params.fadeCurve ?? 'equal-power',
+    keyframes: params.keyframes?.map((key) => ({
+      timeUs: key.timeUs,
+      valueDb: key.valueDb,
+      interpolation: key.interpolation,
+      easing: key.easing as never,
+    })),
+  };
 
+  const total = clip.length;
   for (let index = 0; index < total; index += 1) {
-    let envelope = gain;
-    if (fadeInSamples > 0 && index < fadeInSamples) {
-      envelope *= index / fadeInSamples;
-    }
-    const fromEnd = total - 1 - index;
-    if (fadeOutSamples > 0 && fromEnd < fadeOutSamples) {
-      envelope *= fromEnd / fadeOutSamples;
-    }
-    clip.samples[index * 2] *= envelope * leftGain * Math.SQRT2;
-    clip.samples[index * 2 + 1] *= envelope * rightGain * Math.SQRT2;
+    const timeUs = params.startUs + (index / MIX_SAMPLE_RATE) * 1_000_000;
+    const gain = gainAt(envelope, timeUs);
+    clip.samples[index * 2] *= gain * leftGain * Math.SQRT2;
+    clip.samples[index * 2 + 1] *= gain * rightGain * Math.SQRT2;
   }
 }
 

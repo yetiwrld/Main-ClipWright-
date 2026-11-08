@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { gainAt, gainToDb } from '@clipwright/audio-core';
 import {
   LIMITER_CEILING_DB,
   MIX_CHANNELS,
@@ -82,15 +83,27 @@ describe('applyItemProcessing', () => {
     expect(peakLevel(clip)).toBe(0);
   });
 
-  it('fades in linearly over the requested time', () => {
+  it('fades in with the equal-power default, matching the preview', () => {
+    // The default curve is equal-power everywhere (SPEC 12 §6.2), so half way
+    // through a fade the gain is √½ rather than ½. A linear default here would make
+    // the exported fade sound different from the one the user auditioned.
     const samples = 48_000; // 1 s
     const clip = constantClip(samples, 1);
     applyItemProcessing(clip, { fadeInUs: 500_000, startUs: 0, durationUs: 1_000_000 });
-    // At the very start the envelope is 0; halfway through the fade it is 0.5;
-    // past the fade it is full.
     expect(clip.samples[0]).toBeCloseTo(0, 5);
-    expect(clip.samples[12_000 * 2]).toBeCloseTo(0.5, 2);
+    expect(clip.samples[12_000 * 2]).toBeCloseTo(Math.SQRT1_2, 3);
     expect(clip.samples[40_000 * 2]).toBeCloseTo(1, 2);
+  });
+
+  it('still fades linearly when the mix asks for it', () => {
+    const clip = constantClip(48_000, 1);
+    applyItemProcessing(clip, {
+      fadeInUs: 500_000,
+      startUs: 0,
+      durationUs: 1_000_000,
+      fadeCurve: 'linear',
+    });
+    expect(clip.samples[12_000 * 2]).toBeCloseTo(0.5, 2);
   });
 
   it('fades out to silence at the end', () => {
@@ -325,5 +338,41 @@ describe('fitLength', () => {
 
   it('truncates a fractional target to whole frames', () => {
     expect(fitLength(createClip(10), 10.7).length).toBe(11);
+  });
+});
+
+describe('the mix uses the shared envelope (SPEC 12 §6.1)', () => {
+  it('matches gainAt sample for sample, so preview and export cannot drift', () => {
+    // The mixer must not re-derive a fade. If it did, this would be the only test
+    // comparing the two, and the comparison would fail the first time either side
+    // changed a curve — which is exactly when someone should be looking.
+    const samples = 24_000; // 0.5 s at 48 kHz
+    const params = {
+      startUs: 2_000_000,
+      durationUs: 500_000,
+      gain: 1.5,
+      fadeInUs: 200_000,
+      fadeOutUs: 200_000,
+      fadeCurve: 'equal-power' as const,
+    };
+    const clip = constantClip(samples, 1);
+    applyItemProcessing(clip, params);
+
+    const envelope = {
+      startUs: params.startUs,
+      durationUs: params.durationUs,
+      gainDb: gainToDb(params.gain),
+      fadeInUs: params.fadeInUs,
+      fadeOutUs: params.fadeOutUs,
+      fadeCurve: params.fadeCurve,
+    };
+
+    for (const frame of [0, 6000, 12_000, 18_000, samples - 1]) {
+      const timeUs = params.startUs + (frame / 48_000) * 1_000_000;
+      // Mono-constant input panned centre: the processed sample divided by the
+      // constant-power coefficients is the envelope itself.
+      const observed = clip.samples[frame * 2]! / (Math.cos(Math.PI / 4) * Math.SQRT2);
+      expect(observed, `frame ${frame}`).toBeCloseTo(gainAt(envelope, timeUs), 4);
+    }
   });
 });

@@ -16,13 +16,13 @@ pnpm test:unit
 ```
 
 ```
-Test Files  58 passed (58)
-     Tests  1332 passed (1332)
+Test Files  59 passed (59)
+     Tests  1382 passed (1382)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
-| `packages/export-core` | 284 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, and the ASS caption script: field order, colour byte order, anchor mapping, karaoke timing, range shifting |
+| `packages/export-core` | 285 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, and the ASS caption script: field order, colour byte order, anchor mapping, karaoke timing, range shifting |
 | `packages/compositor` | 70 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios) and the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
 | `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
@@ -30,10 +30,11 @@ Test Files  58 passed (58)
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 124 | Commands, invariants, undo/redo, caption editing (§11 §2.5) |
+| `packages/audio-core` | 48 | The gain envelope: dB conversion, fade curves, keyframe interpolation and easing, and the preview/export agreement that SPEC 10 §7.1 requires |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1332** | 58 files |
+| **Total** | **1382** | 59 files |
 
 ### Tests that run real processes
 
