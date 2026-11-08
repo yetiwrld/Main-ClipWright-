@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
+import { gainAt } from '@clipwright/audio-core';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
 
@@ -46,7 +47,32 @@ export function PreviewPane({ state, fps }: { state: TimelineState; fps: 30 | 60
     if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.08) {
       video.currentTime = target;
     }
-  }, [itemAt]);
+
+    // The preview's level comes from the same envelope the export mixes with
+    // (SPEC 12 §6.1). Reading the item's own volume is not enough: a fade or a
+    // keyframed volume lives in the envelope, and a preview that ignores it sounds
+    // different from the file — which is the one thing a preview must not do.
+    //
+    // The track's mute/solo state is folded in here too, because the video element
+    // has no notion of tracks.
+    const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+    const anySolo = state.tracks.some((candidate) => candidate.solo);
+    video.volume = gainAt(
+      {
+        startUs: item.startUs,
+        durationUs: item.durationUs,
+        gainDb: item.gainDb ?? 0,
+        volumeDb: item.volumeDb ?? 0,
+        fadeInUs: item.fadeInUs,
+        fadeOutUs: item.fadeOutUs,
+        fadeCurve: item.fadeCurve,
+        muted: Boolean(item.muted),
+        trackMuted: Boolean(track?.muted),
+        silencedBySolo: anySolo && !track?.solo,
+      },
+      us,
+    );
+  }, [itemAt, state]);
 
   // Follow the playhead while it moves (scrubbing and playback alike).
   useEffect(() => {
