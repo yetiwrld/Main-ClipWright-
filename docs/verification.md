@@ -172,6 +172,8 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | `assets/icon.ico` has 16/24/32/48/64/128/256 px frames | Verified by parsing the ICO header |
 | Every script a workflow runs is tracked by git | `scripts/check-repo.mjs`, in `pnpm lint` — written after nine release scripts turned out to be outside the repository |
 | Ignore rules cannot swallow source | Same check: an unanchored `release/` pattern is rejected by name |
+| The unsigned notice is on every surface §6.4 names | `check-repo` asserts it in README, the update dialog, the release-notes generator and the release docs (acceptance item 10's automated string check) |
+| Generated release notes carry the unsigned notice | The generator appends it, and drops it only when `--signed` is passed after a certificate was used |
 | Every relative documentation link resolves | Same check, 17 documents |
 | The renderer imports no main-process code | Same check, added after two modules had drifted across the boundary |
 | The signed manifest verifies with only the embedded key | Rehearsed end to end outside CI with a fresh key pair over real files: signature, per-file digests, `SHA256SUMS.txt`, `latest.yml` cross-check, and a single flipped byte rejected |

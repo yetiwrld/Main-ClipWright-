@@ -177,7 +177,39 @@ if (existsSync(REPORT)) {
 }
 
 /* ------------------------------------------------------------------ *
- * 6. File-name references in the package config must match package.json.
+ * 6. The unsigned notice appears everywhere §6.4 and acceptance item 10 say.
+ *
+ * The spec calls for an automated string check, and the reason is that this is
+ * the one thing in the project nobody may quietly drop: an unsigned installer
+ * that does not say so is a trust failure, and SmartScreen would be the first
+ * thing to mention it.
+ *
+ * The release-notes requirement is checked on the *generator* rather than on
+ * RELEASE_NOTES.md, because that file only exists once a release has been built.
+ * ------------------------------------------------------------------ */
+const UNSIGNED_SURFACES = [
+  { file: 'README.md', what: 'the README' },
+  { file: 'apps/desktop/src/renderer/features/updates/UpdateDialog.tsx', what: 'the update dialog' },
+  { file: 'scripts/release/extract-notes.mjs', what: 'the release-notes generator' },
+  { file: 'docs/release.md', what: 'the release documentation' },
+];
+
+for (const surface of UNSIGNED_SURFACES) {
+  const path = join(ROOT, surface.file);
+  if (!existsSync(path)) {
+    fail(`${surface.file} is missing; ${surface.what} carries the unsigned notice.`);
+    continue;
+  }
+  if (!/unsigned/i.test(readFileSync(path, 'utf8'))) {
+    fail(
+      `${surface.what} (${surface.file}) does not mention that the build is unsigned. ` +
+        `SPEC 15 §6.4 requires it on every surface the user can reach.`,
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 7. File-name references in the package config must match package.json.
  * ------------------------------------------------------------------ */
 const desktopPkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'));
 const mainEntry = desktopPkg.main ?? 'dist/main/index.cjs';

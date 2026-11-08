@@ -97,7 +97,11 @@ jobs:
           CHANNEL="${{ github.event.inputs.channel || 'stable' }}"
           # A prerelease tag is always published as beta, whatever was selected.
           case "$VERSION" in *-*) CHANNEL="beta" ;; esac
-          node scripts/release/extract-notes.mjs --version "$VERSION" --out dist/release/notes.md
+          # §6.4: the unsigned notice is appended unless a certificate was used,
+          # in which case it would be false.
+          SIGNED_FLAG=""
+          if [ -n "${CSC_LINK:-}" ]; then SIGNED_FLAG="--signed"; fi
+          node scripts/release/extract-notes.mjs --version "$VERSION" --out dist/release/notes.md $SIGNED_FLAG
           node scripts/release/make-manifest.mjs \
             --dir dist/release \
             --version "$VERSION" \

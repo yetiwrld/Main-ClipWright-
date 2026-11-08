@@ -31,9 +31,39 @@ if (!section.trim()) {
   fail(`CHANGELOG.md has no section for ${version}. Add one before tagging this release.`);
 }
 
+/**
+ * SPEC 15 §6.4: every release note says the build is unsigned, every time.
+ *
+ * Acceptance item 10 asks for this as an automated string check, which is why it
+ * is appended by the generator rather than written by hand into a release: the
+ * one release where somebody forgets is the one where SmartScreen surprises the
+ * user instead. When a certificate is configured the workflow passes
+ * `--signed`, and the notice is omitted because it would then be false.
+ */
+const signed = args.includes('--signed');
+
+const notice = signed
+  ? ''
+  : [
+      '',
+      '---',
+      '',
+      '**This build is unsigned.** Windows SmartScreen will warn about an unknown',
+      'publisher the first time you run the installer. Choose *More info*, then',
+      '*Run anyway*. If you would rather not, wait until a signed build is',
+      'published, or verify the SHA-256 printed below against the release page.',
+      '',
+      'SHA-256 digests for every file are in `SHA256SUMS.txt` on the release page.',
+    ].join('\n');
+
+const body = `${section.trim()}${notice}\n`;
+
 await mkdir(dirname(resolve(out)), { recursive: true });
-await writeFile(resolve(out), `${section.trim()}\n`);
-console.log(`Wrote ${out} (${section.trim().split('\n').length} lines) from CHANGELOG ${version}`);
+await writeFile(resolve(out), body);
+console.log(
+  `Wrote ${out} (${body.trim().split('\n').length} lines) from CHANGELOG ${version}` +
+    (signed ? '' : ', with the unsigned notice'),
+);
 
 /**
  * Find `## [1.3.0] …` (Keep a Changelog) or `## 1.3.0`, and take everything up
