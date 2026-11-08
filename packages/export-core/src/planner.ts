@@ -85,6 +85,16 @@ export interface PlannedItem {
   /** Blend mode against the layers below (SPEC 10 §6). Absent means `normal`. */
   blendMode?: string;
   /**
+   * The item's effect chain in stored order (SPEC 12 §3). Carried so the export can
+   * apply the same colour maths the preview does; without it a graded clip arrives in
+   * the file ungraded.
+   */
+  effects?: Array<{
+    effectId: string;
+    enabled?: boolean;
+    params?: Record<string, number | boolean | string>;
+  }>;
+  /**
    * The transition entering this item (SPEC 12 §4). Carried so the export can widen
    * the item's drawable span across the overlap and fade the two clips together,
    * rather than cutting hard while the preview crossfades.
@@ -245,6 +255,8 @@ export interface ExportSettings {
     opacity?: number;
     /** Blend mode against the layers below (SPEC 10 §6). */
     blendMode?: string;
+    /** The item's effect chain, in stored order (SPEC 12 §3). */
+    effects?: PlannedItem['effects'];
     /** The transition entering this item (SPEC 12 §4). */
     transitionIn?: PlannedItem['transitionIn'];
     /** Stacking order of the item's track; larger is nearer the viewer. */
@@ -325,6 +337,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         blendMode: item.blendMode,
         trackOrder: item.trackOrder,
         transitionIn: item.transitionIn,
+        effects: item.effects,
         captionSegment: item.captionSegment,
       };
     })

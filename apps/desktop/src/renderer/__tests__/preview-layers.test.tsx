@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { createDefaultTimeline, type TimelineState } from '@clipwright/timeline-engine';
 import { PreviewPane } from '../features/editor/PreviewPane.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
@@ -243,5 +243,84 @@ describe('PreviewPane transitions', () => {
     act(() => playheadStore.set(1_100_000));
     const byId = new Map(layerNodes().map((node) => [node.dataset.layerId, node]));
     expect(Number(byId.get('b')!.style.opacity)).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe('PreviewPane effects', () => {
+  it('applies a CSS filter for an effect CSS can reproduce', () => {
+    const state = makeState([{ id: 'a' }]);
+    (state.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'saturation', enabled: true, params: { amount: 0 } },
+    ];
+    render(<PreviewPane state={state} fps={30} />);
+    const video = document.querySelector('[data-layer-id="a"] video') as HTMLElement;
+    expect(video.style.filter).toContain('saturate(0');
+  });
+
+  it('leaves the filter unset for a clip with no effects', () => {
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} />);
+    const video = document.querySelector('[data-layer-id="a"] video') as HTMLElement;
+    expect(video.style.filter).toBe('');
+  });
+
+  it('skips a disabled effect', () => {
+    const state = makeState([{ id: 'a' }]);
+    (state.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'saturation', enabled: false, params: { amount: 0 } },
+    ];
+    render(<PreviewPane state={state} fps={30} />);
+    const video = document.querySelector('[data-layer-id="a"] video') as HTMLElement;
+    expect(video.style.filter).toBe('');
+  });
+
+  it('says so when an effect cannot be previewed', () => {
+    // §10 §14 requires a visible banner rather than a silently wrong picture. A
+    // vignette has no CSS filter equivalent.
+    const state = makeState([{ id: 'a' }]);
+    (state.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'vignette', enabled: true, params: { amount: 0.8 } },
+    ];
+    render(<PreviewPane state={state} fps={30} />);
+    const banner = screen.getByTestId('preview-effect-banner');
+    expect(banner.textContent).toContain('Vignette');
+    expect(banner.textContent).toContain('export is unaffected');
+  });
+
+  it('shows no banner when every effect can be previewed', () => {
+    const state = makeState([{ id: 'a' }]);
+    (state.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'exposure', enabled: true, params: { stops: 1 } },
+    ];
+    render(<PreviewPane state={state} fps={30} />);
+    expect(screen.queryByTestId('preview-effect-banner')).toBeNull();
+  });
+
+  it('ignores an unpaintable effect that is disabled', () => {
+    // The banner is about the picture on screen; a disabled effect is not on it.
+    const state = makeState([{ id: 'a' }]);
+    (state.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'sharpen', enabled: false, params: { amount: 1 } },
+    ];
+    render(<PreviewPane state={state} fps={30} />);
+    expect(screen.queryByTestId('preview-effect-banner')).toBeNull();
+  });
+
+  it('reports a temperature shift only when it is large enough to diverge', () => {
+    // A small warm shift is close enough that sepia approximates it; a large one is
+    // not, and saying so is better than pretending.
+    const mild = makeState([{ id: 'a' }]);
+    (mild.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'temperature', enabled: true, params: { amount: 20 } },
+    ];
+    render(<PreviewPane state={mild} fps={30} />);
+    expect(screen.queryByTestId('preview-effect-banner')).toBeNull();
+
+    cleanup();
+    const strong = makeState([{ id: 'a' }]);
+    (strong.items['a'] as { effects?: unknown[] }).effects = [
+      { id: 'fx', effectId: 'temperature', enabled: true, params: { amount: 90 } },
+    ];
+    render(<PreviewPane state={strong} fps={30} />);
+    expect(screen.getByTestId('preview-effect-banner').textContent).toContain('Temperature');
   });
 });

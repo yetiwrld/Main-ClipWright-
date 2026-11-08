@@ -124,3 +124,35 @@ export {
   type TransitionState,
   type TransitionWindow,
 } from './transitions.js';
+
+/**
+ * SPEC 12 §3 — the effect catalogue and the colour maths behind it.
+ *
+ * Effects were storable, listable and toggleable and applied by nothing. This is
+ * the shared implementation both renderers call, so a brightness of +0.2 cannot
+ * mean two different things on screen and in the file.
+ */
+export {
+  activeEffects,
+  applyEffectsToFrame,
+  applyPixelEffects,
+  EFFECTS,
+  effectDefinition,
+  effectParams,
+  effectPassCount,
+  gaussianBlur,
+  isPixelwise,
+  linearToSrgb,
+  LUMA_B,
+  LUMA_G,
+  LUMA_R,
+  MID_GREY,
+  scaleRadiusForFrame,
+  srgbToLinear,
+  unsharpMask,
+  vignette,
+  type ActiveEffect,
+  type EffectDefinition,
+  type LinearRgb,
+  type ParamSpec,
+} from './effects.js';

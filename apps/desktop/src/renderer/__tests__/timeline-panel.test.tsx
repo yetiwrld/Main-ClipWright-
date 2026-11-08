@@ -90,6 +90,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     applyEffect: vi.fn(() => true),
     removeEffect: vi.fn(() => true),
     toggleEffectEnabled: vi.fn(() => true),
+    setEffectParams: vi.fn(() => true),
     updateEffectParams: vi.fn(() => true),
     updateMarker: vi.fn(() => true),
     deleteMarker: vi.fn(() => true),
@@ -615,7 +616,10 @@ describe('timeline panel', () => {
     const timeline = fakeTimeline(stateWithEffects, { selection: ['item-a'] });
     render(<ItemInspector state={stateWithEffects} timeline={timeline} />);
     expect(screen.getByText('Effects')).toBeTruthy();
-    expect(screen.getByText('blur')).toBeTruthy();
+    // The inspector shows the catalogue's display name now, not the stored id: a
+    // user added the row by picking "Blur (Gaussian)" from a menu, so that is what
+    // the row has to say.
+    expect(screen.getByText('Blur (Gaussian)')).toBeTruthy();
   });
 
 

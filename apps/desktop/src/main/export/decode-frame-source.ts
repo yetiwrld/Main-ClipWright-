@@ -30,13 +30,17 @@ import {
   type PlannedItem,
 } from '@clipwright/export-core';
 import {
+  activeEffects,
+  applyEffectsToFrame,
   compositeRgb,
+  effectPassCount,
   evaluateProperty,
   transitionAt,
   joinYuv,
   rgbToYuv,
   splitYuv,
   yuvToRgb,
+  type ActiveEffect,
   type BlendMode,
   type ItemGeometryInput,
   type RgbFrame,
@@ -86,6 +90,8 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
   const frameBytes = expectedFrameBytes(plan.width, plan.height);
   const decoders = new Map<string, ItemDecoder>();
   const warnings: string[] = [];
+  /** Items already warned about for a heavy effect chain. */
+  const seenHeavyEffects = new Set<string>();
   const frameDurationUs = 1_000_000 / plan.fps;
 
   const videoItems = plan.items
@@ -393,7 +399,12 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         case (one clip on the main track) and it keeps the old, cheap path exactly
         as it was rather than round-tripping every frame through RGB for nothing.
       */
-      const stack: Array<{ frame: Buffer; opacity: number; blendMode: BlendMode }> = [];
+      const stack: Array<{
+        frame: Buffer;
+        opacity: number;
+        blendMode: BlendMode;
+        effects: ActiveEffect[];
+      }> = [];
       for (const item of visible) {
         const decoder = decoders.get(item.itemId);
         if (!decoder) continue;
@@ -419,27 +430,41 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
               frame: decoder.lastFrame,
               opacity: clampOpacity(item.opacity) * transition.opacity,
               blendMode: asBlendMode(item.blendMode),
+              effects: activeEffects(item.effects),
             });
           }
           continue;
         }
         const transition = transitionOpacityFor(item, index * frameDurationUs);
-          stack.push({
+          const effects = activeEffects(item.effects);
+        // §3.2 wants a warning at six or more passes. Warned once per item rather
+        // than once per frame, or a sixty-second export would emit eighteen hundred
+        // copies of it.
+        if (effectPassCount(effects) >= 6 && seenHeavyEffects.add(item.itemId)) {
+          warnings.push(
+            `${item.itemId} has ${effectPassCount(effects)} effect passes, which will slow this export.`,
+          );
+        }
+        stack.push({
           frame,
           opacity: clampOpacity(item.opacity) * transition.opacity,
           blendMode: asBlendMode(item.blendMode),
+          effects,
         });
       }
 
       if (stack.length === 0) return blankFrame(plan.width, plan.height);
 
       // The single opaque layer fast path: only valid when there is nothing behind
-      // it to show through. On a black canvas an opaque `normal` layer covers the
-      // backdrop completely, so the decoded bytes are the frame and the RGB
-      // round-trip would only cost time. On any other canvas the layer still covers
-      // it, so the test is opacity and mode, not the colour.
+      // it to show through *and* nothing to do to it. An effect chain has to run
+      // through RGB, so a graded clip cannot take this path even when it is the only
+      // layer and fully opaque — the check that used to ignore that shipped effects
+      // that were applied only when a second layer happened to exist.
       const simple =
-        stack.length === 1 && stack[0]!.opacity >= 1 && stack[0]!.blendMode === 'normal';
+        stack.length === 1 &&
+        stack[0]!.opacity >= 1 &&
+        stack[0]!.blendMode === 'normal' &&
+        stack[0]!.effects.length === 0;
       if (simple) return Buffer.from(stack[0]!.frame);
 
       /*
@@ -468,6 +493,13 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       };
       for (const layer of stack) {
         const rgb = yuvToRgb(splitYuv(layer.frame, plan.width, plan.height), scratch);
+        // Effects run on the layer's own picture, before it is blended into the
+        // frame below (SPEC 12 §3.1). Applying them after compositing would grade
+        // whatever is underneath as well, which is a different — and much less
+        // useful — operation.
+        if (layer.effects.length > 0) {
+          applyEffectsToFrame(rgb.data, plan.width, plan.height, layer.effects);
+        }
         compositeRgb(base, rgb, layer.opacity, layer.blendMode);
       }
       return joinYuv(rgbToYuv(base));

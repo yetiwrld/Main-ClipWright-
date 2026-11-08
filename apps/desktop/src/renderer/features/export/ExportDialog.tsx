@@ -304,6 +304,9 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       // Transitions travel too (SPEC 12 §4); without them the export cuts hard
       // where the preview fades, which is the difference a user notices first.
       transitionIn: item.transitionIn,
+      // The effect chain travels to the decoder so a graded clip exports graded
+      // (SPEC 12 §3). Without it the export renders the ungraded original.
+      effects: item.effects,
     });
   }
   return items;

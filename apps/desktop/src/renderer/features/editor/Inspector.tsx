@@ -6,6 +6,7 @@ import {
   quantizeUs,
   type TimelineState,
 } from '@clipwright/timeline-engine';
+import { EFFECTS, effectDefinition } from '@clipwright/compositor';
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore } from './playhead-store.js';
 
@@ -363,9 +364,26 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
       </div>
 
       {/* Effects section (SPEC 09 §17) */}
-      {(item.effects && item.effects.length > 0) && (
+      {(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
           <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Effects</span>
+          {/*
+            Adding an effect was impossible before this control: the inspector could
+            list, toggle and remove chain entries but the only way to create one was
+            to call the command. The menu is generated from the effect catalogue, so a
+            new effect appears here without touching this file.
+          */}
+          <Select
+            value=""
+            ariaLabel="Add an effect to this clip"
+            placeholder="Add effect…"
+            options={EFFECTS.filter(
+              (definition) => !item.effects?.some((e) => e.effectId === definition.id),
+            ).map((definition) => ({ value: definition.id, label: definition.name }))}
+            onChange={(value) => {
+              if (value) timeline.applyEffect(item.id, value);
+            }}
+          />
           {item.effects.map((effect) => (
             <div
               key={effect.id}
@@ -385,11 +403,46 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
                 icon={<Power size={12} />}
                 onClick={() => timeline.toggleEffectEnabled(item.id, effect.effectId)}
               />
-              <span style={{ flex: 1, fontSize: 'var(--fs-xs)', color: 'var(--text-primary)' }}>
-                {effect.effectId}
-              </span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-primary)' }}>
+                  {effectDefinition(effect.effectId)?.name ?? effect.effectId}
+                </span>
+                {/*
+                  Parameters are generated from the catalogue's ParamSpecs (§3.1), so
+                  the ranges and defaults here cannot drift from the ones the renderer
+                  clamps to.
+                */}
+                {(effectDefinition(effect.effectId)?.params ?? []).map((spec) => {
+                  const current =
+                    typeof effect.params[spec.id] === 'number'
+                      ? (effect.params[spec.id] as number)
+                      : Number(spec.default);
+                  // A slider works in integers, so a float range has to be scaled
+                  // into positions. Ranges up to 10 (brightness, exposure, contrast,
+                  // radius) get hundredths, which is finer than anyone can drag;
+                  // wider ranges (blur's 0–100) get whole units.
+                  const step = spec.max - spec.min <= 10 ? 0.05 : 1;
+                  const scale = 1 / step;
+                  return (
+                    <Slider
+                      key={spec.id}
+                      value={Math.round(current * scale)}
+                      min={Math.round(spec.min * scale)}
+                      max={Math.round(spec.max * scale)}
+                      step={1}
+                      ariaLabel={`${effectDefinition(effect.effectId)?.name} ${spec.label}`}
+                      formatValue={(value) => String(Number((value / scale).toFixed(2)))}
+                      onChange={(value) =>
+                        timeline.setEffectParams(item.id, effect.effectId, {
+                          [spec.id]: Number((value / scale).toFixed(3)),
+                        })
+                      }
+                    />
+                  );
+                })}
+              </div>
               <IconButton
-                label="Remove effect"
+                label={`Remove ${effectDefinition(effect.effectId)?.name ?? effect.effectId}`}
                 size={28}
                 icon={<Trash2 size={12} />}
                 onClick={() => timeline.removeEffect(item.id, effect.effectId)}

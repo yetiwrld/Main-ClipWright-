@@ -65,8 +65,12 @@ This document tracks architectural scope boundaries and honest limitations per `
    is written — so an overlay track, a faded clip and a `multiply` layer all reach
    the file. Transitions render too: the two clips either side of a cut are both
    drawn across the overlap and faded, slid or zoomed per the transition's type and
-   easing. What is still missing is the rest of the *video* compositor: effects,
-   masks and the `rotationJitterDeg` per-caption tilt are **not rendered**. Where nothing is on the timeline you get the canvas colour. The
+   easing. Effects render, but **not the way §12 §3.1 specifies**: the spec asks for
+   GLSL fragment shaders in a hidden WebGL2 window run by both preview and export,
+   and this build has no GL context anywhere. Effects are a CPU implementation
+   (`packages/compositor/src/effects.ts`) that the export applies to every frame and
+   the preview approximates with CSS filters. Four divergences follow, all visible in
+   item 7. What is still missing: masks, and the `rotationJitterDeg` per-caption tilt. Where nothing is on the timeline you get the canvas colour. The
    export dialog says so before you press Export.
 2. **Keyframed geometry exports as steps, not ramps.** ffmpeg 4.1 evaluates
    `scale`/`crop` expressions once, at configuration time — there is no `t` in
@@ -106,18 +110,37 @@ This document tracks architectural scope boundaries and honest limitations per `
    footage and measurable on synthetic test cards, which is how it was caught. The
    exact `renderFrame` path in `specs/10` §2.1 — one compositor feeding both — is
    what would remove it.
-7. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-8. **No resumable export.** A failed or interrupted export restarts from the
+7. **Effects are CPU code and a CSS approximation, not the shared shader the spec
+   asks for.** §12 §3.1 wants each effect to be a GLSL fragment shader run in a
+   hidden WebGL2 window by both preview and export, which is what guarantees the two
+   cannot disagree. This build has no WebGL2 renderer, so:
+   - the **export** applies a CPU implementation in linear light and is the
+     authoritative picture;
+   - the **preview** approximates it with CSS `filter`, which works on encoded sRGB
+     rather than linear light and has no equivalent for Tint, Sharpen or Vignette at
+     all. Those three are named in a visible banner (§10 §14) rather than silently
+     omitted;
+   - **chain order between a colour effect and a spatial one is not exact**: the
+     CPU path runs every per-pixel effect first, then the spatial ones, so
+     `blur → contrast` and `contrast → blur` currently produce the same frame. A
+     shader pipeline interleaves them so they differ;
+   - a **blur's sigma is this module's own**, not ffmpeg's `gblur=sigma`, so the two
+     agree in shape and not in parameter naming. The kernel itself is checked tap by
+     tap against the textbook Gaussian.
+   The export is correct and tested; the preview is honest and approximate, and the
+   banner is what makes that acceptable.
+8. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+9. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
-9. **Hardware encoding is validated, not assumed — and not proven here.** The
+10. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-10. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+11. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
    normalisation are; the equaliser, reverb and other audio-rack effects are not
    yet in the mix.
-11. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+12. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 
 ### Updates

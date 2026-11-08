@@ -85,7 +85,10 @@ blended bottom-first at its own opacity and blend mode, and written out. The
 preview and the export resolve the layer stack through the same function, so they
 agree about which clip is on top, and transitions draw both clips across the
 overlap in the preview and dissolve, slide or zoom them in the file. What is still
-missing is effects and masks — those are **not rendered into the exported file**.
+effects and masks are the last of it: the nine required effects from §12 §3.2 are
+implemented in CPU code and applied to every exported frame (the preview approximates
+them with CSS filters and says so where it cannot), while masks remain **not
+rendered**.
 Keyframed geometry *is* rendered, but as steps: ffmpeg 4.1 evaluates `scale`
 and `crop` once, so an animated item is split into one segment per keyframe and
 each segment is baked at its start value.
@@ -135,10 +138,10 @@ text and shape items, brand kits, and the audio tools beyond the envelope.
 Captions themselves are done:
 engine, frame builder, preview, list, word editor, burn-in.
 
-**3. Make the export render the rest of the timeline** — the video compositor:
-effects and masks. Captions, keyframed geometry, layer blending and transitions
-already render; this is what remains, and it is what stops the editor offering
-things the export cannot show.
+**3. Finish the video compositor** — masks, and a real WebGL2 `renderFrame` so
+preview and export share one implementation instead of a CPU path plus a CSS
+approximation. Captions, keyframed geometry, layer blending, transitions and the
+nine required effects already render and export.
 
 **4. Finish Phase 6** — build an installer on a real Windows machine and run the
 acceptance checks in `specs/15` §12. These need a clean Windows VM and a published

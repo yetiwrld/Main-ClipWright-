@@ -853,4 +853,104 @@ describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
     expect(ratioAtCut).toBeGreaterThan(0.6);
     expect(ratioAtCut).toBeLessThan(2.5);
   }, 180_000);
+  it('applies an effect chain to the exported pixels', async () => {
+    // Effects could be added, listed, toggled and removed and were applied by
+    // nothing. A grey source through a saturation-0 chain must come out grey — and
+    // it already is grey — so the discriminating case is a *coloured* source whose
+    // channels must converge.
+    const source = makeSolidSource('fx-grey.mp4', [200, 60, 40]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'graded', trackId: 'track-main', type: 'video', mediaId: 'media-graded',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          effects: [{ id: 'fx1', effectId: 'saturation', enabled: true, params: { amount: 0 } }],
+        },
+      ] as never,
+      rangeUs: [0, 500_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'effect-saturation.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-effect',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red, green, blue] = decodedChannelMeans(outputPath);
+    // Saturation 0 is Rec.709 luma of (200,60,40) ≈ 88 in sRGB terms; whatever the
+    // exact level, the three channels must be equal within rounding, which they are
+    // not in the source (200/60/40).
+    expect(Math.abs(red - green)).toBeLessThan(6);
+    expect(Math.abs(green - blue)).toBeLessThan(6);
+  }, 120_000);
+
+  it('applies an effect even when the clip is the only layer', async () => {
+    // The fast path for a single opaque layer returns the decoded bytes untouched.
+    // Effects have to disable that path, or a graded clip exports ungraded whenever
+    // it happens to be alone on its track — which is most of the time.
+    const source = makeSolidSource('fx-only.mp4', [128, 128, 128]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'only', trackId: 'track-main', type: 'video', mediaId: 'media-only',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          effects: [{ id: 'fx1', effectId: 'exposure', enabled: true, params: { stops: 1 } }],
+        },
+      ] as never,
+      rangeUs: [0, 500_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'effect-single-layer.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-effect-single',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red] = decodedChannelMeans(outputPath);
+    // +1 stop on 128 sRGB: 0.216 linear doubled is 0.432, which re-encodes to ~173.
+    expect(red).toBeGreaterThan(160);
+    expect(red).toBeLessThan(190);
+  }, 120_000);
+
+  it('leaves the picture alone when the effect is disabled', async () => {
+    const source = makeSolidSource('fx-off.mp4', [128, 128, 128]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'off', trackId: 'track-main', type: 'video', mediaId: 'media-off',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+          effects: [{ id: 'fx1', effectId: 'exposure', enabled: false, params: { stops: 1 } }],
+        },
+      ] as never,
+      rangeUs: [0, 500_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'effect-disabled.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-effect-off',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => source }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red] = decodedChannelMeans(outputPath);
+    expect(red).toBeGreaterThan(118);
+    expect(red).toBeLessThan(138);
+  }, 120_000);
 });

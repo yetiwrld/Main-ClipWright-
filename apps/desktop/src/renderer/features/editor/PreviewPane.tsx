@@ -5,9 +5,11 @@ import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwrig
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
 import {
+  activeEffects,
   itemGeometry,
   transitionAt,
   visibleLayers,
+  type ActiveEffect,
   type ItemGeometry,
   type VisibleLayer,
 } from '@clipwright/compositor';
@@ -25,6 +27,95 @@ const MEDIA_ORIGIN = 'clipwright-media://media/';
  * silently drops the declaration and the layer paints as if it were `normal` —
  * a bug that looks like blending being ignored. The rest happen to agree.
  */
+/**
+ * The effect chain as a CSS `filter` string, for the effects CSS can reproduce.
+ *
+ * CSS filters operate in sRGB on the *encoded* values, while the export linearises
+ * first, so these are approximations rather than the same maths — the preview's job
+ * is to show the shape of a grade while the export produces the real one. The
+ * functions below were chosen so that the two agree closely for the usual settings:
+ * `brightness()` and `saturate()` are close cousins of their linear counterparts,
+ * whereas `contrast()` pivots on 0.5 rather than on 0.18 linear and is a visibly
+ * different curve at large amounts.
+ *
+ * Five of the nine required effects have no CSS equivalent at all — blur, sharpen,
+ * vignette and the two channel-mix ones need either a neighbourhood or per-channel
+ * control that `filter` does not expose. Those are reported by
+ * `unsupportedEffectNames` so the preview can say so instead of quietly showing an
+ * ungraded picture.
+ */
+export function cssFiltersFor(effects: readonly ActiveEffect[]): string {
+  const filters: string[] = [];
+  for (const effect of effects) {
+    const p = effect.params;
+    switch (effect.effectId) {
+      case 'brightness': {
+        // CSS brightness() is a multiply, which is unlimited upward and zero at 0.
+        // Mapping the −1…1 amount onto 0…2 keeps 0 as "unchanged" and makes the
+        // direction right; the highlight roll-off the export uses is not expressible.
+        const amount = p.amount ?? 0;
+        filters.push(`brightness(${(1 + Math.max(-0.9, amount)).toFixed(4)})`);
+        break;
+      }
+      case 'exposure': {
+        filters.push(`brightness(${Math.pow(2, p.stops ?? 0).toFixed(4)})`);
+        break;
+      }
+      case 'contrast': {
+        filters.push(`contrast(${Math.pow(2, p.amount ?? 0).toFixed(4)})`);
+        break;
+      }
+      case 'saturation': {
+        filters.push(`saturate(${(p.amount ?? 1).toFixed(4)})`);
+        break;
+      }
+      case 'temperature': {
+        // Warm = more red, less blue. `sepia` is the only CSS function that shifts
+        // the colour balance, and blending a little in is a fair stand-in for a
+        // small shift; a large one diverges from the export, so the amount is
+        // capped where the two still resemble each other.
+        const shift = (p.amount ?? 0) / 100;
+        if (shift > 0) filters.push(`sepia(${Math.min(0.35, shift * 0.35).toFixed(4)})`);
+        else if (shift < 0) filters.push(`hue-rotate(${(Math.abs(shift) * 20).toFixed(2)}deg)`);
+        break;
+      }
+      case 'blur': {
+        // The export scales the radius by the frame's short side over 1080; the
+        // preview draws at the canvas's own CSS size, and a 1:1 pixel radius is the
+        // right unit there because the element is already sized in frame units.
+        const radius = p.radius ?? 0;
+        if (radius > 0) filters.push(`blur(${radius.toFixed(2)}px)`);
+        break;
+      }
+      case 'tint':
+      case 'sharpen':
+      case 'vignette':
+        // No CSS equivalent. Reported separately.
+        break;
+      default:
+        break;
+    }
+  }
+  return filters.join(' ');
+}
+
+/** Effects in a chain the preview cannot approximate, by their catalogue names. */
+export function unsupportedEffectNames(effects: readonly ActiveEffect[]): string[] {
+  const names: string[] = [];
+  for (const effect of effects) {
+    // `tint` needs per-channel gains CSS does not expose; `sharpen` needs a
+    // high-pass; `vignette` needs a radial mask, which is a `radial-gradient`
+    // overlay rather than a filter and is not attempted here.
+    if (effect.effectId === 'tint') names.push('Tint');
+    if (effect.effectId === 'sharpen') names.push('Sharpen');
+    if (effect.effectId === 'vignette') names.push('Vignette');
+    if (effect.effectId === 'temperature' && Math.abs(effect.params.amount ?? 0) > 35) {
+      names.push('Temperature (only approximated)');
+    }
+  }
+  return names;
+}
+
 const CSS_BLEND_MODE: Record<string, React.CSSProperties['mixBlendMode']> = {
   normal: 'normal',
   multiply: 'multiply',
@@ -149,6 +240,23 @@ export function PreviewPane({
     );
   }, [state, playheadUs]);
 
+  /**
+   * Effects that are active under the playhead but that the preview cannot draw.
+   *
+   * Collected from every visible layer rather than only the selected one, because
+   * the banner is about the picture on screen — an unpaintable effect on an overlay
+   * clip is just as missing as one on the main track.
+   */
+  const unpreviewable = useMemo(() => {
+    const names = new Set<string>();
+    for (const layer of layers) {
+      for (const name of unsupportedEffectNames(activeEffects(state.items[layer.id]?.effects))) {
+        names.add(name);
+      }
+    }
+    return [...names];
+  }, [layers, state]);
+
   // Sound comes from the bottom picture layer only — the one `videoRef` points at.
   // Each layer seeks itself; this function must not seek or the two would fight
   // over the same element.
@@ -227,6 +335,7 @@ export function PreviewPane({
           {layers.length > 0 ? (
             layers.map((layer: VisibleLayer, index: number) => {
               const transition = transitionFor(layer, state, playheadUs);
+              const effects = activeEffects(state.items[layer.id]?.effects);
               return (
               <PreviewLayer
                 key={layer.id}
@@ -236,6 +345,7 @@ export function PreviewPane({
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
                 transitionScale={transition?.scale ?? 1}
+                effectFilter={cssFiltersFor(effects)}
                 initialAspect={canvas.width / canvas.height}
                 muted={muted}
                 playing={playing}
@@ -276,6 +386,35 @@ export function PreviewPane({
             height={canvas.height}
             projectCopies={captionStyles}
           />
+
+          {/*
+            SPEC 10 §14 — the preview must admit what it cannot show. This build
+            has no WebGL2 renderer, so effects are drawn with CSS filters where CSS
+            has an equivalent and not at all where it does not. Saying so is the
+            difference between a preview that is approximate and a preview that
+            lies; the export applies the full chain either way.
+          */}
+          {unpreviewable.length > 0 && (
+            <div
+              data-testid="preview-effect-banner"
+              style={{
+                position: 'absolute',
+                left: 'var(--space-2)',
+                right: 'var(--space-2)',
+                bottom: 'var(--space-2)',
+                padding: 'var(--space-1) var(--space-2)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'color-mix(in srgb, var(--surface-app) 85%, transparent)',
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--fs-xs)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              Some effects can’t be previewed on this computer ({unpreviewable.join(', ')});
+              export is unaffected.
+            </div>
+          )}
         </div>
       </div>
 
@@ -408,6 +547,7 @@ const PreviewLayer = memo(function PreviewLayer({
   initialAspect,
   transitionOffsetX,
   transitionScale,
+  effectFilter,
   muted,
   playing,
   onPlayRejected,
@@ -422,6 +562,8 @@ const PreviewLayer = memo(function PreviewLayer({
   initialAspect: number;
   /** Horizontal slide from a running transition, in frame widths. */
   transitionOffsetX: number;
+  /** CSS `filter` string approximating the item's effect chain. */
+  effectFilter: string;
   /** Scale from a running `zoom` transition. */
   transitionScale: number;
   muted: boolean;
@@ -516,6 +658,10 @@ const PreviewLayer = memo(function PreviewLayer({
           }}
           style={{
             position: 'absolute',
+            // The filter goes on the <video> rather than the layer wrapper so it
+            // applies to the picture only: a blur on the wrapper would feather the
+            // crop's hard edge, which is not what the export does.
+            filter: effectFilter || undefined,
             left: `${-(geometry.source.x / geometry.source.width) * 100}%`,
             top: `${-(geometry.source.y / geometry.source.height) * 100}%`,
             width: `${100 / geometry.source.width}%`,

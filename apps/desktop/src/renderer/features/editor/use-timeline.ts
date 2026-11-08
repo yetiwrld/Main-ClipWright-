@@ -138,6 +138,7 @@ export interface TimelineApi {
   applyEffect: (itemId: string, effectId: string, params?: Record<string, number | boolean | string>) => boolean;
   removeEffect: (itemId: string, effectId: string) => boolean;
   toggleEffectEnabled: (itemId: string, effectId: string) => boolean;
+  setEffectParams: (itemId: string, effectId: string, params: Record<string, number | boolean | string>) => boolean;
   updateEffectParams: (itemId: string, effectId: string, params: Record<string, number | boolean | string>) => boolean;
   updateMarker: (markerId: string, patch: { name?: string; note?: string; color?: string }) => boolean;
   deleteMarker: (markerId: string) => boolean;
@@ -486,6 +487,8 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Remove effect', (s) => removeEffect(s, { itemId, effectId })),
       toggleEffectEnabled: (itemId, effectId) =>
         run('Toggle effect', (s) => toggleEffectEnabled(s, { itemId, effectId })),
+      setEffectParams: (itemId, effectId, params) =>
+        run('Change effect', (s) => updateEffectParams(s, { itemId, effectId, params })),
       updateEffectParams: (itemId, effectId, params) =>
         run('Update effect params', (s) => updateEffectParams(s, { itemId, effectId, params })),
       updateMarker: (markerId, patch) =>

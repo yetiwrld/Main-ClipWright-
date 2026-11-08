@@ -55,6 +55,7 @@ function fakeTimeline(state: TimelineState): TimelineApi {
     applyEffect: vi.fn(),
     removeEffect: vi.fn(),
     toggleEffectEnabled: vi.fn(),
+    setEffectParams: vi.fn(() => true),
     addTransition: vi.fn(() => true),
     updateTransition: vi.fn(() => true),
     removeTransition: vi.fn(() => true),
@@ -307,5 +308,66 @@ describe('ItemInspector transitions', () => {
       target: { value: '100' },
     });
     expect(timeline.updateTransition).toHaveBeenCalledWith('item-1', { durationUs: 1_000_000 });
+  });
+});
+
+describe('ItemInspector effects', () => {
+  it('offers a menu of effects that are not already applied', () => {
+    renderInspector(makeState());
+    expect(screen.getByLabelText('Add an effect to this clip')).toBeTruthy();
+  });
+
+  it('adds an effect through the command', () => {
+    // There was no way to create an effect from the app at all before this: the
+    // inspector listed, toggled and removed chain entries, so the chain could only
+    // be populated by calling the store directly.
+    const timeline = renderInspector(makeState());
+    fireEvent.click(screen.getByLabelText('Add an effect to this clip'));
+    fireEvent.click(screen.getByText('Exposure'));
+    expect(timeline.applyEffect).toHaveBeenCalledWith('item-1', 'exposure');
+  });
+
+  it('shows each applied effect with its parameter controls', () => {
+    const state = makeState({
+      effects: [{ id: 'fx', effectId: 'brightness', enabled: true, params: { amount: 0.2 } }],
+    } as never);
+    renderInspector(state);
+    expect(screen.getByText('Brightness')).toBeTruthy();
+    // Label comes from the catalogue's ParamSpec, so it stays in step with the
+    // range the renderer clamps to.
+    expect(screen.getByLabelText('Brightness Amount')).toBeTruthy();
+  });
+
+  it('writes a parameter change through the command', () => {
+    const state = makeState({
+      effects: [{ id: 'fx', effectId: 'exposure', enabled: true, params: { stops: 0 } }],
+    } as never);
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    // The slider is scaled so float ranges remain usable: −3…3 in steps of 0.05,
+    // so slider position 20 is one stop.
+    fireEvent.change(screen.getByLabelText('Exposure Stops'), { target: { value: '20' } });
+    expect(timeline.setEffectParams).toHaveBeenCalledWith('item-1', 'exposure', { stops: 1 });
+  });
+
+  it('names the remove button after the effect rather than repeating "Remove effect"', () => {
+    const state = makeState({
+      effects: [{ id: 'fx', effectId: 'vignette', enabled: true, params: {} }],
+    } as never);
+    renderInspector(state);
+    // Five effects in a chain would otherwise present five identical buttons.
+    expect(screen.getByLabelText('Remove Vignette')).toBeTruthy();
+  });
+
+  it('does not offer an effect that is already in the chain', () => {
+    const state = makeState({
+      effects: [{ id: 'fx', effectId: 'blur', enabled: true, params: {} }],
+    } as never);
+    renderInspector(state);
+    // The applied row already says "Blur (Gaussian)", so counting is the only way to
+    // tell whether the *menu* also offers it.
+    const before = screen.getAllByText('Blur (Gaussian)').length;
+    fireEvent.click(screen.getByLabelText('Add an effect to this clip'));
+    expect(screen.getAllByText('Blur (Gaussian)').length).toBe(before);
   });
 });
