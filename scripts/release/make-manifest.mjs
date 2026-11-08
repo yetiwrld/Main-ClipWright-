@@ -100,10 +100,14 @@ const verifier = createPublicKey({
 });
 const ok = verify(null, Buffer.from(manifestText, 'utf8'), verifier, Buffer.from(signature, 'base64'));
 if (!ok) {
-  // Remove what was just written before failing. CI runs these steps in
-  // sequence, and an unverifiable manifest left on disk is exactly the artefact
-  // that must not reach the publish step — the app would refuse it, and the
-  // release would be broken in a way that only a user discovers.
+  // Remove what was just written before failing. The script's whole contract is
+  // "refuse to publish", and leaving the exact files it just refused to vouch
+  // for sitting in the output directory contradicts that.
+  //
+  // Today the release workflow aborts when this step fails, so the files would
+  // not be uploaded. That is one `if: always()` or one local re-run away from
+  // being false, and the files are indistinguishable from good ones: same names,
+  // valid JSON, a signature that only the app's key would reject.
   await rm(manifestPath, { force: true });
   await rm(sigPath, { force: true });
   await rm(join(outDir, 'SHA256SUMS.txt'), { force: true });

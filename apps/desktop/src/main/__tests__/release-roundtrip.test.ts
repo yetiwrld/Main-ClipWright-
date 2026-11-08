@@ -66,9 +66,9 @@ afterAll(() => {
 
 describe('a refused signature leaves nothing to publish', () => {
   it('removes the manifest, signature and sums when the key does not match', async () => {
-    // CI runs these steps in sequence. An unverifiable manifest left on disk is
-    // precisely the artefact that must not reach the publish step: the app would
-    // refuse it and the release would be broken in a way only a user discovers.
+    // A refused manifest must not survive on disk. The files look entirely
+    // normal — right names, valid JSON — and only the app's embedded key would
+    // reject the signature.
     const scratch = join(TMP, 'refusal');
     mkdirSync(scratch, { recursive: true });
     writeFileSync(join(scratch, SETUP), Buffer.alloc(1000, 0x41));
