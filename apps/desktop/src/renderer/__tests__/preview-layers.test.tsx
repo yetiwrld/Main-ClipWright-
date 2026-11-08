@@ -16,7 +16,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { createDefaultTimeline, type TimelineState } from '@clipwright/timeline-engine';
-import { PreviewPane } from '../features/editor/PreviewPane.js';
+import { PreviewPane, volumeKeyframesFor } from '../features/editor/PreviewPane.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
 
 interface Overrides {
@@ -322,5 +322,56 @@ describe('PreviewPane effects', () => {
     ];
     render(<PreviewPane state={strong} fps={30} />);
     expect(screen.getByTestId('preview-effect-banner').textContent).toContain('Temperature');
+  });
+});
+
+describe('volume keyframes in the preview (SPEC 12 §6)', () => {
+  it('shifts item-local keys into timeline time', () => {
+    // The preview evaluates the envelope against timeline time, exactly as the
+    // export does. A key at local 0 on a clip starting at 1.5 s therefore has to
+    // become a key at 1.5 s, or the volume line plays early by the clip's position.
+    const keys = volumeKeyframesFor({
+      startUs: 1_500_000,
+      keyframes: {
+        volumeDb: [
+          { timeUs: 0, value: -12, interpolation: 'linear' },
+          { timeUs: 400_000, value: 0, interpolation: 'linear' },
+        ],
+      },
+    });
+    expect(keys?.map((key) => key.timeUs)).toEqual([1_500_000, 1_900_000]);
+    expect(keys?.map((key) => key.valueDb)).toEqual([-12, 0]);
+  });
+
+  it('reports nothing for a clip without a volume line', () => {
+    // `undefined` rather than an empty array: the envelope treats a present-but-empty
+    // list as no keys too, but passing one around would allocate on every frame for
+    // the overwhelmingly common case of a clip with no volume animation.
+    expect(volumeKeyframesFor({ startUs: 0 })).toBeUndefined();
+    expect(volumeKeyframesFor({ startUs: 0, keyframes: { volumeDb: [] } })).toBeUndefined();
+  });
+
+  it('drops a non-numeric value instead of passing NaN into the gain', () => {
+    // A colour keyframe on `volumeDb` would become NaN, and NaN silences the clip
+    // with nothing in the log to explain why.
+    const keys = volumeKeyframesFor({
+      startUs: 0,
+      keyframes: {
+        volumeDb: [
+          { timeUs: 0, value: [1, 0, 0, 1], interpolation: 'linear' },
+          { timeUs: 100_000, value: -3, interpolation: 'linear' },
+        ],
+      },
+    });
+    expect(keys).toHaveLength(1);
+    expect(keys?.[0]!.valueDb).toBe(-3);
+  });
+
+  it('ignores a volume line on a clip whose animation belongs to another property', () => {
+    // `opacity` keys must not be mistaken for the volume line; the properties are
+    // separate and a clip can animate either without the other.
+    expect(
+      volumeKeyframesFor({ startUs: 0, keyframes: { opacity: [{ timeUs: 0, value: 0.5 }] } }),
+    ).toBeUndefined();
   });
 });

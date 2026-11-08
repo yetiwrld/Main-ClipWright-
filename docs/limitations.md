@@ -53,13 +53,13 @@ This document tracks architectural scope boundaries and honest limitations per `
    depends on a viewport (zoom, pan, fit) is absent rather than half-working, and
    the transform tools are not written. There is also no box-select of keys in the
    drawer: keys are selected by clicking a diamond, one at a time.
-8. **Auto-keyframing is not wired, and keyframe creation has no inspector
-   affordance.** SPEC 12 §2.4 wants a diamond per property row that toggles a key
-   at the playhead with the current evaluated value, ◀ ▶ buttons to jump between
-   keys, and the rule that changing an already-animated property writes a key at
-   the playhead rather than editing the static value. Keys can be added on the
-   timeline lane and shaped in the curve drawer, but the inspector always edits the
-   static value, so an animated property cannot be re-keyed from the sidebar.
+8. **The inspector's keyframe controls cover opacity and volume only.** SPEC 12
+   §2.4's diamond, the ◀ ▶ jumpers and auto-keyframing are built, but they are wired
+   to the two rows that have a slider in the sidebar. Transform scale, position,
+   rotation and the four crop edges are animatable — the compositor reads every one
+   of them, and `ANIMATABLE_PROPERTIES` lists them — but the inspector does not draw
+   those rows at all yet, so they can only be keyed from the timeline lane. The rule
+   they follow is the same one the two wired rows use.
 9. **The left panel has the Media and Captions tabs.** Text/Graphics,
    Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
    there.

@@ -353,6 +353,163 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     expect(result.truePeakDb!).toBeLessThanOrEqual(-0.5);
   }, 120_000);
 
+  /**
+   * SPEC 12 §6 — "volume line keyframes".
+   *
+   * The envelope in `@clipwright/audio-core` has always accepted volume keyframes
+   * and `applyItemProcessing` has always forwarded them, but `planAudioItems` never
+   * read them off the plan and `AudioItemRequest` had no field to carry them. So a
+   * keyframed volume line was drawn in the UI, stored in the project, and then
+   * ignored by the export — the clip played at its static level throughout.
+   *
+   * Measured as loudness either side of the midpoint: a constant source with a ramp
+   * from full to silence must be loud early and quiet late. Sampling one instant
+   * would not do, because the *static* value is what a broken implementation
+   * replays, and that is flat.
+   */
+  it('follows a volume keyframe line rather than the static level', async () => {
+    const source = makeConstantToneFile('keyed.wav', { seconds: 2, volume: 0.6, frequency: 300 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 2_000_000, sourceInUs: 0, sourceDurationUs: 2_000_000,
+            // The static level is full, so a renderer that ignored the keys would be
+            // equally loud at both sample points.
+            volumeDb: 0,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            keyframes: {
+              // Item-local times: the item starts at 0, so these are also timeline
+              // times here. 0 dB → silence across the clip.
+              volumeDb: [
+                { timeUs: 0, value: 0, interpolation: 'linear' },
+                { timeUs: 2_000_000, value: -60, interpolation: 'linear' },
+              ],
+            },
+          },
+        ] as never,
+      }),
+    );
+    const wavPath = join(TMP, 'keyed.wav');
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, () => source),
+      wavPath,
+    });
+
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    /** Peak amplitude in a window, which is what "how loud is it" means here. */
+    const peakBetween = (fromSeconds: number, toSeconds: number): number => {
+      const from = Math.round(fromSeconds * MIX_SAMPLE_RATE);
+      const to = Math.round(toSeconds * MIX_SAMPLE_RATE);
+      let peak = 0;
+      for (let index = from; index < to; index += 1) {
+        peak = Math.max(peak, Math.abs(decoded.samples[index * 2] ?? 0));
+      }
+      return peak;
+    };
+
+    const early = peakBetween(0.05, 0.25);
+    const late = peakBetween(1.7, 1.9);
+    expect(early, 'the clip is at its keyed level at the start').toBeGreaterThan(0.1);
+    /*
+      −60 dB is the envelope's silence floor, so the tail must be essentially gone.
+      The bound is generous against the AAC-free WAV fixture and the de-click taper,
+      but it is nowhere near the static level: a renderer that replayed `volumeDb`
+      would give the same peak at both ends.
+    */
+    expect(late, `the keyed line should have faded out, got ${late.toFixed(4)}`).toBeLessThan(early * 0.2);
+  }, 120_000);
+
+  it('shifts volume keyframes into timeline time when the clip does not start at zero', () => {
+    /*
+      Keyframe times are stored *local* to the item; the envelope is evaluated against
+      absolute mix time. Getting the shift wrong is silent: the whole volume line
+      rides along with the clip's position, so it looks right on the clip and wrong in
+      the file — and a fixture starting at zero cannot detect it, because the shift is
+      the identity there.
+    */
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 4_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            // Starts 1.5 s in, with a key at local 0 that must land at 1.5 s.
+            startUs: 1_500_000, durationUs: 1_000_000,
+            sourceInUs: 0, sourceDurationUs: 1_000_000,
+            volumeDb: 0, disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            keyframes: {
+              volumeDb: [
+                { timeUs: 0, value: -12, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: 0, interpolation: 'linear' },
+              ],
+            },
+          },
+        ] as never,
+      }),
+    );
+    const requests = planAudioItems(plan, () => 'media.wav');
+    const keys = requests[0]!.keyframes ?? [];
+    expect(keys.map((key) => key.timeUs)).toEqual([1_500_000, 2_500_000]);
+    // The values ride along unchanged; only the times move.
+    expect(keys.map((key) => key.valueDb)).toEqual([-12, 0]);
+  });
+
+  it('leaves a clip with no volume keys without a keyframe list', () => {
+    // An empty array and "no list" must not be the same thing downstream: the
+    // envelope treats a present-but-empty list as "no keyframes", but passing one
+    // around costs an allocation per item on every export.
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 1_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+          },
+        ] as never,
+      }),
+    );
+    const requests = planAudioItems(plan, () => 'media.wav');
+    expect(requests[0]!.keyframes).toBeUndefined();
+  });
+
+  it('ignores a non-numeric volume keyframe rather than writing NaN into the gain', () => {
+    /*
+      The schema lets a keyframe's value be an RGBA tuple, and a project edited by
+      another tool could put one on `volumeDb`. Converting it to a number would give
+      NaN, and NaN multiplies through the gain into every sample — the whole export
+      comes out silent with no error anywhere.
+    */
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 1_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            keyframes: {
+              volumeDb: [
+                { timeUs: 0, value: [1, 0, 0, 1], interpolation: 'linear' },
+                { timeUs: 500_000, value: -6, interpolation: 'linear' },
+              ],
+            },
+          },
+        ] as never,
+      }),
+    );
+    const requests = planAudioItems(plan, () => 'media.wav');
+    const keys = requests[0]!.keyframes ?? [];
+    expect(keys).toHaveLength(1);
+    expect(keys[0]!.valueDb).toBe(-6);
+    expect(keys.every((key) => Number.isFinite(key.valueDb))).toBe(true);
+  });
+
   it('ducks a music bed under speech', async () => {
     const speech = makeAudioFile('speech.mp4', { seconds: 1, volume: 0.6 });
     const music = makeAudioFile('music.mp4', { seconds: 2, volume: 0.3 });

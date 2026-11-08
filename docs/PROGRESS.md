@@ -138,9 +138,12 @@ proxy playback. The keyframe **curve editor** now exists as a bottom drawer
 be dragged and writes it as a single undo step, and it is what made `bezier`
 reachable at all — the schema and the evaluator carried the field while no command
 could write it. What it still lacks is the viewport (§2.6's zoom, pan and fit) and
-the numeric transform tools, and auto-keyframing from the inspector is not wired. The inspector's numeric controls, including
+the numeric transform tools. The inspector's numeric controls, including
 the volume slider that used to be a read-only placeholder, now work, and the values
-they write are drawn by the preview and applied by the export.
+they write are drawn by the preview and applied by the export — including
+auto-keyframing, which writes a key at the playhead when a property already has
+keys and leaves the static value alone when it does not, so a slider drag on an
+un-animated clip cannot start an animation by accident.
 
 **2. Finish Phase 5 ⚠️** — the style editor's colour pickers and anchor grid,
 text and shape items, brand kits, and the audio tools beyond the envelope.

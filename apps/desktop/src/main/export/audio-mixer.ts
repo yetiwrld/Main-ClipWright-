@@ -55,6 +55,14 @@ export interface AudioItemRequest {
   fadeOutUs?: number;
   pan?: number;
   muted?: boolean;
+  /**
+   * Volume keyframes in dB, already shifted into *timeline* time (SPEC 12 §6).
+   *
+   * The project stores keyframe times local to the item, while the envelope is
+   * evaluated against absolute mix time, so the shift has to happen exactly once —
+   * here, in `planAudioItems`, which is the one place that knows both.
+   */
+  keyframes?: ReadonlyArray<{ timeUs: number; valueDb: number; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset' }>;
   /** Set for a music bed that should duck under the other items (§12 §6.7). */
   duckUnderSpeech?: boolean;
   /**
@@ -167,6 +175,7 @@ export async function buildAudioMix(options: {
       muted: item.muted,
       startUs: item.timelineStartUs,
       durationUs: item.sourceDurationUs,
+      keyframes: item.keyframes,
     });
     /*
       Click-free edits (SPEC 12 §12 item 8). A cut where the two sides are unrelated
@@ -471,6 +480,28 @@ export function planAudioItems(
       });
     }
 
+    /*
+      Volume keyframes (SPEC 12 §6) are stored local to the item but the envelope is
+      evaluated against absolute mix time, so they are shifted here — once, by the
+      one function that knows both the item's local origin and where it lands. The
+      shift uses the item's *unadjusted* start: a crossfade may pull the clip earlier
+      by `availableLeadUs`, and the keyframe times were measured against where the
+      user put the clip, not against the handles it gained.
+
+      Only `volumeDb` is carried. `gain` is a static pre-fade control with no
+      keyframe path in the catalogue, and reading it would invent a feature.
+    */
+    const volumeKeys = (item.keyframes?.['volumeDb'] ?? [])
+      .filter(
+        (key): key is { timeUs: number; value: number; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset' } =>
+          typeof key.value === 'number',
+      )
+      .map((key) => ({
+        timeUs: key.timeUs + (item.startUs - plan.rangeStartUs),
+        valueDb: key.value,
+        ...(key.interpolation ? { interpolation: key.interpolation } : {}),
+      }));
+
     items.push({
       itemId: item.itemId,
       sourcePath: path,
@@ -478,6 +509,7 @@ export function planAudioItems(
       sourceDurationUs: item.durationUs + availableLeadUs,
       timelineStartUs,
       crossfades,
+      ...(volumeKeys.length > 0 ? { keyframes: volumeKeys } : {}),
     });
   }
   return items;

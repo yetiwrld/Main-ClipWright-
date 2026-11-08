@@ -397,6 +397,14 @@ export function PreviewPane({
         muted: Boolean(bottom.muted),
         trackMuted: Boolean(track?.muted),
         silencedBySolo: anySolo && !track?.solo,
+        /*
+          Volume keyframes (SPEC 12 §6), which the preview was ignoring while the
+          export honoured them. Stored local to the item and evaluated against
+          timeline time, so they are shifted by the item's own start — the same shift
+          `planAudioItems` performs for the export, because a preview that disagreed
+          with the file would be worse than one that ignored the feature outright.
+        */
+        keyframes: volumeKeyframesFor(bottom),
       },
       us,
     );
@@ -650,6 +658,30 @@ function transitionFor(
     offsetY: at.state.fromOffsetY,
     scale: at.state.fromScale,
   };
+}
+
+/**
+ * An item's `volumeDb` keyframes, shifted from item-local into timeline time.
+ *
+ * Only numeric values are kept: the schema lets a keyframe hold an RGBA tuple, and a
+ * tuple reaching the dB envelope would become `NaN`, which multiplies through the
+ * gain and silences the whole clip with no error to explain it.
+ */
+export function volumeKeyframesFor(
+  item: { startUs: number; keyframes?: Record<string, readonly { timeUs: number; value: unknown; interpolation?: string }[]> },
+): ReadonlyArray<{ timeUs: number; valueDb: number; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset' }> | undefined {
+  const keys = item.keyframes?.['volumeDb'];
+  if (!keys || keys.length === 0) return undefined;
+  const shifted = keys
+    .filter((key) => typeof key.value === 'number')
+    .map((key) => ({
+      timeUs: key.timeUs + item.startUs,
+      valueDb: key.value as number,
+      ...(key.interpolation
+        ? { interpolation: key.interpolation as 'linear' | 'hold' | 'bezier' | 'preset' }
+        : {}),
+    }));
+  return shifted.length > 0 ? shifted : undefined;
 }
 
 /**

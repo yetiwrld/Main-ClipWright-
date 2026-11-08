@@ -11,10 +11,11 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createDefaultTimeline, createMediaItem, type TimelineState } from '@clipwright/timeline-engine';
 import type { TimelineApi } from '../features/editor/use-timeline.js';
 import { ItemInspector } from '../features/editor/Inspector.js';
+import { playheadStore } from '../features/editor/playhead-store.js';
 
 afterEach(() => cleanup());
 
@@ -61,6 +62,9 @@ function fakeTimeline(state: TimelineState): TimelineApi {
     copyEffects: vi.fn(() => 0),
     pasteEffects: vi.fn(() => true),
     effectClipboardSize: 0,
+    addKeyframe: vi.fn(() => true),
+    removeKeyframe: vi.fn(() => true),
+    updateKeyframe: vi.fn(() => true),
     addTransition: vi.fn(() => true),
     updateTransition: vi.fn(() => true),
     removeTransition: vi.fn(() => true),
@@ -551,5 +555,113 @@ describe('ItemInspector copy and paste effects', () => {
     expect(paste.disabled).toBe(false);
     fireEvent.click(paste);
     expect(timeline.pasteEffects).toHaveBeenCalledWith('item-1');
+  });
+});
+
+describe('keyframe controls on the property rows (SPEC 12 §2.4)', () => {
+  it('offers a diamond on the opacity and volume rows', () => {
+    renderInspector(makeState());
+    expect(screen.getByLabelText('Keyframe Opacity at the playhead')).toBeTruthy();
+    expect(screen.getByLabelText('Keyframe Volume at the playhead')).toBeTruthy();
+  });
+
+  it('records the property\'s current value when the diamond creates a key', () => {
+    /*
+      §2.4: "Every keyframe creation records the evaluated value at that time, so
+      adding a key never changes the picture." Creating a key with a default value
+      instead would snap the clip to something the user never chose.
+    */
+    const state = makeState({ opacity: 0.4 });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.click(screen.getByLabelText('Keyframe Opacity at the playhead'));
+    // The playhead starts at 0, which is the clip's start, so the local time is 0.
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'opacity', 0, 0.4);
+  });
+
+  it('removes the key when the playhead is already on one', () => {
+    // The diamond is a toggle, not an insert. A second click on the same frame must
+    // not stack a duplicate key at the same time.
+    const state = makeState({
+      keyframes: { opacity: [{ timeUs: 0, value: 0.4, interpolation: 'linear' }] },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    const diamond = screen.getByLabelText('Keyframe Opacity at the playhead');
+    expect(diamond.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(diamond);
+    expect(timeline.removeKeyframe).toHaveBeenCalledWith('item-1', 'opacity', 0);
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+  });
+
+  it('disables the diamond when the playhead is outside the clip, with a reason', () => {
+    // §2.4 blocks the edit "with a tooltip", so the reason has to be in the title.
+    const state = makeState({ startUs: 2_000_000 });
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    const diamond = screen.getByLabelText('Keyframe Opacity at the playhead');
+    expect((diamond as HTMLButtonElement).disabled).toBe(true);
+    expect(diamond.getAttribute('title')).toMatch(/before this clip|past the end/);
+  });
+
+  it('updates the key already under the playhead rather than inserting a second', () => {
+    /*
+      Auto-keyframing. The property has keys, so a slider change must go to the keys
+      — the evaluator reads them and ignores the static value, so a static edit would
+      be invisible. The playhead starts at the clip's start, where a key already
+      exists, so the right move is to *update* it: inserting another at the same time
+      would break the model's "unique per property" rule.
+    */
+    const state = makeState({
+      keyframes: {
+        volumeDb: [
+          { timeUs: 0, value: 0, interpolation: 'linear' },
+          { timeUs: 3_000_000, value: -20, interpolation: 'linear' },
+        ],
+      },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Clip volume in decibels'), {
+      target: { value: '-12' },
+    });
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('item-1', 'volumeDb', 0, { value: -12 });
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('inserts a key when the property is animated but the playhead is between keys', () => {
+    // The other auto-keyframing branch: animated, but no key at this exact frame.
+    const state = makeState({
+      keyframes: {
+        volumeDb: [
+          { timeUs: 0, value: 0, interpolation: 'linear' },
+          { timeUs: 3_000_000, value: -20, interpolation: 'linear' },
+        ],
+      },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    // Move the playhead 1 s in, between the two keys.
+    act(() => playheadStore.set(1_000_000));
+    fireEvent.change(screen.getByLabelText('Clip volume in decibels'), {
+      target: { value: '-12' },
+    });
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'volumeDb', 1_000_000, -12);
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    // Leave the store where the next test expects to find it.
+    act(() => playheadStore.set(0));
+  });
+
+  it('edits the static value when the property has no keys', () => {
+    // The other half of the rule: dragging a slider on a never-animated clip must
+    // not start an animation.
+    const state = makeState();
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Clip volume in decibels'), {
+      target: { value: '-12' },
+    });
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { volumeDb: -12 });
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
   });
 });

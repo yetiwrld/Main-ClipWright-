@@ -8,7 +8,13 @@ import {
 } from '@clipwright/timeline-engine';
 import { EFFECTS, effectDefinition } from '@clipwright/compositor';
 import type { TimelineApi } from './use-timeline.js';
-import { playheadStore } from './playhead-store.js';
+import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import {
+  adjacentKeyTime,
+  keyframeAt,
+  keyframeWriteRefusal,
+  planPropertyEdit,
+} from './keyframe-controls.js';
 
 export interface MediaAsset {
   id: string;
@@ -109,6 +115,158 @@ export function MediaLibrary({
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Apply a property edit with §2.4's auto-keyframing rule.
+ *
+ * The playhead is read at call time rather than passed in because the slider's
+ * `onChange` closure is created before the user moves the playhead; reading the
+ * store here means the key lands where the playhead actually is, which is what §2.4
+ * describes.
+ */
+function applyAnimatable(
+  timeline: TimelineApi,
+  item: TimelineState['items'][string],
+  path: string,
+  value: number,
+  editStatic: () => void,
+): void {
+  const plan = planPropertyEdit(
+    item.keyframes?.[path],
+    item,
+    quantizeUs(playheadStore.get(), timeline.fps),
+    value,
+  );
+  if (plan.kind === 'insert-key') {
+    // Insert first, then update, so a brand-new key ends up holding exactly the
+    // value the user dragged to — `addKeyframe` records the value it is given.
+    timeline.addKeyframe(item.id, path, plan.timeUs, plan.value);
+    return;
+  }
+  if (plan.kind === 'update-key') {
+    timeline.updateKeyframe(item.id, path, plan.timeUs, { value: plan.value });
+    return;
+  }
+  editStatic();
+}
+
+/**
+ * A property row with its keyframe diamond and ◀ ▶ jumpers (SPEC 12 §2.4).
+ *
+ * A `Field` is a `<label>`, so a button placed inside one would forward its clicks
+ * to the wrapped input — which is why this row wraps the label in a flex row with
+ * the controls outside it, rather than nesting them.
+ *
+ * The diamond records the property's *current* value when it creates a key, so
+ * adding one never changes the picture (§2.4). It is drawn filled when a key sits
+ * exactly on the playhead, and half-filled when the property is animated but the
+ * playhead is between keys.
+ */
+function KeyframeRow({
+  label,
+  path,
+  value,
+  item,
+  timeline,
+  children,
+}: {
+  label: string;
+  path: string;
+  /** The property's current value, recorded when a key is created. */
+  value: number;
+  item: TimelineState['items'][string];
+  timeline: TimelineApi;
+  children: React.ReactNode;
+}) {
+  const playheadUs = usePlayheadUs();
+  const keys = item.keyframes?.[path];
+  const animated = (keys?.length ?? 0) > 0;
+  const refusal = keyframeWriteRefusal(item, playheadUs);
+  const local = playheadUs - item.startUs;
+  const onKey = animated && keyframeAt(keys, local) !== undefined;
+  const previous = adjacentKeyTime(keys, local, 'previous');
+  const next = adjacentKeyTime(keys, local, 'next');
+
+  const toggle = () => {
+    if (refusal) return;
+    if (onKey) {
+      timeline.removeKeyframe(item.id, path, local);
+      return;
+    }
+    timeline.addKeyframe(item.id, path, local, value);
+  };
+
+  const jump = (target: number | null) => {
+    if (target === null) return;
+    playheadStore.set(item.startUs + target);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-1)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Field label={label}>{children}</Field>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingBottom: 2 }}>
+        <button
+          type="button"
+          aria-label={`Previous ${label} keyframe`}
+          disabled={previous === null}
+          onClick={() => jump(previous)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: previous === null ? 'default' : 'pointer',
+            color: previous === null ? 'var(--text-disabled)' : 'var(--text-secondary)',
+            fontSize: 'var(--fs-xs)',
+            lineHeight: 1,
+          }}
+        >
+          ◀
+        </button>
+        <button
+          type="button"
+          aria-label={`Keyframe ${label} at the playhead`}
+          aria-pressed={onKey}
+          // The tooltip is the entire user-facing half of the "blocked outside the
+          // clip" rule, so it carries the reason rather than being a generic label.
+          title={refusal ?? (onKey ? `Remove the ${label} keyframe here` : `Add a ${label} keyframe here`)}
+          disabled={refusal !== null}
+          onClick={toggle}
+          style={{
+            width: 10,
+            height: 10,
+            padding: 0,
+            margin: '0 2px',
+            // §2.5's diamond: a rotated square, brand-filled when selected.
+            transform: 'rotate(45deg)',
+            background: onKey ? 'var(--brand)' : animated ? 'var(--text-muted)' : 'transparent',
+            border: `1px solid ${animated ? 'var(--brand)' : 'var(--line-default)'}`,
+            cursor: refusal ? 'not-allowed' : 'pointer',
+            opacity: refusal ? 0.5 : 1,
+          }}
+        />
+        <button
+          type="button"
+          aria-label={`Next ${label} keyframe`}
+          disabled={next === null}
+          onClick={() => jump(next)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: next === null ? 'default' : 'pointer',
+            color: next === null ? 'var(--text-disabled)' : 'var(--text-secondary)',
+            fontSize: 'var(--fs-xs)',
+            lineHeight: 1,
+          }}
+        >
+          ▶
+        </button>
+      </div>
     </div>
   );
 }
@@ -283,7 +441,7 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
         </Field>
       )}
 
-      <Field label="Opacity">
+      <KeyframeRow label="Opacity" path="opacity" value={item.opacity} item={item} timeline={timeline}>
         <Slider
           value={Math.round(item.opacity * 100)}
           min={0}
@@ -291,11 +449,20 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           step={1}
           ariaLabel="Clip opacity as a percentage"
           formatValue={(value) => `${value}%`}
-          onChange={(value) => timeline.setItemProperties([item.id], { opacity: value / 100 })}
+          onChange={(value) =>
+            /*
+              Auto-keyframing (§2.4): with existing keys the change becomes a keyframe
+              at the playhead; with none it stays a static edit, so a slider drag
+              never starts an animation the user did not ask for.
+            */
+            applyAnimatable(timeline, item, 'opacity', value / 100, () =>
+              timeline.setItemProperties([item.id], { opacity: value / 100 }),
+            )
+          }
         />
-      </Field>
+      </KeyframeRow>
 
-      <Field label="Volume">
+      <KeyframeRow label="Volume" path="volumeDb" value={item.volumeDb} item={item} timeline={timeline}>
         <Slider
           value={item.volumeDb}
           min={-60}
@@ -303,9 +470,13 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           step={1}
           ariaLabel="Clip volume in decibels"
           formatValue={(value) => (value <= -60 ? 'Silent' : `${value} dB`)}
-          onChange={(value) => timeline.setItemProperties([item.id], { volumeDb: value })}
+          onChange={(value) =>
+            applyAnimatable(timeline, item, 'volumeDb', value, () =>
+              timeline.setItemProperties([item.id], { volumeDb: value }),
+            )
+          }
         />
-      </Field>
+      </KeyframeRow>
 
       <Field label="Pan">
         <Slider
