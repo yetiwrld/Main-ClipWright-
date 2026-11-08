@@ -1,0 +1,31 @@
+# Line endings, pinned (SPEC 15 §12.12 — the build must behave the same on the
+# Windows CI runner as on a developer's machine).
+#
+# This file exists because two checks failed on Windows for the same reason and
+# neither failure said so. Git's `core.autocrlf` checks files out with CRLF on
+# Windows, so:
+#
+#   - `make-notices --check` compared a CRLF checkout against an LF generation
+#     and reported that *every* package line had changed;
+#   - a test that parses the ```json examples out of docs/formats.md found none,
+#     because it searched for a newline the checkout does not have.
+#
+# Both were fixed at the point of comparison, which is correct and local. This
+# makes the situation explicit for anything added later.
+
+# Source and text: normalise to LF in the repository, and check out as LF
+# everywhere. Tools that generate files write LF, so a CRLF checkout means every
+# generated-file check fails for a reason unrelated to the file's contents.
+* text=auto eol=lf
+
+# Binary formats must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.node binary
+*.woff2 binary
+*.sqlite binary
+*.db binary

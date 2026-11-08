@@ -3,8 +3,16 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseStyle } from '../schema.js';
 
-/** The two examples in docs/formats.md must be real, valid styles. */
-const doc = readFileSync(join(process.cwd(), 'docs', 'formats.md'), 'utf8');
+/**
+ * The two examples in docs/formats.md must be real, valid styles.
+ *
+ * Line endings are normalised before anything else. There is no `.gitattributes`
+ * in this repository, so `core.autocrlf` checks markdown out with CRLF on the
+ * Windows runner while this file writes LF — and a fence matcher looking for
+ * "```json\n" finds nothing at all, which reads as "the examples are missing"
+ * rather than "the file has different line endings".
+ */
+const doc = readFileSync(join(process.cwd(), 'docs', 'formats.md'), 'utf8').replaceAll('\r\n', '\n');
 
 function jsonBlocksAfter(heading: string): unknown[] {
   const start = doc.indexOf(heading);
