@@ -16,13 +16,13 @@ pnpm test:unit
 ```
 
 ```
-Test Files  57 passed (57)
-     Tests  1279 passed (1279)
+Test Files  58 passed (58)
+     Tests  1332 passed (1332)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
-| `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
+| `packages/export-core` | 284 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, and the ASS caption script: field order, colour byte order, anchor mapping, karaoke timing, range shifting |
 | `packages/compositor` | 70 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios) and the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
 | `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
@@ -33,7 +33,7 @@ Test Files  57 passed (57)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1279** | 57 files |
+| **Total** | **1332** | 58 files |
 
 ### Tests that run real processes
 
@@ -92,7 +92,7 @@ because of it.
 
 | Gap | Why, and what it needs |
 |---|---|
-| **The compositor is not in the export path.** Text, effects, transitions, keyframed transforms and blend modes are not rendered | Each item is decoded and the topmost visible one is shown. `renderFrame` exists and is tested separately; wiring it into the frame producer is the next phase. Disclosed in the export dialog itself, in `docs/limitations.md`, and locked by a renderer test. |
+| **The video compositor is not in the export path.** Effects, transitions, keyframed transforms, blend modes and masks are not rendered | Each video/image item is decoded and the topmost visible one is shown. Disclosed in the export dialog, `docs/limitations.md`, and locked by a renderer test. **Captions are now burnt in** — ffmpeg renders a generated ASS script, verified here by burning a Karaoke cue and reading back the frame. |
 | Frame blending | Not implemented; nearest-time selection is used and documented |
 | Hardware encoding on real GPUs | No GPU in this environment. The *validation* logic is tested with fakes; actual NVENC/QSV/AMF output is unverified |
 | 4K 60 fps performance | Not benchmarked here; the code path is tested at 320×180 |

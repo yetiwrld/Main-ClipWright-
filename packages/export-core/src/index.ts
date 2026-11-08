@@ -135,3 +135,18 @@ export {
   formatVttTimestamp,
 } from './subtitles.js';
 export type { CaptionCue } from './subtitles.js';
+
+// Styled caption burn-in (§4.3) — an ASS script ffmpeg renders itself.
+export {
+  assAlignment,
+  assColour,
+  assCuesFromPlan,
+  assDialogue,
+  assHeader,
+  assStyleLine,
+  assStyleName,
+  assTimestamp,
+  buildAssScript,
+  escapeAssText,
+} from './ass-captions.js';
+export type { AssCue, AssScriptOptions, AssWord } from './ass-captions.js';

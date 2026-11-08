@@ -48,24 +48,31 @@ This document tracks architectural scope boundaries and honest limitations per `
 
 ### Export
 
-1. **The compositor is not in the export path.** Each video/image item is
-   decoded by its own ffmpeg process and the topmost visible item is written;
-   where nothing is on the timeline you get the canvas colour. Text, effects,
-   transitions, keyframed transforms and blend modes are **not rendered** —
-   `renderFrame` exists and is tested separately, but it is not yet the frame
-   producer. The export dialog says so before you press Export.
-2. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-3. **No resumable export.** A failed or interrupted export restarts from the
+1. **Captions are burnt in; the rest of the compositor is not yet.** Captioned
+   exports are rendered by ffmpeg from a generated ASS script, so font, weight,
+   size, fill, outline, shadow, position and karaoke timing all come from the
+   `.cwstyle` and match the preview (SPEC 11 §3). What is still missing is the
+   *video* compositor: each video/image item is decoded by its own ffmpeg process
+   and the topmost visible item is written, so effects, transitions, keyframed
+   transforms, blend modes, masks and the `rotationJitterDeg` per-caption tilt are
+   **not rendered**. Where nothing is on the timeline you get the canvas colour.
+   The export dialog says so before you press Export.
+2. **ASS is a smaller language than the style format.** A blurred drop shadow is
+   approximated by its vertical offset, and letter-spacing is in pixels rather than
+   ems, so a style with a heavy blur will look slightly cleaner on export than in
+   the preview. Everything the ten presets ask for is expressible.
+3. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+4. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
-4. **Hardware encoding is validated, not assumed — and not proven here.** The
+5. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-5. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+6. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
    normalisation are; the equaliser, reverb and other audio-rack effects are not
    yet in the mix.
-6. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+7. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 
 ### Updates

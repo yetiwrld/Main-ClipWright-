@@ -35,6 +35,21 @@ export interface PlannedItem {
    * of the burn-in path).
    */
   captionText?: string;
+  /**
+   * Which `.cwstyle` this caption was edited with (SPEC 11 §6). Carried so a
+   * multi-style composition burns each caption in its own look, rather than every
+   * caption collapsing to the project default on export.
+   */
+  captionStyleId?: string;
+  /**
+   * The caption's full segment: word timings for karaoke, overrides, speaker.
+   * Absent for a caption typed into a build that did not store one.
+   */
+  captionSegment?: {
+    text: string;
+    wordRefs?: Array<{ wordId: string; startUs: number; endUs: number; textOverride?: string }>;
+    speaker?: string;
+  };
 }
 
 /** Export plan describing the full render. */
@@ -141,7 +156,13 @@ export interface ExportSettings {
     muted: boolean;
     hasAudio: boolean;
     /** Caption text, for `caption` items (feeds the subtitle sidecars). */
-    captionSegment?: { text: string };
+    captionSegment?: {
+      text: string;
+      wordRefs?: Array<{ wordId: string; startUs: number; endUs: number; textOverride?: string }>;
+      speaker?: string;
+    };
+    /** Which `.cwstyle` the caption uses, for a styled burn-in. */
+    captionStyleId?: string;
   }>;
 }
 
@@ -211,6 +232,8 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         active: overlaps,
         hasAudio,
         captionText: item.captionSegment?.text,
+        captionStyleId: item.captionStyleId,
+        captionSegment: item.captionSegment,
       };
     })
     .filter((item) => item.active);

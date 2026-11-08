@@ -218,6 +218,19 @@ export interface EncoderInputs {
   title: string;
   /** What this ffmpeg build understands. Defaults to the legacy spelling. */
   capabilities?: EncoderCapabilities;
+  /**
+   * Path to a generated ASS script to burn in (SPEC 14 §4.3). Omit when captions
+   * are not being burned, or when the composition has none.
+   *
+   * Pass a **relative** path: ffmpeg parses the filtergraph twice, so an absolute
+   * Windows path (`C:\\Users\\…`) needs its colon and backslashes escaped to
+   * survive both passes, and the escaping interacts differently with quoting and
+   * with the `ass` filter's own option parser. Every spelling that looked right
+   * either lost the drive letter or failed with "Unable to parse option value".
+   * A bare filename in the encoder's working directory has neither character and
+   * therefore nothing to escape.
+   */
+  subtitlePath?: string;
 }
 
 /**
@@ -248,6 +261,11 @@ export function buildEncoderArgs(inputs: EncoderInputs): string[] {
   args.push('-map', '0:v:0');
   if (plan.includeAudio && inputs.audioInput) args.push('-map', '1:a:0');
 
+  // Burned-in captions run before the encoder sees a frame, so the encoder's rate
+  // control is measured on the final picture rather than on footage that gains
+  // text afterwards (SPEC 14 §4.3).
+  if (inputs.subtitlePath) args.push('-vf', subtitleFilter(inputs.subtitlePath));
+
   args.push('-c:v', encoder.codec, ...videoQualityArgs(plan, encoder));
 
   // Constant-frame-rate output on a fixed grid: no motion interpolation.
@@ -265,6 +283,23 @@ export function buildEncoderArgs(inputs: EncoderInputs): string[] {
   args.push('-t', plan.durationSeconds.toFixed(6));
   args.push('-y', inputs.outputPath);
   return args;
+}
+
+/**
+ * The `ass` filter for a subtitle filename.
+ *
+ * Deliberately not an escaper. A relative path with no colon and no backslash needs
+ * no quoting at all, and every escaping scheme for an absolute Windows path ran into
+ * a different failure against a real ffmpeg: one lost the drive letter, two left the
+ * `ass` filter reading `ird/c.ass` as an image size. Refusing what cannot be
+ * expressed is better than emitting a filtergraph that silently produces an export
+ * with no captions, so this throws.
+ */
+export function subtitleFilter(subtitlePath: string): string {
+  if (/[:\\]/.test(subtitlePath) || subtitlePath.startsWith('/')) {
+    throw new Error(`The subtitle path must be relative and contain no colon: ${subtitlePath}`);
+  }
+  return `ass='${subtitlePath}'`;
 }
 
 /**

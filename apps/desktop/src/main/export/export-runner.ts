@@ -12,9 +12,11 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import {
+  assCuesFromPlan,
+  buildAssScript,
   buildEncoderArgs,
   buildExportPlan,
   chooseVideoEncoder,
@@ -31,6 +33,7 @@ import {
   type ValidationReport,
   type VideoEncoderChoice,
 } from '@clipwright/export-core';
+import { BUILT_IN_STYLES, DEFAULT_STYLE_ID, type CaptionStyle } from '@clipwright/caption-styles';
 import {
   CancelledError,
   decodeCheck,
@@ -94,6 +97,17 @@ export interface ExportJobInput {
   title?: string;
   /** Run the slow full decode during validation (default true). */
   fullDecode?: boolean;
+  /**
+   * Styles to burn captions with, keyed by id (SPEC 11 §6). Omit to fall back to
+   * the built-in presets — a composition whose styles were all presets needs
+   * nothing here, and a project-local copy only exists in the project file.
+   */
+  captionStyles?: Readonly<Record<string, CaptionStyle>>;
+  /**
+   * Word text by word id, from the transcript. The caption's refs carry timing but
+   * not text, so without this a karaoke burn-in has nothing to write for each word.
+   */
+  resolveWordText?: (wordId: string) => string | undefined;
 }
 
 export interface ExportJobResult {
@@ -117,6 +131,11 @@ export interface ExportJobResult {
 }
 
 export type ProgressSink = (progress: ExportProgress) => void;
+
+/** The ten presets, keyed by id — the style map used when none was supplied. */
+function builtInStyleMap(): Record<string, CaptionStyle> {
+  return Object.fromEntries(BUILT_IN_STYLES.map((style) => [style.id, style]));
+}
 
 /** Re-exported so callers of this module do not need the runner directly. */
 export { CancelledError } from './ffmpeg-runner.js';
@@ -199,6 +218,44 @@ export async function runExportJob(
     report({ status: 'rendering', percent: 0, message: 'Preparing' });
     await mkdir(dirname(partialPath), { recursive: true });
     await rm(partialPath, { force: true });
+
+    // ---- Burn-in script, written before the encoder starts.
+    //
+    // The filename is fixed and relative on purpose: ffmpeg's `ass` filter cannot
+    // take an absolute Windows path without escaping that broke in every spelling
+    // I tried against a real binary, and the encoder runs with `cwd` set to this
+    // directory. A caption file that cannot be written is a warning, not a failure
+    // — losing the whole export because the captions failed would be worse than
+    // losing the captions.
+    let subtitleFilename: string | undefined;
+    const captionWarnings: string[] = [];
+    if (plan.burnCaptions) {
+      const cues = assCuesFromPlan(plan, input.resolveWordText);
+      if (cues.length > 0) {
+        subtitleFilename = 'captions.ass';
+        try {
+          const styleMap = input.captionStyles ?? builtInStyleMap();
+          await writeFile(
+            join(dirname(partialPath), subtitleFilename),
+            buildAssScript(cues, {
+              width: plan.width,
+              height: plan.height,
+              styles: styleMap,
+              defaultStyleId: DEFAULT_STYLE_ID,
+            }),
+            'utf8',
+          );
+          write(`burning ${cues.length} caption${cues.length === 1 ? '' : 's'} in as ASS`);
+        } catch (err) {
+          subtitleFilename = undefined;
+          const reason = err instanceof Error ? err.message : String(err);
+          captionWarnings.push(`Captions could not be burnt in: ${reason}`);
+          write(`caption script failed: ${reason}`);
+        }
+      } else {
+        write('burn captions was requested but the composition has no captions');
+      }
+    }
     write(`plan ${plan.id} ${plan.width}x${plan.height}@${plan.fps} ${plan.totalFrames} frames, encoder ${encoder.codec}`);
 
     // ---- Prepare the frame source and capability detection.
@@ -221,8 +278,15 @@ export async function runExportJob(
       encoder,
       title: input.title ?? basenameWithoutExtension(input.outputPath),
       capabilities,
+      subtitlePath: subtitleFilename,
     });
-    const encoderProcess = spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'] });
+    // The encoder runs *in* the output directory: that is what makes the subtitle
+    // filename relative, and relative is what keeps the `ass` filter's argument
+    // free of the colon and backslash that broke it (see `subtitleFilter`).
+    const encoderProcess = spawn(ffmpegPath(), args, {
+      stdio: ['pipe', 'ignore', 'pipe'],
+      cwd: dirname(partialPath),
+    });
     let encoderStderr = '';
     encoderProcess.stderr.setEncoding('utf8');
     encoderProcess.stderr.on('data', (chunk: string) => {
