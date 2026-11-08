@@ -38,18 +38,21 @@ This document tracks architectural scope boundaries and honest limitations per `
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
-6. **The canvas supports moving, cropping and rotating; scale and the anchor crosshair
-   are still numeric.** Dragging a selected clip's picture moves it, dragging one of
-   its edges crops it, and the handle above it rotates about the anchor; each is one
-   undo step on release, the preview follows the pointer before anything is written,
-   and `Esc` abandons a drag without touching the undo stack. The *anchor* is a real
-   property — `itemGeometry` resolves it into the offset, so rotation pivots where the
-   user says rather than always at the centre, and it can be keyed like any other
-   property — but it is set by number in the inspector rather than by dragging a
-   crosshair on the canvas (SPEC 10 §8's *Show anchor* mode), and the hook already
-   supports that gesture (`anchor` mode); what is missing is the crosshair to start it
-   with. Scale has no corner or edge handle, so it stays a typed number. Nor is there
-   `Shift` for 15° rotation snaps — the handle rotates freely.
+6. **The canvas supports moving, cropping, rotating and the anchor crosshair; scale
+   and the `Show anchor` toggle are missing.** Dragging a selected clip's picture
+   moves it, dragging one of its edges crops it, the handle above it rotates about the
+   anchor, and dragging the crosshair moves the pivot without moving the picture; each
+   is one undo step on release, the preview follows the pointer before anything is
+   written, and `Esc` abandons a drag without touching the undo stack. Aiming the
+   crosshair carries the pointer back through the picture's own rotation and scale,
+   because a 90° turn swaps the bounding box's axes and box arithmetic silently puts
+   the crosshair in the wrong place.
+
+   Still missing: **scale has no corner or edge handle**, so it stays a typed number;
+   there is no **`Shift`** for 15° rotation snaps or 0/90/180/270, so the handle turns
+   freely; and the crosshair is always visible on the selected clip rather than
+   behind SPEC 10 §8's *Show anchor* toggle (`A`), which also means there is no way to
+   put it away.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
    them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
    snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for

@@ -233,3 +233,58 @@ export function rotatedBy(start: number, delta: number): number {
   while (next < MIN_ROTATION) next += 360;
   return next;
 }
+
+/**
+ * Where a pointer lands as a fraction of the picture, accounting for its transform.
+ *
+ * The anchor crosshair lives *inside* the transformed picture element, so a point
+ * the user aims at has to be carried back through the rotation and scale to reach
+ * the picture's own coordinates. Measuring against the axis-aligned bounding box
+ * instead is only correct while the clip is unrotated and unscaled: a 90° turn swaps
+ * the box's axes, and a 2× scale compresses every fraction toward the centre. Both
+ * put the crosshair somewhere the user did not point at, silently.
+ *
+ * The inverse is well-defined because CSS applies `scale` and `rotate` about the
+ * element's centre, so the centre is the one point the transform leaves alone:
+ *
+ *         local = centre + S⁻¹ · R⁻¹ · (pointer − centre)
+ *
+ * `size` is the element's *untransformed* layout size, not its bounding box.
+ */
+export function pointerToPictureFraction(
+  pointer: { x: number; y: number },
+  frame: {
+    /** The element's transformed bounding box, in client coordinates. */
+    box: { left: number; top: number; width: number; height: number };
+    /** The element's untransformed layout size, in CSS pixels. */
+    size: { width: number; height: number };
+    rotation: number;
+    scaleX: number;
+    scaleY: number;
+  },
+): { x: number; y: number } {
+  // Scale and rotate are both about the centre, so the centre of the bounding box is
+  // the centre of the element — before and after the transform alike.
+  const centreX = frame.box.left + frame.box.width / 2;
+  const centreY = frame.box.top + frame.box.height / 2;
+  const dx = pointer.x - centreX;
+  const dy = pointer.y - centreY;
+
+  const radians = (-frame.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  // R⁻¹ first, then S⁻¹: the forward order is scale then rotate, so undoing it is
+  // unrotate then unscale.
+  const unrotatedX = cos * dx - sin * dy;
+  const unrotatedY = sin * dx + cos * dy;
+  const localX = unrotatedX / (frame.scaleX || 1);
+  const localY = unrotatedY / (frame.scaleY || 1);
+
+  // Back into the element's own box, whose top-left is half its size from the centre.
+  const fractionX = (localX + frame.size.width / 2) / (frame.size.width || 1);
+  const fractionY = (localY + frame.size.height / 2) / (frame.size.height || 1);
+  return {
+    x: Math.min(1, Math.max(0, fractionX)),
+    y: Math.min(1, Math.max(0, fractionY)),
+  };
+}

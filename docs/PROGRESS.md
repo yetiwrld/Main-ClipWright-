@@ -76,9 +76,9 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-a scale handle, the anchor crosshair and rotation snapping, the playback clock is
+a scale handle, rotation snapping and a `Show anchor` toggle, the playback clock is
 not audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
-slow). Canvas drag editing *is* built — move, crop and rotate — dragging a selected clip moves it, dragging an edge crops it — and so are
+slow). Canvas drag editing *is* built — move, crop, rotate and the anchor crosshair — dragging a selected clip moves it, dragging an edge crops it — and so are
 the keyframe inspector and the curve editor. Numeric editing of opacity, level,
 pan, speed, crop, scale, rotation and flip works, is undoable, and — since the
 preview and the export both apply the same geometry — is visible where it matters:
@@ -138,10 +138,11 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — a scale handle, a draggable anchor crosshair, `Shift` for
-15° rotation snaps, and proxy playback. Canvas drag editing is largely there: a
-selected clip's picture can be dragged to move it, its edges dragged to crop it, and
-the handle above it dragged to rotate it about the anchor. Every gesture converts
+**1. Finish Phase 4 ⚠️** — a scale handle, `Shift` for 15° rotation snaps, a
+`Show anchor` toggle, and proxy playback. Canvas drag editing is largely there: a
+selected clip's picture can be dragged to move it, its edges dragged to crop it, the
+handle above it dragged to rotate it about the anchor, and the crosshair dragged to
+move the pivot without moving the picture. Every gesture converts
 pixels into canvas fractions so it means the same at any preview size, commits once
 on release so the whole drag is one undo step, and `Esc` abandons it without
 touching the undo stack. The anchor point is real too — rotation pivots where the

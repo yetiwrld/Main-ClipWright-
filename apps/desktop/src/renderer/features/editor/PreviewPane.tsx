@@ -613,6 +613,12 @@ export function PreviewPane({
                       anchorX: live?.anchorX ?? item.transform.anchorX ?? 0.5,
                       anchorY: live?.anchorY ?? item.transform.anchorY ?? 0.5,
                       crop: live?.crop ?? item.crop,
+                      // Move and crop measure against the drawn box, so the layer's own
+                      // size is what they want; the untransformed size is only used to
+                      // aim the anchor crosshair.
+                      size: { width: box.width, height: box.height },
+                      scaleX: geometry.scaleX,
+                      scaleY: geometry.scaleY,
                       rect: { x: 0, y: 0, width: box.width, height: box.height },
                     },
                     canvasRef.current,
@@ -635,6 +641,12 @@ export function PreviewPane({
                       anchorX: live?.anchorX ?? item.transform.anchorX,
                       anchorY: live?.anchorY ?? item.transform.anchorY,
                       crop: live?.crop ?? item.crop,
+                      // A rotate needs the pivot, not the pointer, so the size fields
+                      // are unused here; the layer's own box fills them and the gesture
+                      // only reads `rect`.
+                      size: { width: box.width, height: box.height },
+                      scaleX: geometry.scaleX,
+                      scaleY: geometry.scaleY,
                       // The pivot has to be measured against the *picture's* box, so
                       // the handle turns about the crosshair rather than the frame.
                       rect: fitBox
@@ -643,6 +655,41 @@ export function PreviewPane({
                     },
                     canvasRef.current,
                     'rotate',
+                  );
+                }}
+                onAnchorStart={(event) => {
+                  if (!editable) return;
+                  const box = event.currentTarget.getBoundingClientRect();
+                  const fit = document.querySelector<HTMLElement>(
+                    `[data-layer-id="${layer.id}"] [data-testid="preview-item-fit"]`,
+                  );
+                  const fitBox = fit?.getBoundingClientRect();
+                  drag.begin(
+                    event,
+                    {
+                      itemId: layer.id,
+                      x: live?.x ?? item.transform.x,
+                      y: live?.y ?? item.transform.y,
+                      rotation: live?.rotation ?? item.transform.rotation ?? 0,
+                      anchorX: live?.anchorX ?? item.transform.anchorX ?? 0.5,
+                      anchorY: live?.anchorY ?? item.transform.anchorY ?? 0.5,
+                      crop: live?.crop ?? item.crop,
+                      // The element's *layout* size, which is what a transform is applied to; the
+                      // bounding box would already include the rotation and scale.
+                      size: fit ? { width: fit.offsetWidth, height: fit.offsetHeight } : { width: box.width, height: box.height },
+                      scaleX: geometry.scaleX,
+                      scaleY: geometry.scaleY,
+                      rect: fitBox
+                        ? {
+                            x: fitBox.left - box.left,
+                            y: fitBox.top - box.top,
+                            width: fitBox.width,
+                            height: fitBox.height,
+                          }
+                        : { x: 0, y: 0, width: box.width, height: box.height },
+                    },
+                    canvasRef.current,
+                    'anchor',
                   );
                 }}
                 onPointerMove={(event) => {
@@ -914,6 +961,7 @@ const PreviewLayer = memo(function PreviewLayer({
   onPointerMove,
   onPointerUp,
   onRotateStart,
+  onAnchorStart,
 }: {
   item: TimelineState['items'][string];
   geometry: ItemGeometry;
@@ -924,6 +972,8 @@ const PreviewLayer = memo(function PreviewLayer({
   onPointerDown?: (event: React.PointerEvent) => void;
   /** Starts a rotate gesture from the handle above the picture. */
   onRotateStart?: (event: React.PointerEvent) => void;
+  /** Starts an anchor drag from the crosshair. */
+  onAnchorStart?: (event: React.PointerEvent) => void;
   onPointerMove?: (event: React.PointerEvent) => void;
   onPointerUp?: (event: React.PointerEvent) => void;
   opacity: number;
@@ -984,6 +1034,19 @@ const PreviewLayer = memo(function PreviewLayer({
     if (playing) void video.play().catch(onPlayRejected);
     else video.pause();
   }, [playing, onPlayRejected]);
+
+  /*
+    The crosshair's position as a fraction of the *drawn* picture.
+
+    `geometry.anchorX/Y` are item-relative 0–1 — the same space the crosshair is laid
+    out in — so no conversion is needed here beyond noting that the picture is what
+    they are relative to. Kept in one object so the JSX below reads as one position
+    rather than two lookups that could drift apart.
+  */
+  const anchorFraction = {
+    x: geometry.anchorX ?? 0.5,
+    y: geometry.anchorY ?? 0.5,
+  };
 
   if (!src) return null;
 
@@ -1093,6 +1156,63 @@ const PreviewLayer = memo(function PreviewLayer({
               Corner grips, drawn only as a cue — the hit test is along the whole edge
               (`handleAt`), so a user who grabs slightly off a corner still crops.
             */}
+            {/*
+              The anchor crosshair (SPEC 10 §8.2's *Show anchor*, `A`). It sits at the
+              pivot as a fraction of the picture, and dragging it moves the pivot
+              *without moving the picture* — the engine compensates, which `itemGeometry`
+              already does by folding the anchor into the offset.
+
+              Unlike the edge grips it must receive the pointer, so it is the one child
+              of this overlay that is not `pointerEvents: none`.
+            */}
+            <div
+              data-testid="preview-anchor"
+              aria-label="Drag the anchor point"
+              onPointerDown={(event) => {
+                // Same reason as the rotate handle: without stopping here the layer
+                // beneath would start a move and the picture would slide while the
+                // crosshair was being placed.
+                event.stopPropagation();
+                event.preventDefault();
+                onAnchorStart?.(event);
+              }}
+              style={{
+                position: 'absolute',
+                left: `${(anchorFraction.x ?? 0.5) * 100}%`,
+                top: `${(anchorFraction.y ?? 0.5) * 100}%`,
+                width: 16,
+                height: 16,
+                transform: 'translate(-50%, -50%)',
+                cursor: 'move',
+                pointerEvents: 'auto',
+                zIndex: 3,
+              }}
+            >
+              {/* A crosshair drawn as two bars, so it reads as a pivot rather than as
+                  another round handle. */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: '50%',
+                  height: 1,
+                  marginTop: -0.5,
+                  background: 'var(--brand-amber)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: '50%',
+                  width: 1,
+                  marginLeft: -0.5,
+                  background: 'var(--brand-amber)',
+                }}
+              />
+            </div>
             {(['left', 'right', 'top', 'bottom'] as const).map((edge) => (
               <div
                 key={edge}

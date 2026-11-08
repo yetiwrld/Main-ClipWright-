@@ -16,6 +16,7 @@ import {
   handleAt,
   movedOffset,
   pixelsToFraction,
+  pointerToPictureFraction,
   rotatedBy,
 } from '../features/editor/canvas-drag.js';
 
@@ -287,5 +288,91 @@ describe('the rotate handle (SPEC 10 §8.2)', () => {
         expect(next).toBeLessThanOrEqual(MAX_ROTATION);
       }
     }
+  });
+});
+
+describe('aiming the anchor crosshair at a transformed picture', () => {
+  const size = { width: 400, height: 600 };
+  /** Unrotated, unscaled: the bounding box is the element. */
+  const plain = { box: { left: 0, top: 0, width: 400, height: 600 }, size, rotation: 0, scaleX: 1, scaleY: 1 };
+
+  it('is the identity when the picture is untouched', () => {
+    // The case that makes every other one trustworthy: no transform, so aiming at a
+    // point gives that point.
+    expect(pointerToPictureFraction({ x: 200, y: 300 }, plain)).toEqual({ x: 0.5, y: 0.5 });
+    expect(pointerToPictureFraction({ x: 0, y: 0 }, plain)).toEqual({ x: 0, y: 0 });
+    expect(pointerToPictureFraction({ x: 400, y: 600 }, plain)).toEqual({ x: 1, y: 1 });
+  });
+
+  it('undoes a rotation rather than measuring the bounding box', () => {
+    /*
+      Measuring the axis-aligned box is the bug this replaces: a 90° turn swaps the
+      box's axes, so a fraction taken from it is measured against the wrong side and
+      a crosshair lands where the user did not point.
+
+      A 400×600 element turned 90° has a 600×400 box on the same centre. With forward
+      `rotate(+90deg)` being clockwise, a local point at (+right, 0) appears *below*
+      the centre on screen — so pointing above the centre must invert to the picture's
+      LEFT edge.
+    */
+    const rotated = {
+      box: { left: -100, top: 100, width: 600, height: 400 },
+      size,
+      rotation: 90,
+      scaleX: 1,
+      scaleY: 1,
+    };
+    const above = pointerToPictureFraction({ x: 200, y: 100 }, rotated);
+    expect(above.x).toBeCloseTo(0, 6);
+    expect(above.y).toBeCloseTo(0.5, 6);
+
+    // And the picture's top edge, which now faces right, is to the right on screen.
+    const rightOfCentre = pointerToPictureFraction({ x: 500, y: 300 }, rotated);
+    expect(rightOfCentre.x).toBeCloseTo(0.5, 6);
+    expect(rightOfCentre.y).toBeCloseTo(0, 6);
+  });
+
+  it('undoes a scale so the fraction lands where the picture is drawn', () => {
+    /*
+      A regression guard rather than a discriminator, and worth saying so: measuring
+      the bounding box happens to survive pure scaling, because scaling about the
+      centre and then measuring the scaled box is the same linear map as measuring and
+      then scaling. Only *rotation* breaks box arithmetic, since the box stops being
+      axis-aligned with the picture — the test below is the one that catches that.
+
+      What this holds is the arithmetic's shape: a sign error or an off-by-the-centre
+      mistake in the unscale step fails here and would not fail anywhere else.
+    */
+    const scaled = {
+      box: { left: -200, top: -300, width: 800, height: 1200 },
+      size,
+      rotation: 0,
+      scaleX: 2,
+      scaleY: 2,
+    };
+    expect(pointerToPictureFraction({ x: -200, y: 300 }, scaled)).toEqual({ x: 0, y: 0.5 });
+    expect(pointerToPictureFraction({ x: 600, y: 300 }, scaled)).toEqual({ x: 1, y: 0.5 });
+  });
+
+  it('clamps a pointer that wandered off the picture', () => {
+    // Position is stored as 0–1 of the item; a value outside that is not a place on
+    // the picture, and a crosshair parked off its own edge cannot be grabbed back.
+    const off = pointerToPictureFraction({ x: 5000, y: -5000 }, plain);
+    expect(off).toEqual({ x: 1, y: 0 });
+  });
+
+  it('survives a zero-sized element', () => {
+    // The panel can measure 0×0 for a frame on mount; dividing by it gives NaN, and a
+    // NaN anchor silently blanks the layer.
+    const collapsed = {
+      box: { left: 0, top: 0, width: 0, height: 0 },
+      size: { width: 0, height: 0 },
+      rotation: 0,
+      scaleX: 0,
+      scaleY: 0,
+    };
+    const result = pointerToPictureFraction({ x: 10, y: 10 }, collapsed);
+    expect(Number.isFinite(result.x)).toBe(true);
+    expect(Number.isFinite(result.y)).toBe(true);
   });
 });

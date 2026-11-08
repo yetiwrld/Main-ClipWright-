@@ -787,3 +787,151 @@ describe('the rotate handle and Esc (SPEC 10 §8.2, §8.3)', () => {
     fireEvent(layer, pointer('pointerup', 280, 300));
   });
 });
+
+describe('the anchor crosshair (SPEC 10 §8.2)', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  /**
+   * The canvas and the picture both measure 400×600 at the origin.
+   *
+   * The crosshair is aimed in reverse through the picture's transform, so the test
+   * needs a real layout size (`offsetWidth`/`offsetHeight`) as well as the bounding
+   * box — jsdom reports 0 for both unless they are stubbed.
+   */
+  function stubLayout() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
+    for (const [prop, value] of [['offsetWidth', 400], ['offsetHeight', 600]] as const) {
+      Object.defineProperty(HTMLElement.prototype, prop, {
+        configurable: true,
+        get: () => value,
+      });
+    }
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('sits at the picture’s centre by default', () => {
+    // The default anchor is 0.5,0.5, so the crosshair starts in the middle. A missing
+    // anchor must read as the centre rather than as the corner, which is what an
+    // omitted field would give if the default were not applied.
+    stubLayout();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline()} />);
+    const crosshair = screen.getByTestId('preview-anchor');
+    expect(crosshair.style.left).toBe('50%');
+    expect(crosshair.style.top).toBe('50%');
+  });
+
+  it('appears only on the selected clip', () => {
+    stubLayout();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline(['x'])} />);
+    expect(screen.queryByTestId('preview-anchor')).toBeNull();
+  });
+
+  it('moves the pivot to where the pointer is, and nothing else', () => {
+    /*
+      SPEC 10 §8.2: "Drag to move the anchor without moving the item visually (the
+      engine compensates position)". So the gesture writes only the two anchor
+      fractions — a position write would slide the clip, which is the one thing the
+      interaction promises not to do.
+
+      Aimed a quarter of the way across and a quarter down: 100,150 of a 400×600
+      picture is 0.25,0.25.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const crosshair = screen.getByTestId('preview-anchor');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(crosshair, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 100, 150));
+    fireEvent(layer, pointer('pointerup', 100, 150));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
+      transform: { anchorX: expect.closeTo(0.25, 4), anchorY: expect.closeTo(0.25, 4) },
+    });
+    for (const call of (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls) {
+      const patch = call[1] as { transform?: Record<string, unknown> };
+      expect(patch.transform && 'x' in patch.transform, 'the anchor drag must not move the clip').toBe(
+        false,
+      );
+    }
+  });
+
+  it('writes both anchor axes together', () => {
+    // The pivot is one point: a half-written pair is a pivot the user never placed,
+    // and the two axes have no meaning independently.
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const crosshair = screen.getByTestId('preview-anchor');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(crosshair, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 100, 150));
+    fireEvent(layer, pointer('pointerup', 100, 150));
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, unknown> };
+    expect(Object.keys(patch.transform).sort()).toEqual(['anchorX', 'anchorY']);
+  });
+
+  it('commits only the anchor, never a position, when the drag ends', () => {
+    /*
+      The claim that matters is about the *commit*, not the in-flight state: the end
+      handler is what decides whether a gesture edits one property or two. An earlier
+      version of this test asserted the negative on the preview state instead, and a
+      mutant that also wrote the position into the gesture's preview survived it —
+      because the anchor branch never reads that field. Checking the payload that
+      actually reaches the document is the only version that bites.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const crosshair = screen.getByTestId('preview-anchor');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(crosshair, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 100, 150));
+    fireEvent(layer, pointer('pointerup', 100, 150));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledTimes(1);
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, unknown> };
+    expect(Object.keys(patch.transform).sort(), 'one gesture, one property pair').toEqual([
+      'anchorX',
+      'anchorY',
+    ]);
+  });
+
+  it('does not move the picture while the crosshair is being placed', () => {
+    /*
+      SPEC 10 §8.2 promises the item does not move visually. The preview state is what
+      the picture is drawn from, so if the gesture wrote a position into it the clip
+      would slide under the pointer while the user was aiming — the picture would
+      visibly jump away from the crosshair they were dragging.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const crosshair = screen.getByTestId('preview-anchor');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(crosshair, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 100, 150));
+    expect(layer.style.transform).not.toMatch(/translate\((?!0%, 0%)/);
+  });
+});

@@ -25,6 +25,7 @@ import {
   handleAt,
   movedOffset,
   pixelsToFraction,
+  pointerToPictureFraction,
   rotatedBy,
   type CropEdge,
   type CropEdges,
@@ -42,6 +43,17 @@ export interface CanvasDragTarget {
   crop: CropEdges;
   /** The picture's drawn rectangle within the canvas, in CSS pixels. */
   rect: { x: number; y: number; width: number; height: number };
+  /**
+   * The picture's *untransformed* layout size, in CSS pixels.
+   *
+   * Needed to aim the anchor crosshair: `rect` is the transformed bounding box, and
+   * inverting a rotation or scale needs the size the element has before either is
+   * applied.
+   */
+  size: { width: number; height: number };
+  /** The transform the picture is drawn with, so a pointer can be carried back. */
+  scaleX: number;
+  scaleY: number;
 }
 
 /** The values a gesture can change, as they stand at any moment during it. */
@@ -244,14 +256,31 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         The fraction is the pointer's position measured inside the *picture's* drawn
         rectangle, which is the space the model stores the anchor in.
       */
-      const rect = current.target.rect;
-      const fractionX = (event.clientX - current.boxLeft - rect.x) / (rect.width || 1);
-      const fractionY = (event.clientY - current.boxTop - rect.y) / (rect.height || 1);
-      current.to = {
-        ...current.to,
-        anchorX: Math.min(1, Math.max(0, fractionX)),
-        anchorY: Math.min(1, Math.max(0, fractionY)),
-      };
+      /*
+        Carried back through the picture's own transform, not measured off its bounding
+        box: a 90° turn swaps the box's axes and a scale compresses every fraction
+        toward the centre, so box arithmetic puts the crosshair where the user did not
+        point — and does so silently, since the drag still "works".
+      */
+      const target = current.target;
+      const fraction = pointerToPictureFraction(
+        { x: event.clientX, y: event.clientY },
+        {
+          box: {
+            left: current.boxLeft + target.rect.x,
+            top: current.boxTop + target.rect.y,
+            width: target.rect.width,
+            height: target.rect.height,
+          },
+          size: target.size,
+          rotation: current.from.rotation,
+          // The gesture's own previewed scale, so a clip scaled mid-animation aims
+          // with the scale it is drawn at rather than the stored one.
+          scaleX: target.scaleX,
+          scaleY: target.scaleY,
+        },
+      );
+      current.to = { ...current.to, anchorX: fraction.x, anchorY: fraction.y };
     } else if (current.mode === 'rotate') {
       // The gesture is the *change* in the pointer's angle about the pivot, so a drag
       // that circles the handle round the clip produces a continuous rotation.
