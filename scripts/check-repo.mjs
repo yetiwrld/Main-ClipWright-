@@ -391,6 +391,48 @@ if (!existsSync(mainOnDisk) && existsSync(join(ROOT, 'apps', 'desktop', 'dist'))
   fail(`apps/desktop/package.json "main" is ${mainEntry}, which the build did not produce.`);
 }
 
+/* ------------------------------------------------------------------ *
+ * 11. Every `uses:` in a workflow must name an action that exists.
+ * ------------------------------------------------------------------ */
+// A pinned action that does not resolve kills the job at "Set up job", before a
+// single step runs — and it does so only in CI, on a branch push, which is the
+// slowest possible feedback loop. That is exactly what happened: two of the four
+// pinned actions in this repository bore SHAs from no commit in their own repo,
+// so `ci.yml` had never once executed and `release.yml` would have failed at its
+// upload step. Nothing local could catch it.
+//
+// This cannot verify a SHA without network access, and check-repo must run
+// offline. What it can check is that each pin is a full 40-character SHA with a
+// version comment — a real SHA is the only thing GitHub will accept, and the
+// comment is what makes the pin reviewable.
+const SHA_PIN = /^[0-9a-f]{40}$/;
+const USES_LINE = /^\s*(?:-\s*)?uses:\s*(\S+)\s*(?:#\s*(\S+))?\s*$/;
+for (const file of workflowFiles) {
+  const lines = readFileSync(join(workflowDir, file), 'utf8').split('\n');
+  lines.forEach((line, index) => {
+    const match = USES_LINE.exec(line);
+    if (match === null) return;
+    const [, ref, comment] = match;
+    // Local composite actions use `./path` and are not pinned.
+    if (ref.startsWith('./')) return;
+    if (!ref.includes('@')) {
+      problems.push(`${file}:${index + 1} uses "${ref}" with no @ref.`);
+      return;
+    }
+    const [action, sha] = ref.split('@');
+    if (!SHA_PIN.test(sha)) {
+      problems.push(
+        `${file}:${index + 1} pins ${action} to "${sha}", which is not a full 40-character commit SHA.`,
+      );
+    }
+    if (comment === undefined) {
+      problems.push(
+        `${file}:${index + 1} pins ${action} without a version comment; write "# v4.2.2" so the pin can be reviewed.`,
+      );
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ */
 
 if (problems.length > 0) {

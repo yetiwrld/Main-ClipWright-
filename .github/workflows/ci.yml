@@ -46,7 +46,7 @@ jobs:
           node -e "const p=require('./apps/desktop/package.json');const fs=require('fs');const m=p.main;if(!fs.existsSync('apps/desktop/'+m)){console.error('Missing main entry: '+m);process.exit(1)}console.log('main entry present: '+m)"
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1f49c2b8b1c1e1b0b7d # v2.3.6
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: false
