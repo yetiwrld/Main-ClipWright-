@@ -20,10 +20,11 @@ the work is committed and tagged.
 | **2 — Start flow & transcription** | Start screen, file import, URL download (yt-dlp), ffprobe inspection, proxies, Whisper transcription, transcript editor | ✅ Done, tagged `phase-2-complete` |
 | **3 — AI & moments** | AI provider settings, Ollama, moment detection and scoring, moments screen, clip creation | ✅ Done, tagged `phase-3-complete` |
 | **4 — Editor core** | Editor layout, media library, timeline, playhead, preview, undo/redo, autosave, recovery | ⚠️ Mostly done, not tagged |
-| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ❌ Not built |
+| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ⚠️ Mostly done: captions, keyframes, effects, transitions and audio envelope built; text/shape items, brand kits, equaliser, metering and voiceover not built |
 | **6 — Export, updates, packaging** | Export engine, queue, updates, installer, GitHub release, docs | ⚠️ Built, one big gap (see below) |
 
-So: **three phases fully done, two partial, one not started.**
+So: **three phases fully done (1, 2, 3) and three partial (4, 5, 6)** — every phase
+except the last is substantially built, and none of 4, 5 or 6 is "not started".
 
 ---
 
@@ -66,14 +67,20 @@ export path:
 
 Still open in Phase 5: the style editor's colour pickers and anchor grid (colours
 are entered as hex today, and position is a slider rather than drag-on-canvas),
-text and shape items, brand kits, the audio tools beyond the envelope (equaliser,
-metering UI, voiceover recorder), and keyframes/effects/transitions in the
-inspector.
+text and shape items (the schema allows the item types; nothing draws them), brand
+kits (the schema has the field; no UI writes it), and the audio tools beyond the
+envelope (equaliser, metering UI, voiceover recorder). The inspector's keyframes,
+effects and transitions are **done** — the §2.4 diamond and auto-keyframing on
+every animatable row, the §2.6 curve editor, the nine required effects with
+reorder/copy/paste and adjustment layers, and the transition controls with every
+type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-canvas editing (drag handles, crop rectangle, anchor grid) and the keyframe editor
-are missing, the playback clock is not audio-mastered, and the preview does not
-switch to proxies (so scrubbing 4K is slow). Numeric editing of opacity, level,
+the anchor grid (so rotation always turns about the centre), scale and rotate
+handles on the canvas, the playback clock is not audio-mastered, and the preview
+does not switch to proxies (so scrubbing 4K is slow). Canvas drag editing *is*
+built — dragging a selected clip moves it, dragging an edge crops it — and so are
+the keyframe inspector and the curve editor. Numeric editing of opacity, level,
 pan, speed, crop, scale, rotation and flip works, is undoable, and — since the
 preview and the export both apply the same geometry — is visible where it matters:
 on screen and in the file.
