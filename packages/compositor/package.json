@@ -12,6 +12,7 @@
   "dependencies": {
     "@clipwright/caption-styles": "workspace:*",
     "@clipwright/project-schema": "workspace:*",
-    "@clipwright/timeline-engine": "workspace:*"
+    "@clipwright/timeline-engine": "workspace:*",
+    "@clipwright/audio-core": "workspace:*"
   }
 }

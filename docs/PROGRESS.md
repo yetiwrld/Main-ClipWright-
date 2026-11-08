@@ -82,8 +82,10 @@ on screen and in the file.
 and each clip's static crop, scale, rotation, flip and offset are applied to its
 decoded frames; the rest of the video compositor is not. Each video/image item is
 decoded separately and the topmost visible item is written out, so effects,
-transitions, keyframed transforms and blend modes are **not rendered into the
-exported file**.
+transitions and blend modes are **not rendered into the exported file**.
+Keyframed geometry *is* rendered, but as steps: ffmpeg 4.1 evaluates `scale`
+and `crop` once, so an animated item is split into one segment per keyframe and
+each segment is baked at its start value.
 This is stated in the export dialog before the user presses Export.
 
 ---
@@ -119,7 +121,9 @@ Also found and fixed two real security holes along the way:
 ## What is left, in order
 
 **1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid),
-the keyframe editor, and proxy playback. The inspector's numeric controls, including
+the keyframe **editor** (the evaluator exists and both the preview and the export
+read keyframes now; what is missing is the curve editor that writes them), and
+proxy playback. The inspector's numeric controls, including
 the volume slider that used to be a read-only placeholder, now work, and the values
 they write are drawn by the preview and applied by the export.
 

@@ -104,3 +104,38 @@ describe('PreviewPane geometry', () => {
     expect(transformOf('preview-item')).toContain('translate(-40%');
   });
 });
+
+describe('PreviewPane keyframes', () => {
+  const keys = (pairs: Array<[number, number]>) =>
+    pairs.map(([timeUs, value]) => ({ timeUs, value, interpolation: 'linear' as const }));
+
+  it('draws the keyframed value at the playhead, not the static one', () => {
+    const state = makeState({
+      transform: { x: 0 },
+      keyframes: { 'transform.x': keys([[0, 0], [1_000_000, 0.5]]) },
+    });
+    playheadStore.set(500_000);
+    render(<PreviewPane state={state} fps={30} />);
+    expect(transformOf('preview-item')).toContain('translate(25%');
+  });
+
+  it('animates a scale', () => {
+    const state = makeState({
+      keyframes: { 'transform.scaleX': keys([[0, 1], [1_000_000, 2]]), 'transform.scaleY': keys([[0, 1], [1_000_000, 2]]) },
+    });
+    playheadStore.set(500_000);
+    render(<PreviewPane state={state} fps={30} />);
+    expect(transformOf('preview-item-fit')).toContain('scale(1.5, 1.5)');
+  });
+
+  it('leaves an unanimated property alone while another animates', () => {
+    const state = makeState({
+      transform: { rotation: 45 },
+      keyframes: { 'transform.x': keys([[0, 0], [1_000_000, 1]]) },
+    });
+    playheadStore.set(0);
+    render(<PreviewPane state={state} fps={30} />);
+    expect(transformOf('preview-item-fit')).toContain('rotate(45deg)');
+    expect(transformOf('preview-item')).toContain('translate(0%');
+  });
+});

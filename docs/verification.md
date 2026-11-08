@@ -16,17 +16,17 @@ pnpm test:unit
 ```
 
 ```
-Test Files  66 passed (66)
-     Tests  1495 passed (1495)
+Test Files  68 passed (68)
+     Tests  1552 passed (1552)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
-| `packages/export-core` | 296 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, the ASS caption script (field order, colour byte order, anchor mapping, karaoke timing, range shifting), and the decode filter chain: crop, scale, rotation, offset and flip, with every stage kept even-sized and landing on the exact output size |
-| `packages/compositor` | 82 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios), the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop, and item geometry: crop rectangles, per-axis and legacy scale, flips, offsets |
+| `packages/export-core` | 315 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, the ASS caption script (field order, colour byte order, anchor mapping, karaoke timing, range shifting), and the decode filter chain: crop, scale, rotation, offset and flip, with every stage kept even-sized and landing on the exact output size, and the keyframe segmenter: boundaries, merging equal neighbours, the segment cap |
+| `packages/compositor` | 114 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios), the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop, and item geometry (crop rectangles, per-axis and legacy scale, flips, offsets) and the keyframe evaluator: holding outside the key range, hold segments, cubic-bezier and preset easing, duplicate timestamps |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
-| `apps/desktop/src/main` | 275 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
-| `apps/desktop/src/renderer` | 293 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector, preview geometry (jsdom) |
+| `apps/desktop/src/main` | 278 | Export service, queue, ffmpeg orchestration, audio mixing, keyframed segmentation over real footage, karaoke word resolution, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/renderer` | 296 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector, preview geometry (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 144 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation (§09 §17) |
@@ -34,7 +34,7 @@ Test Files  66 passed (66)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1495** | 66 files |
+| **Total** | **1552** | 68 files |
 
 ### Tests that run real processes
 

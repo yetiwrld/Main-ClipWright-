@@ -105,3 +105,85 @@ describe('itemGeometry', () => {
     expect(itemGeometry(input)).not.toBe(itemGeometry(input));
   });
 });
+
+/**
+ * SPEC 12 §2.1 — a keyframed property has to reach the geometry.
+ *
+ * The distinction these tests draw is between "animated" and "not animated" per
+ * *property*, not per item: a clip with a keyframed move and a static scale is the
+ * normal case, and an implementation that decided once, per item, would freeze one
+ * of them at its base value.
+ */
+describe('itemGeometry with keyframes', () => {
+  const keys = (pairs: Array<[number, number]>) =>
+    pairs.map(([timeUs, value]) => ({ timeUs, value, interpolation: 'linear' as const }));
+
+  it('reads the static values when no time is given', () => {
+    const geometry = itemGeometry({
+      transform: { x: 0.5 },
+      keyframes: { 'transform.x': keys([[0, 0], [1_000_000, 1]]) },
+    });
+    expect(geometry.offsetX).toBe(0.5);
+  });
+
+  it('animates a keyframed offset', () => {
+    const keyframes = { 'transform.x': keys([[0, 0], [1_000_000, 1]]) };
+    expect(itemGeometry({ keyframes, timeUs: 0 }).offsetX).toBe(0);
+    expect(itemGeometry({ keyframes, timeUs: 250_000 }).offsetX).toBe(0.25);
+    expect(itemGeometry({ keyframes, timeUs: 1_000_000 }).offsetX).toBe(1);
+  });
+
+  it('animates scale, rotation and crop together', () => {
+    const keyframes = {
+      'transform.scaleX': keys([[0, 1], [1_000_000, 2]]),
+      'transform.scaleY': keys([[0, 1], [1_000_000, 2]]),
+      'transform.rotation': keys([[0, 0], [1_000_000, 90]]),
+      'crop.left': keys([[0, 0], [1_000_000, 0.4]]),
+    };
+    const geometry = itemGeometry({ keyframes, timeUs: 500_000 });
+    expect(geometry.scaleX).toBe(1.5);
+    expect(geometry.scaleY).toBe(1.5);
+    expect(geometry.rotation).toBe(45);
+    expect(geometry.source.x).toBeCloseTo(0.2, 6);
+    expect(geometry.source.width).toBeCloseTo(0.8, 6);
+  });
+
+  it('leaves a property that is not animated at its static value', () => {
+    // The mix is the point: an animated move must not drag the static scale along.
+    const geometry = itemGeometry({
+      transform: { scaleX: 1.25, scaleY: 1.25 },
+      keyframes: { 'transform.x': keys([[0, 0], [1_000_000, 1]]) },
+      timeUs: 500_000,
+    });
+    expect(geometry.offsetX).toBe(0.5);
+    expect(geometry.scaleX).toBe(1.25);
+  });
+
+  it('prefers the animation over the static value for the same property', () => {
+    const geometry = itemGeometry({
+      transform: { rotation: 90 },
+      keyframes: { 'transform.rotation': keys([[0, 0], [1_000_000, 10]]) },
+      timeUs: 500_000,
+    });
+    expect(geometry.rotation).toBe(5);
+  });
+
+  it('is still identity when nothing is set and no keys exist', () => {
+    expect(itemGeometry({ keyframes: {}, timeUs: 500 }).identity).toBe(true);
+  });
+
+  it('keeps the crop rectangle valid at every instant of an animated crop', () => {
+    // A keyframed crop sweeps through many rectangles; every one has to stay
+    // drawable, or a pan-and-zoom blanks the frame partway through.
+    const keyframes = {
+      'crop.left': keys([[0, 0], [1_000_000, 0.9]]),
+      'crop.right': keys([[0, 0], [1_000_000, 0.9]]),
+    };
+    for (let timeUs = 0; timeUs <= 1_000_000; timeUs += 50_000) {
+      const source = itemGeometry({ keyframes, timeUs }).source;
+      expect(source.width).toBeGreaterThan(0);
+      expect(source.x).toBeGreaterThanOrEqual(0);
+      expect(source.x + source.width).toBeLessThanOrEqual(1.0000001);
+    }
+  });
+});

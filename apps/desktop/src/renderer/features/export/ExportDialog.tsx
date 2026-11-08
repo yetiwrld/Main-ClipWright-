@@ -288,6 +288,10 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       // this the export renders every clip whole and centred however it was
       // cropped, scaled or rotated in the editor (SPEC 10 §8.4–8.6).
       geometry: { crop: item.crop, transform: item.transform },
+      // Keyframes travel to the decoder so an animated item is rendered in segments
+      // (SPEC 12 §2.2). Without them the export freezes the clip at its static
+      // values, which is the one thing a keyframed move must not do.
+      keyframes: item.keyframes,
     });
   }
   return items;

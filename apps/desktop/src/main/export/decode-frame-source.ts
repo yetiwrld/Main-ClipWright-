@@ -22,10 +22,14 @@ import type { Readable } from 'node:stream';
 import { existsSync } from 'node:fs';
 import {
   buildDecodeArgs,
+  buildSegmentedDecodeArgs,
+  geometrySegments,
+  segmentedDecodeChain,
   sourceFilterChain,
   type ExportPlan,
   type PlannedItem,
 } from '@clipwright/export-core';
+import { evaluateProperty, type ItemGeometryInput } from '@clipwright/compositor';
 import { ffmpegPath, CancelledError } from './ffmpeg-runner.js';
 import { expectedFrameBytes, type FrameSource } from './export-runner.js';
 
@@ -89,21 +93,88 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
       return null;
     }
     const sourceInUs = Math.max(0, item.sourceInUs);
-    const filterChain = sourceFilterChain({
-      targetFps: plan.fps,
-      outputWidth: plan.width,
-      outputHeight: plan.height,
-      fit: 'fit',
-      // The item's own crop/scale/rotation, so the decoded frame is the picture the
-      // editor showed rather than the whole source (SPEC 10 §8.4–8.6).
-      geometry: item.geometry,
-    });
-    const args = buildDecodeArgs({
-      sourcePath: mediaPath,
-      inUs: sourceInUs,
+
+    const chainFor = (geometry: ItemGeometryInput) =>
+      sourceFilterChain({
+        targetFps: plan.fps,
+        outputWidth: plan.width,
+        outputHeight: plan.height,
+        fit: 'fit',
+        // The item's own crop/scale/rotation, so the decoded frame is the picture
+        // the editor showed rather than the whole source (SPEC 10 §8.4–8.6).
+        geometry,
+      });
+
+    /**
+     * The geometry the filter chain takes is the *stored* shape (crop edges and
+     * transform fields), not `itemGeometry`'s resolved form — the chain does its own
+     * fitting and needs the fractions. So the animation is sampled through
+     * `evaluateProperty` rather than through `itemGeometry`.
+     */
+    const geometryAt = (timeUs: number): ItemGeometryInput => {
+      const staticGeometry = (item.geometry ?? {}) as ItemGeometryInput;
+      const keys = item.keyframes as
+        | Record<string, Array<{ timeUs: number; value: unknown }>>
+        | undefined;
+      const read = (path: Parameters<typeof evaluateProperty>[1], fallback: number) =>
+        evaluateProperty(keys as Parameters<typeof evaluateProperty>[0], path, timeUs, fallback);
+      return {
+        crop: {
+          left: read('crop.left', staticGeometry.crop?.left ?? 0),
+          top: read('crop.top', staticGeometry.crop?.top ?? 0),
+          right: read('crop.right', staticGeometry.crop?.right ?? 0),
+          bottom: read('crop.bottom', staticGeometry.crop?.bottom ?? 0),
+        },
+        transform: {
+          x: read('transform.x', staticGeometry.transform?.x ?? 0),
+          y: read('transform.y', staticGeometry.transform?.y ?? 0),
+          scaleX: read('transform.scaleX', staticGeometry.transform?.scaleX ?? 1),
+          scaleY: read('transform.scaleY', staticGeometry.transform?.scaleY ?? 1),
+          rotation: read('transform.rotation', staticGeometry.transform?.rotation ?? 0),
+          flipH: staticGeometry.transform?.flipH ?? false,
+          flipV: staticGeometry.transform?.flipV ?? false,
+          // The legacy framing field only applies when the axes are untouched; that
+          // rule lives in `effectiveScale`, and passing it through keeps one
+          // definition of what "scale" means.
+          scale: staticGeometry.transform?.scale,
+        },
+      };
+    };
+
+    // Time-varying geometry cannot be one expression: ffmpeg 4.1 evaluates
+    // `scale`/`crop` once, so an animated item is decoded as several segments with
+    // a constant value each (SPEC 12 §2.2). An item with no keys — the common case
+    // — takes the single-decode path exactly as before.
+    const segments = geometrySegments({
       durationUs: item.durationUs,
-      filterChain,
+      keyframeTimes: animatedTimes(item),
+      geometryAt,
     });
+
+    let args: string[];
+    if (segments.length > 1) {
+      args = buildSegmentedDecodeArgs({
+        sourcePath: mediaPath,
+        inUs: sourceInUs,
+        durationUs: item.durationUs,
+        filterComplex: segmentedDecodeChain({
+          segments,
+          targetFps: plan.fps,
+          sourceInUs: 0,
+          chainFor: (segment) => chainFor(segment.geometry),
+        }),
+      });
+      warnings.push(
+        `${item.itemId} animates: rendered in ${segments.length} segments, so its movement steps rather than ramps.`,
+      );
+    } else {
+      args = buildDecodeArgs({
+        sourcePath: mediaPath,
+        inUs: sourceInUs,
+        durationUs: item.durationUs,
+        filterChain: chainFor(segments[0]?.geometry ?? geometryAt(0)),
+      });
+    }
     const child = spawn(ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.pause();
     const decoder: ItemDecoder = {
@@ -251,6 +322,12 @@ function readSome(stream: NodeJS.ReadableStream): Promise<Buffer | null> {
 }
 
 /** A black yuv420p frame at the plan's resolution. */
+export /** The item's keyframe times per animated property, for the segment boundaries. */
+function animatedTimes(item: PlannedItem): number[][] {
+  if (!item.keyframes) return [];
+  return Object.values(item.keyframes).map((keys) => keys.map((key) => key.timeUs));
+}
+
 export function blankFrame(width: number, height: number): Buffer {
   const ySize = width * height;
   const chroma = Math.ceil(width / 2) * Math.ceil(height / 2);

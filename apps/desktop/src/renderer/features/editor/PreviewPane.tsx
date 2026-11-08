@@ -138,7 +138,11 @@ export function PreviewPane({
   const item = activeItemId ? (state.items[activeItemId] ?? null) : null;
   const src = item?.mediaId ? `${MEDIA_ORIGIN}${encodeURIComponent(item.mediaId)}` : undefined;
   const canvas = state.canvas ?? { width: 1080, height: 1920, aspect: '9:16' };
-  const geometry = itemGeometry(item ?? {});
+  // The playhead is read through the same subscription as `item`, so a keyframed
+  // property redraws as time moves. Reading `playheadStore.get()` here without
+  // subscribing would animate only when something else happened to re-render.
+  const playheadUs = usePlayheadUs();
+  const geometry = itemGeometry({ ...(item ?? {}), timeUs: playheadUs });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>

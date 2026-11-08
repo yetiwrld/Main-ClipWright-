@@ -502,6 +502,35 @@ export function buildDecodeArgs(options: {
   ];
 }
 
+/**
+ * Arguments for a decode whose picture changes over time (SPEC 12 §2.2).
+ *
+ * The keyframed item is split into segments and concatenated, so the chain has to
+ * be a `filter_complex` with a named output rather than a linear `-vf`. The input
+ * seek stays on the input side for the same reason it does in `buildDecodeArgs`:
+ * it is fast, and every branch filters timestamps relative to it.
+ */
+export function buildSegmentedDecodeArgs(options: {
+  sourcePath: string;
+  inUs: number;
+  durationUs: number;
+  filterComplex: string;
+}): string[] {
+  return [
+    '-hide_banner',
+    '-nostdin',
+    '-ss', (options.inUs / 1_000_000).toFixed(6),
+    '-i', options.sourcePath,
+    '-t', (options.durationUs / 1_000_000).toFixed(6),
+    '-filter_complex', options.filterComplex,
+    '-map', '[out]',
+    '-an',
+    '-f', 'rawvideo',
+    '-pix_fmt', 'yuv420p',
+    '-',
+  ];
+}
+
 /** Arguments for the loudness analysis pass (`ebur128`, SPEC 14 §5.1). */
 export function buildLoudnessArgs(inputPath: string): string[] {
   return ['-hide_banner', '-nostdin', '-i', inputPath, '-af', 'ebur128=peak=true', '-f', 'null', '-'];

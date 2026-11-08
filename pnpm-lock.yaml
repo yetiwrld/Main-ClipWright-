@@ -210,6 +210,9 @@ importers:
 
   packages/compositor:
     dependencies:
+      '@clipwright/audio-core':
+        specifier: workspace:*
+        version: link:../audio-core
       '@clipwright/caption-styles':
         specifier: workspace:*
         version: link:../caption-styles

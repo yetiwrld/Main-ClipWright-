@@ -20,6 +20,8 @@
  * with instead of jumping to full size on open.
  */
 
+import { evaluateProperty } from './keyframes.js';
+
 export interface ItemGeometryInput {
   /** Stored crop edges, 0–1, as fractions of the source. */
   crop?: { left?: number; top?: number; right?: number; bottom?: number } | undefined;
@@ -39,6 +41,14 @@ export interface ItemGeometryInput {
         flipV?: boolean;
       }
     | undefined;
+  /**
+   * Keyframed properties, keyed the way the item stores them. When present and
+   * `timeUs` is given, an animated property overrides its static value — which is
+   * what makes a keyframed move actually move (SPEC 12 §2.1).
+   */
+  keyframes?: Record<string, readonly { timeUs: number; value: unknown; interpolation?: string }[]> | undefined;
+  /** The instant to evaluate at. Absent means "use the static values". */
+  timeUs?: number | undefined;
 }
 
 /** The source rectangle that survives the crop, as fractions of the source. */
@@ -102,12 +112,37 @@ export function croppedSource(crop: ItemGeometryInput['crop']): SourceRect {
   return { x: left, y: top, width: extent(1 - left - right), height: extent(1 - top - bottom) };
 }
 
+/**
+ * A property's value at an instant: the keyframed value when the property is
+ * animated, otherwise the static one.
+ *
+ * Animating only *some* properties is the normal case — a clip scaled by the
+ * inspector and moved by keyframes has one of each — so this has to fall back per
+ * property rather than per item.
+ */
+function at(keyframes: ItemGeometryInput['keyframes'], timeUs: number | undefined, path: Parameters<typeof evaluateProperty>[1], fallback: number): number {
+  if (!keyframes || timeUs === undefined) return fallback;
+  return evaluateProperty(keyframes as Parameters<typeof evaluateProperty>[0], path, timeUs, fallback);
+}
+
 export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
-  const source = croppedSource(input.crop);
-  const scale = effectiveScale(input.transform);
-  const offsetX = input.transform?.x ?? 0;
-  const offsetY = input.transform?.y ?? 0;
-  const rotation = input.transform?.rotation ?? 0;
+  const timeUs = input.timeUs;
+  // Crop is keyframeable too (`10 §8.6`): a keyframed crop is how a pan-and-zoom
+  // is written, and reading only the static crop would freeze it at the first frame.
+  const source = croppedSource({
+    left: at(input.keyframes, timeUs, 'crop.left', input.crop?.left ?? 0),
+    top: at(input.keyframes, timeUs, 'crop.top', input.crop?.top ?? 0),
+    right: at(input.keyframes, timeUs, 'crop.right', input.crop?.right ?? 0),
+    bottom: at(input.keyframes, timeUs, 'crop.bottom', input.crop?.bottom ?? 0),
+  });
+  const staticScale = effectiveScale(input.transform);
+  const scale = {
+    x: at(input.keyframes, timeUs, 'transform.scaleX', staticScale.x),
+    y: at(input.keyframes, timeUs, 'transform.scaleY', staticScale.y),
+  };
+  const offsetX = at(input.keyframes, timeUs, 'transform.x', input.transform?.x ?? 0);
+  const offsetY = at(input.keyframes, timeUs, 'transform.y', input.transform?.y ?? 0);
+  const rotation = at(input.keyframes, timeUs, 'transform.rotation', input.transform?.rotation ?? 0);
   const flipH = input.transform?.flipH ?? false;
   const flipV = input.transform?.flipV ?? false;
 

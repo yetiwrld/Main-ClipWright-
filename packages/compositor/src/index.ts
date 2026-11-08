@@ -51,3 +51,20 @@ export {
   type ItemGeometryInput,
   type SourceRect,
 } from './item-geometry.js';
+
+/**
+ * SPEC 12 §2.1 — `evaluate()`, the value of a keyframed property at an instant.
+ *
+ * Keyframes were drawn on the timeline and read by nothing. This is the piece the
+ * preview, the export and the inspector's readout all go through, so a property can
+ * no longer mean three different things in three places.
+ */
+export {
+  cubicBezier,
+  evaluate,
+  evaluateNumber,
+  evaluateProperty,
+  keyframeTimes,
+  type KeyframeValue,
+  type PropertyPath,
+} from './keyframes.js';

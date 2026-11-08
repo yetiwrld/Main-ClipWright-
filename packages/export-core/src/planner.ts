@@ -69,6 +69,13 @@ export interface PlannedItem {
       flipV?: boolean;
     };
   };
+  /**
+   * Keyframed properties, keyed as the item stores them (`transform.x`, …).
+   * Carried so the decoder can split an animated item into segments (SPEC 12 §2.2):
+   * ffmpeg 4.1 evaluates `scale`/`crop` once, so time-varying geometry is rendered
+   * as several constant segments rather than one expression.
+   */
+  keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
 }
 
 /** Export plan describing the full render. */
@@ -182,6 +189,8 @@ export interface ExportSettings {
     };
     /** Which `.cwstyle` the caption uses, for a styled burn-in. */
     captionStyleId?: string;
+    /** Keyframed properties, so an animated item can be segmented. */
+    keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
     /** Crop and transform, so the decoded frame matches the preview. */
     geometry?: {
       crop?: { left?: number; top?: number; right?: number; bottom?: number };
@@ -267,6 +276,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         captionText: item.captionSegment?.text,
         captionStyleId: item.captionStyleId,
         geometry: item.geometry,
+        keyframes: item.keyframes,
         captionSegment: item.captionSegment,
       };
     })

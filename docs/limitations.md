@@ -61,41 +61,50 @@ This document tracks architectural scope boundaries and honest limitations per `
    by its own ffmpeg process, and the item's *static* crop, scale, rotation, flip
    and offset are applied to the decoded frame, so a clip framed in the editor
    exports framed. What is still missing is the rest of the *video* compositor:
-   only the topmost visible item is written, so effects, transitions, **keyframed**
-   property values, blend modes, opacity, masks and the `rotationJitterDeg`
-   per-caption tilt are **not rendered**. Where nothing is on the timeline you get
-   the canvas colour. The export dialog says so before you press Export.
-2. **Karaoke needs the transcript, and a transcript edited after the export
+   only the topmost visible item is written, so effects, transitions, blend
+   modes, opacity, masks and the `rotationJitterDeg` per-caption tilt are **not
+   rendered**. Where nothing is on the timeline you get the canvas colour. The
+   export dialog says so before you press Export.
+2. **Keyframed geometry exports as steps, not ramps.** ffmpeg 4.1 evaluates
+   `scale`/`crop` expressions once, at configuration time — there is no `t` in
+   those expressions (measured: `scale=w='iw*(1+t)'` fails with "Undefined
+   constant"). So an animated item is decoded as one segment per keyframe, each
+   baked at its start value and concatenated. A move from scale 1 to 2 over a
+   second produces two constant halves, not a smooth ramp; the preview interpolates
+   properly. The export log says which items were segmented and how many segments
+   each used, so this is visible rather than silent. Removing the limitation means
+   the WebGL2 `renderFrame` path in `specs/10` §2.1, which renders per frame.
+3. **Karaoke needs the transcript, and a transcript edited after the export
    started is not re-read.** The burn-in resolves each word ref against the
    project's transcript when the export starts. That is correct for normal use and
    wrong for one case: edit a word in the caption editor while an export is already
    rendering and the file will carry the text the transcript had when the render
    began. The preview updates immediately; the in-flight export does not.
-3. **ASS is a smaller language than the style format.** A blurred drop shadow is
+4. **ASS is a smaller language than the style format.** A blurred drop shadow is
    approximated by its vertical offset, and letter-spacing is in pixels rather than
    ems, so a style with a heavy blur will look slightly cleaner on export than in
    the preview. Everything the ten presets ask for is expressible. The per-caption
    `rotationJitterDeg` tilt is not applied — ASS has no per-event rotation, so the
    tilt exists in the preview and the editable style but not in the burned-in file.
-4. **Project-local style copies live in the project's settings blob.** The style
+5. **Project-local style copies live in the project's settings blob.** The style
    editor saves a copy into `settings.captionStyles`, and the overlay, the caption
    list and the burn-in all resolve through it, so an edited style now survives to
    export. It is not a first-class table: styles are not listed separately, cannot
    be renamed or deleted from a dedicated manage screen (a copy can only be
    replaced by editing it again), and a project opened in a build that predates the
    style editor shows the presets — the copies are simply invisible to it, not lost.
-5. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-6. **No resumable export.** A failed or interrupted export restarts from the
+6. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+7. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
-6. **Hardware encoding is validated, not assumed — and not proven here.** The
+8. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-7. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+9. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
    normalisation are; the equaliser, reverb and other audio-rack effects are not
    yet in the mix.
-8. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+10. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 
 ### Updates

@@ -64,6 +64,38 @@ function makeWhiteFirstSource(): string {
  * on a mid-grey field — bright enough that `blackdetect` finds nothing, so the
  * validation report can legitimately reach "verified".
  */
+/**
+ * A completely still source: one picture, repeated for a second.
+ *
+ * Any difference between two frames decoded from it is geometry and nothing else,
+ * which is what makes it the right source for a keyframe test. Built from raw
+ * frames because the bundled ffmpeg 4.1 has no `freeze` filter, and a looped
+ * one-frame file would re-encode a single frame rather than repeating it.
+ */
+function makeStillSource(): string {
+  mkdirSync(TMP, { recursive: true });
+  const path = join(TMP, 'still.mp4');
+  const rawPath = join(TMP, 'still.yuv');
+  const width = 1920;
+  const height = 1080;
+  const frame = Buffer.alloc((width * height * 3) / 2, 128);
+  // A high-contrast block in one corner: a zoom has to move its edge, and a flat
+  // grey field would look identical at every scale.
+  for (let y = 100; y < 400; y += 1) {
+    for (let x = 200; x < 600; x += 1) frame[y * width + x] = 235;
+  }
+  writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+  execFileSync(
+    ffmpegPath(),
+    ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'yuv420p',
+      '-s', `${width}x${height}`, '-framerate', '30', '-i', rawPath,
+      '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', path],
+    { stdio: 'ignore' },
+  );
+  rmSync(rawPath, { force: true });
+  return path;
+}
+
 function makeMovingSource(): string {
   mkdirSync(TMP, { recursive: true });
   const path = join(TMP, 'moving.mp4');
@@ -340,3 +372,136 @@ function average(buffer: Buffer): number {
   for (const byte of buffer) sum += byte;
   return sum / Math.max(1, buffer.length);
 }
+
+describe.skipIf(!HAS_FFMPEG)('decode frame source with keyframes', () => {
+  /**
+   * SPEC 12 §2.2 — a keyframed scale has to change the picture during an export.
+   *
+   * ffmpeg 4.1 cannot evaluate `scale` per frame, so the item is decoded in
+   * segments. The assertion that matters is not "a filter appeared" but "the
+   * second half of the file is a different size than the first", which is only
+   * true if the segmentation reached the decoder.
+   */
+  it('renders an animated scale as segments rather than one frozen value', async () => {
+    // A still source, so the only thing that can make frame 0 differ from the last
+    // frame is the keyframed geometry. With a moving source the frames differ for
+    // reasons that have nothing to do with keyframes, and the test passes whether
+    // or not the segmentation ran.
+    const source = makeStillSource();
+    const plan = buildExportPlan(
+      makeSettings({
+        preset: '1080p',
+        aspect: '16:9',
+        rangeUs: [0, 1_000_000],
+        compositionDurationUs: 1_000_000,
+        items: [
+          {
+            id: 'item-video',
+            trackId: 'track-video',
+            type: 'video',
+            mediaId: 'media-1',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: false,
+            geometry: { transform: {} },
+            keyframes: {
+              'transform.scaleX': [
+                { timeUs: 0, value: 1 },
+                { timeUs: 500_000, value: 2 },
+              ],
+              'transform.scaleY': [
+                { timeUs: 0, value: 1 },
+                { timeUs: 500_000, value: 2 },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    const frameSource = createDecodeFrameSource({ plan, resolveMediaPath: resolve(source) });
+    await frameSource.open?.(plan);
+    // The source is a sequential stream (`FrameSource.next(index)` is called in
+    // order by the export runner), so jumping straight to the last index returns
+    // the *next* frame, not that one. Read them all.
+    let first: Buffer | null = null;
+    let later: Buffer | null = null;
+    for (let index = 0; index < plan.totalFrames; index += 1) {
+      const frame = await frameSource.next(index);
+      if (index === 0) first = frame;
+      if (index === plan.totalFrames - 1) later = frame;
+    }
+    await frameSource.close();
+    expect(first).toBeTruthy();
+    expect(later).toBeTruthy();
+
+    expect(first!.length).toBe(expectedFrameBytes(plan.width, plan.height));
+    expect(later!.length).toBe(expectedFrameBytes(plan.width, plan.height));
+    // Same still source, same instant of it, different geometry: the only
+    // explanation for a different frame is that the second segment was baked at a
+    // different scale.
+    expect(first!.equals(later!)).toBe(false);
+    // And the zoom is the *right* one: 2x about the centre moves the bright block
+    // from x=200..599 to x=0..239 on a row through it.
+    const brightExtent = (frame: Buffer, row: number) => {
+      // yuv420p: the luma plane is the first width*height bytes, one byte per pixel.
+      const start = row * plan.width;
+      const lit: number[] = [];
+      for (let x = 0; x < plan.width; x += 1) if (frame[start + x]! > 200) lit.push(x);
+      return lit.length === 0 ? null : { from: lit[0], to: lit[lit.length - 1] };
+    };
+    const before = brightExtent(first!, 200);
+    const after = brightExtent(later!, 200);
+    expect(before).toBeTruthy();
+    expect(after).toBeTruthy();
+    // A 2x centre zoom maps x -> 2x - width/2, so the block's right edge at 599
+    // lands at 239 while its left edge at 200 lands at -560 — off the frame. The
+    // visible result is a block whose right edge has moved from ~599 to ~239, which
+    // is the zoom's signature: each edge moves *outward from the centre* by its own
+    // distance, and the left one simply leaves the frame.
+    expect(before!.to).toBeGreaterThan(500);
+    expect(after!.to).toBeLessThan(300);
+    expect(after!.from).toBe(0);
+    const warnings = (frameSource as unknown as { warnings: string[] }).warnings;
+    expect(warnings.some((warning) => warning.includes('segments'))).toBe(true);
+  }, 120_000);
+
+  it('does not segment an item that is not animated', async () => {
+    // The common case has to keep its single decode; a warning here would mean
+    // every ordinary export started paying for keyframes nobody placed.
+    const source = makeMovingSource();
+    const plan = planWithVideo(source);
+    const frameSource = createDecodeFrameSource({ plan, resolveMediaPath: resolve(source) });
+    await frameSource.open?.(plan);
+    await frameSource.next(0);
+    await frameSource.close();
+    const warnings = (frameSource as unknown as { warnings: string[] }).warnings;
+    expect(warnings.some((warning) => warning.includes('segments'))).toBe(false);
+  }, 120_000);
+});
+
+describe.skipIf(!HAS_FFMPEG)('segmented decode arguments', () => {
+  it('builds a filter_complex with one trim per segment and a concat', async () => {
+    // Asserting on the arguments is what localises a failure: the picture test
+    // below can only say "both frames look the same", which is true both when the
+    // segmentation is missing and when ffmpeg silently produced nothing.
+    const { segmentedDecodeChain, sourceFilterChain } = await import('@clipwright/export-core');
+    const chain = segmentedDecodeChain({
+      segments: [
+        { startUs: 0, endUs: 500_000 },
+        { startUs: 500_000, endUs: 1_000_000 },
+      ],
+      targetFps: 30,
+      sourceInUs: 0,
+      chainFor: () => sourceFilterChain({ targetFps: 30, outputWidth: 1080, outputHeight: 1920, fit: 'fit' }),
+    });
+    expect(chain).toContain('split=2');
+    expect(chain).toContain('trim=0.000000:0.500000');
+    expect(chain).toContain('trim=0.500000:1.000000');
+    expect(chain).toContain('concat=n=2:v=1:a=0[out]');
+  });
+});

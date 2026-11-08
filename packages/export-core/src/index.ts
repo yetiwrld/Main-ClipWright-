@@ -82,6 +82,7 @@ export {
   metadataArgs,
   videoQualityArgs,
   sourceFilterChain,
+  buildSegmentedDecodeArgs,
   hardwareQualityValue,
   parseIntegratedLoudness,
   loudnessGainDb,
@@ -93,6 +94,21 @@ export {
   SOFTWARE_VP9,
   HARDWARE_ENCODERS,
 } from './encoder.js';
+
+/**
+ * SPEC 12 §2.2 — keyframed geometry in a decode with no notion of time.
+ *
+ * ffmpeg 4.1 evaluates `scale`/`crop` once, so a keyframed move is rendered as
+ * several segments with a constant value each, concatenated.
+ */
+export {
+  geometrySegments,
+  sameGeometry,
+  segmentBoundaries,
+  segmentedDecodeChain,
+  type GeometryAt,
+  type GeometrySegment,
+} from './keyframe-segments.js';
 export type { EncoderCapabilities, EncoderInputs, HardwareEncoderId, VideoEncoderChoice } from './encoder.js';
 
 // Audio mix (§5 / SPEC 12 §6.1)
