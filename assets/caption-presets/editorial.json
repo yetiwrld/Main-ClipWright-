@@ -1,0 +1,96 @@
+{
+  "$comment": "SPEC 11 §5 preset — \"Editorial\". Data, not code: editable, exportable, and identical to what a user can import.",
+  "format": "cwstyle",
+  "formatVersion": 1,
+  "author": "Clipwright Studio",
+  "license": "CC0-1.0 — free to copy, modify and share.",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "font": {
+    "family": "Playfair Display",
+    "weight": 600,
+    "italic": false,
+    "source": "bundled",
+    "sizePctOfShortSide": 5.8
+  },
+  "text": {
+    "case": "none",
+    "align": "center",
+    "letterSpacingEm": 0.01,
+    "wordSpacingEm": 0,
+    "lineHeight": 1.25,
+    "maxLinesHint": 2,
+    "maxCharsPerLineHint": 26
+  },
+  "fill": {
+    "color": "#F5F0E6",
+    "opacity": 1
+  },
+  "outline": {
+    "enabled": true,
+    "color": "#000000",
+    "widthPctOfFont": 3,
+    "join": "round"
+  },
+  "shadow": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "dx": 0,
+    "dyPctOfFont": 8,
+    "blurPctOfFont": 0
+  },
+  "background": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "radiusPx": 10,
+    "paddingX": 12,
+    "paddingY": 6,
+    "perLine": true
+  },
+  "position": {
+    "anchor": "bottom-center",
+    "xPct": 50,
+    "yPct": 80,
+    "maxWidthPct": 82
+  },
+  "highlight": {
+    "mode": "none",
+    "color": "#FFD400",
+    "scale": 1,
+    "background": null,
+    "keepLit": true
+  },
+  "wordColors": [],
+  "animation": {
+    "in": {
+      "preset": "fade",
+      "durationMs": 150,
+      "easing": "easeOut",
+      "params": {}
+    },
+    "out": {
+      "preset": "fade",
+      "durationMs": 150,
+      "easing": "linear",
+      "params": {}
+    },
+    "perWord": {
+      "preset": "none",
+      "durationMs": 0,
+      "easing": "linear",
+      "staggerMs": 0,
+      "params": {}
+    }
+  },
+  "timing": {
+    "leadMs": 0,
+    "lagMs": 0,
+    "minDisplayMs": 600,
+    "holdAfterLastWordMs": 150
+  },
+  "rotationJitterDeg": 0,
+  "seed": 1,
+  "id": "editorial",
+  "name": "Editorial"
+}

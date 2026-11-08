@@ -1,0 +1,96 @@
+{
+  "$comment": "SPEC 11 §5 preset — \"Multi-line Subtitle\". Data, not code: editable, exportable, and identical to what a user can import.",
+  "format": "cwstyle",
+  "formatVersion": 1,
+  "author": "Clipwright Studio",
+  "license": "CC0-1.0 — free to copy, modify and share.",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "font": {
+    "family": "Inter",
+    "weight": 500,
+    "italic": false,
+    "source": "bundled",
+    "sizePctOfShortSide": 5.2
+  },
+  "text": {
+    "case": "none",
+    "align": "left",
+    "letterSpacingEm": 0,
+    "wordSpacingEm": 0,
+    "lineHeight": 1.3,
+    "maxLinesHint": 2,
+    "maxCharsPerLineHint": 38
+  },
+  "fill": {
+    "color": "#FFFFFF",
+    "opacity": 1
+  },
+  "outline": {
+    "enabled": false,
+    "color": "#000000",
+    "widthPctOfFont": 9,
+    "join": "round"
+  },
+  "shadow": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "dx": 0,
+    "dyPctOfFont": 8,
+    "blurPctOfFont": 0
+  },
+  "background": {
+    "enabled": true,
+    "color": "#000000",
+    "opacity": 0.62,
+    "radiusPx": 10,
+    "paddingX": 12,
+    "paddingY": 6,
+    "perLine": false
+  },
+  "position": {
+    "anchor": "bottom-center",
+    "xPct": 50,
+    "yPct": 86,
+    "maxWidthPct": 80
+  },
+  "highlight": {
+    "mode": "none",
+    "color": "#FFD400",
+    "scale": 1,
+    "background": null,
+    "keepLit": true
+  },
+  "wordColors": [],
+  "animation": {
+    "in": {
+      "preset": "fade",
+      "durationMs": 100,
+      "easing": "easeOut",
+      "params": {}
+    },
+    "out": {
+      "preset": "fade",
+      "durationMs": 100,
+      "easing": "linear",
+      "params": {}
+    },
+    "perWord": {
+      "preset": "none",
+      "durationMs": 0,
+      "easing": "linear",
+      "staggerMs": 0,
+      "params": {}
+    }
+  },
+  "timing": {
+    "leadMs": 0,
+    "lagMs": 0,
+    "minDisplayMs": 600,
+    "holdAfterLastWordMs": 150
+  },
+  "rotationJitterDeg": 0,
+  "seed": 1,
+  "id": "multi-line-subtitle",
+  "name": "Multi-line Subtitle"
+}

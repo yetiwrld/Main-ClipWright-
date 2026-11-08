@@ -1,0 +1,98 @@
+{
+  "$comment": "SPEC 11 §5 preset — \"Animated Slide\". Data, not code: editable, exportable, and identical to what a user can import.",
+  "format": "cwstyle",
+  "formatVersion": 1,
+  "author": "Clipwright Studio",
+  "license": "CC0-1.0 — free to copy, modify and share.",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "font": {
+    "family": "Poppins",
+    "weight": 700,
+    "italic": false,
+    "source": "bundled",
+    "sizePctOfShortSide": 6.2
+  },
+  "text": {
+    "case": "none",
+    "align": "center",
+    "letterSpacingEm": 0,
+    "wordSpacingEm": 0,
+    "lineHeight": 1.18,
+    "maxLinesHint": 2,
+    "maxCharsPerLineHint": 22
+  },
+  "fill": {
+    "color": "#FFFFFF",
+    "opacity": 1
+  },
+  "outline": {
+    "enabled": false,
+    "color": "#000000",
+    "widthPctOfFont": 9,
+    "join": "round"
+  },
+  "shadow": {
+    "enabled": true,
+    "color": "#000000",
+    "opacity": 0.6,
+    "dx": 0,
+    "dyPctOfFont": 6,
+    "blurPctOfFont": 10
+  },
+  "background": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "radiusPx": 10,
+    "paddingX": 12,
+    "paddingY": 6,
+    "perLine": true
+  },
+  "position": {
+    "anchor": "center",
+    "xPct": 50,
+    "yPct": 66,
+    "maxWidthPct": 86
+  },
+  "highlight": {
+    "mode": "sequence",
+    "color": "#4DA3FF",
+    "scale": 1,
+    "background": null,
+    "keepLit": true
+  },
+  "wordColors": [],
+  "animation": {
+    "in": {
+      "preset": "slide-up",
+      "durationMs": 160,
+      "easing": "easeOut",
+      "params": {
+        "distancePctOfFont": 40
+      }
+    },
+    "out": {
+      "preset": "fade",
+      "durationMs": 120,
+      "easing": "linear",
+      "params": {}
+    },
+    "perWord": {
+      "preset": "fade",
+      "durationMs": 120,
+      "easing": "easeOut",
+      "staggerMs": 60,
+      "params": {}
+    }
+  },
+  "timing": {
+    "leadMs": 0,
+    "lagMs": 0,
+    "minDisplayMs": 600,
+    "holdAfterLastWordMs": 150
+  },
+  "rotationJitterDeg": 0,
+  "seed": 1,
+  "id": "animated-slide",
+  "name": "Animated Slide"
+}

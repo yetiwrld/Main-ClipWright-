@@ -16,13 +16,14 @@ pnpm test:unit
 ```
 
 ```
-Test Files  48 passed (48)
-     Tests  1090 passed (1090)
+Test Files  51 passed (51)
+     Tests  1127 passed (1127)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 231 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets |
+| `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
 | `apps/desktop/src/main` | 270 | Export service, queue, ffmpeg orchestration, audio mixing, updates, journal, binary integrity, releases, packaging |
 | `apps/desktop/src/renderer` | 177 | Export dialog, queue panel, update dialog, update notice and chip, recovery dialog, command palette (jsdom) |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
@@ -31,7 +32,7 @@ Test Files  48 passed (48)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1090** | 48 files |
+| **Total** | **1127** | 51 files |
 
 ### Tests that run real processes
 

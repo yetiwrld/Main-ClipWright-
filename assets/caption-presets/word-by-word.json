@@ -1,0 +1,98 @@
+{
+  "$comment": "SPEC 11 §5 preset — \"Word by Word\". Data, not code: editable, exportable, and identical to what a user can import.",
+  "format": "cwstyle",
+  "formatVersion": 1,
+  "author": "Clipwright Studio",
+  "license": "CC0-1.0 — free to copy, modify and share.",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "font": {
+    "family": "Anton",
+    "weight": 400,
+    "italic": false,
+    "source": "bundled",
+    "sizePctOfShortSide": 9
+  },
+  "text": {
+    "case": "upper",
+    "align": "center",
+    "letterSpacingEm": 0,
+    "wordSpacingEm": 0,
+    "lineHeight": 1.05,
+    "maxLinesHint": 1,
+    "maxCharsPerLineHint": 14
+  },
+  "fill": {
+    "color": "#FFFFFF",
+    "opacity": 1
+  },
+  "outline": {
+    "enabled": true,
+    "color": "#000000",
+    "widthPctOfFont": 7,
+    "join": "round"
+  },
+  "shadow": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "dx": 0,
+    "dyPctOfFont": 8,
+    "blurPctOfFont": 0
+  },
+  "background": {
+    "enabled": false,
+    "color": "#000000",
+    "opacity": 0.6,
+    "radiusPx": 10,
+    "paddingX": 12,
+    "paddingY": 6,
+    "perLine": true
+  },
+  "position": {
+    "anchor": "center",
+    "xPct": 50,
+    "yPct": 55,
+    "maxWidthPct": 80
+  },
+  "highlight": {
+    "mode": "word-by-word",
+    "color": "#FFFFFF",
+    "scale": 1,
+    "background": null,
+    "keepLit": false
+  },
+  "wordColors": [],
+  "animation": {
+    "in": {
+      "preset": "none",
+      "durationMs": 0,
+      "easing": "linear",
+      "params": {}
+    },
+    "out": {
+      "preset": "none",
+      "durationMs": 0,
+      "easing": "linear",
+      "params": {}
+    },
+    "perWord": {
+      "preset": "pop",
+      "durationMs": 120,
+      "easing": "easeOut",
+      "staggerMs": 0,
+      "params": {
+        "from": 0.8
+      }
+    }
+  },
+  "timing": {
+    "leadMs": 0,
+    "lagMs": 0,
+    "minDisplayMs": 600,
+    "holdAfterLastWordMs": 150
+  },
+  "rotationJitterDeg": 0,
+  "seed": 1,
+  "id": "word-by-word",
+  "name": "Word by Word"
+}
