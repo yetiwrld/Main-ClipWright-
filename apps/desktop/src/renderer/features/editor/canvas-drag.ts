@@ -169,3 +169,67 @@ export function handleAt(
   );
   return nearest[1] <= handleSize ? nearest[0] : null;
 }
+
+/**
+ * The angle of a point about a pivot, in degrees clockwise from straight up.
+ *
+ * Used by the rotate handle: dragging it is a change in the angle between the pointer
+ * and the pivot, so both the start and the current pointer position are measured the
+ * same way and subtracted.
+ *
+ * CSS space has +y *down*, so `atan2(dy, dx)` already increases clockwise on screen.
+ * The `+ 90` swings the zero from "right" to "up", which is where a rotation handle
+ * sits and therefore what "no change" should read as.
+ */
+export function angleAbout(pivot: { x: number; y: number }, point: { x: number; y: number }): number {
+  const raw = (Math.atan2(point.y - pivot.y, point.x - pivot.x) * 180) / Math.PI + 90;
+  /*
+    Fold into (−180, 180] to match the range the model stores. `atan2` returns
+    (−180, 180], and adding the 90° offset can push that to 270 — the same direction
+    as −90, and deltas across it are unaffected, but a value outside the model's own
+    range invites a reader to think the two disagree.
+  */
+  let wrapped = raw;
+  while (wrapped <= -180) wrapped += 360;
+  while (wrapped > 180) wrapped -= 360;
+  return wrapped;
+}
+
+/**
+ * The shortest way round from one angle to another.
+ *
+ * Subtracting raw angles breaks at the wrap: a pointer at 170° dragged to −170° has
+ * moved 20° clockwise, but `-170 - 170` is −340°, and applying that would throw the
+ * clip three quarters of a turn the wrong way. Normalising into (−180, 180] is what
+ * makes the handle follow the pointer across the seam.
+ */
+export function angleDelta(from: number, to: number): number {
+  let delta = to - from;
+  while (delta <= -180) delta += 360;
+  while (delta > 180) delta -= 360;
+  return delta;
+}
+
+/** The rotation range the model accepts, in degrees. */
+export const MIN_ROTATION = -180;
+export const MAX_ROTATION = 180;
+
+/**
+ * The rotation after dragging the handle, wrapped into the model's range.
+ *
+ * The model stores −180…180 rather than an unbounded angle, so a drag that passes a
+ * whole turn has to wrap rather than clamp: clamping would pin the clip at the edge
+ * while the pointer kept going, which reads as the handle having jammed.
+ */
+export function rotatedBy(start: number, delta: number): number {
+  // Guard the *result*, not just the delta. A `start` that arrived as `undefined`
+  // makes `start + delta` NaN however finite the delta is, and NaN reaches the
+  // document as a rotation that blanks the layer. Checking only `delta` was the
+  // first version of this and it let exactly that through.
+  const from = Number.isFinite(start) ? start : 0;
+  if (!Number.isFinite(delta)) return from;
+  let next = from + delta;
+  while (next > MAX_ROTATION) next -= 360;
+  while (next < MIN_ROTATION) next += 360;
+  return next;
+}

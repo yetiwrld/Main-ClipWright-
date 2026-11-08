@@ -666,3 +666,124 @@ describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC
     expect(timeline.setItemProperties).not.toHaveBeenCalled();
   });
 });
+
+describe('the rotate handle and Esc (SPEC 10 §8.2, §8.3)', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  /** A 400×600 canvas with the picture filling it. */
+  function stubBoxes() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      // The fit element is the picture; everything else is the canvas.
+      const isFit = this.getAttribute('data-testid') === 'preview-item-fit';
+      return {
+        x: 0, y: 0, left: 0, top: 0,
+        width: 400, height: 600, right: 400, bottom: 600,
+        ...(isFit ? {} : {}),
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('shows a rotate handle only on the selected clip', () => {
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline()} />);
+    expect(screen.getByTestId('preview-rotate-handle')).toBeTruthy();
+    cleanup();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline(['x'])} />);
+    expect(screen.queryByTestId('preview-rotate-handle')).toBeNull();
+  });
+
+  it('turns the clip as the pointer circles the pivot', () => {
+    /*
+      The pivot with a centred anchor is the picture's middle, (200, 300). Starting
+      the drag directly above it — (200, 100) — and moving to its right — (400, 300)
+      — is a quarter turn clockwise, which is what the model stores.
+
+      A handle that measured displacement instead of angle would write something
+      unrelated; one that flipped the sign would turn the picture anticlockwise while
+      the pointer went clockwise, which is the most confusing failure a rotate handle
+      has.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const handle = screen.getByTestId('preview-rotate-handle');
+
+    fireEvent(handle, pointer('pointerdown', 200, 100));
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointermove', 400, 300));
+    fireEvent(layer, pointer('pointerup', 400, 300));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
+      transform: { rotation: expect.closeTo(90, 4) },
+    });
+  });
+
+  it('starts a rotate rather than a move, so the clip does not also translate', () => {
+    // Pointer-down on the handle bubbles through the layer, which would begin a move
+    // as well; the handle stops propagation so one gesture edits one property.
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const handle = screen.getByTestId('preview-rotate-handle');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(handle, pointer('pointerdown', 200, 100));
+    fireEvent(layer, pointer('pointermove', 400, 300));
+    fireEvent(layer, pointer('pointerup', 400, 300));
+
+    for (const call of (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls) {
+      const patch = call[1] as { transform?: Record<string, unknown> };
+      expect(patch.transform && 'x' in patch.transform, 'a rotate must not write a position').toBe(false);
+    }
+  });
+
+  it('abandons the drag when Esc is pressed', () => {
+    /*
+      SPEC 10 §8.3: `Esc` cancels "exactly" — the picture goes back and nothing is
+      written. An undo would be the wrong affordance: it would also consume a stack
+      entry for an edit that never happened.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 280, 300));
+    fireEvent(document, new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    // The pointer comes up after the cancel; nothing may be committed.
+    fireEvent(layer, pointer('pointerup', 280, 300));
+
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('puts the picture back when Esc is pressed mid-drag', () => {
+    // Cancelling has to drop the in-flight preview as well as skip the commit, or the
+    // clip stays where the pointer left it until something else re-renders.
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 280, 300));
+    expect(layer.style.transform).toContain('translate(20%');
+    fireEvent(document, new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(layer.style.transform).not.toContain('translate(20%');
+    fireEvent(layer, pointer('pointerup', 280, 300));
+  });
+});

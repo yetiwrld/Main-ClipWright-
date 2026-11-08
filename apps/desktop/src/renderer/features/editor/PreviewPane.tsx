@@ -284,15 +284,41 @@ export function PreviewPane({
           return;
         }
         if (!change.transform) return;
-        const move = change.transform;
+        const edit = change.transform;
+        if (edit.rotation !== undefined) {
+          commitKeyed(writer, item, [{ path: 'transform.rotation', value: edit.rotation }], () =>
+            timeline.setItemProperties([change.itemId], { transform: { rotation: edit.rotation } }),
+          );
+          return;
+        }
+        if (edit.anchorX !== undefined || edit.anchorY !== undefined) {
+          /*
+            Both anchor axes are written together, for the same reason the uniform
+            scale field writes both: they are one point, and a half-written pivot is a
+            pivot the user never placed.
+          */
+          const anchorX = edit.anchorX ?? item.transform.anchorX;
+          const anchorY = edit.anchorY ?? item.transform.anchorY;
+          commitKeyed(
+            writer,
+            item,
+            [
+              { path: 'transform.anchorX', value: anchorX },
+              { path: 'transform.anchorY', value: anchorY },
+            ],
+            () => timeline.setItemProperties([change.itemId], { transform: { anchorX, anchorY } }),
+          );
+          return;
+        }
+        if (edit.x === undefined || edit.y === undefined) return;
         commitKeyed(
           writer,
           item,
           [
-            { path: 'transform.x', value: move.x },
-            { path: 'transform.y', value: move.y },
+            { path: 'transform.x', value: edit.x },
+            { path: 'transform.y', value: edit.y },
           ],
-          () => timeline.setItemProperties([change.itemId], { transform: { x: move.x, y: move.y } }),
+          () => timeline.setItemProperties([change.itemId], { transform: { x: edit.x, y: edit.y } }),
         );
       },
       // `state` is read for the item's stored values; changing it re-creates the
@@ -301,6 +327,23 @@ export function PreviewPane({
     ),
   );
   const selectedId = timeline?.selection.length === 1 ? timeline.selection[0] : undefined;
+
+  /*
+    `Esc` abandons an in-flight drag (SPEC 10 §8.3). Bound at the document rather than
+    the canvas because the pointer may have been captured by the layer and focus can be
+    anywhere; the handler is only active while a gesture is running, so it does not
+    swallow `Esc` from dialogs or the command palette.
+  */
+  useEffect(() => {
+    if (!drag.dragging) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      drag.cancel();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [drag.dragging, drag.cancel]);
 
 
 
@@ -566,10 +609,40 @@ export function PreviewPane({
                       itemId: layer.id,
                       x: live?.x ?? item.transform.x,
                       y: live?.y ?? item.transform.y,
+                      rotation: live?.rotation ?? item.transform.rotation ?? 0,
+                      anchorX: live?.anchorX ?? item.transform.anchorX ?? 0.5,
+                      anchorY: live?.anchorY ?? item.transform.anchorY ?? 0.5,
                       crop: live?.crop ?? item.crop,
                       rect: { x: 0, y: 0, width: box.width, height: box.height },
                     },
                     canvasRef.current,
+                  );
+                }}
+                onRotateStart={(event) => {
+                  if (!editable) return;
+                  const box = event.currentTarget.getBoundingClientRect();
+                  const fit = document.querySelector<HTMLElement>(
+                    `[data-layer-id="${layer.id}"] [data-testid="preview-item-fit"]`,
+                  );
+                  const fitBox = fit?.getBoundingClientRect();
+                  drag.begin(
+                    event,
+                    {
+                      itemId: layer.id,
+                      x: live?.x ?? item.transform.x,
+                      y: live?.y ?? item.transform.y,
+                      rotation: live?.rotation ?? item.transform.rotation,
+                      anchorX: live?.anchorX ?? item.transform.anchorX,
+                      anchorY: live?.anchorY ?? item.transform.anchorY,
+                      crop: live?.crop ?? item.crop,
+                      // The pivot has to be measured against the *picture's* box, so
+                      // the handle turns about the crosshair rather than the frame.
+                      rect: fitBox
+                        ? { x: fitBox.left - box.left, y: fitBox.top - box.top, width: fitBox.width, height: fitBox.height }
+                        : { x: 0, y: 0, width: box.width, height: box.height },
+                    },
+                    canvasRef.current,
+                    'rotate',
                   );
                 }}
                 onPointerMove={(event) => {
@@ -840,6 +913,7 @@ const PreviewLayer = memo(function PreviewLayer({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onRotateStart,
 }: {
   item: TimelineState['items'][string];
   geometry: ItemGeometry;
@@ -848,6 +922,8 @@ const PreviewLayer = memo(function PreviewLayer({
   /** Whether a drag is in flight, which keeps the outline solid. */
   dragging?: boolean;
   onPointerDown?: (event: React.PointerEvent) => void;
+  /** Starts a rotate gesture from the handle above the picture. */
+  onRotateStart?: (event: React.PointerEvent) => void;
   onPointerMove?: (event: React.PointerEvent) => void;
   onPointerUp?: (event: React.PointerEvent) => void;
   opacity: number;
@@ -965,6 +1041,40 @@ const PreviewLayer = memo(function PreviewLayer({
           visible edges are. Putting it on the wrapper would outline the whole canvas
           and the edge drags would be measured against the wrong rectangle.
         */}
+        {editable ? (
+          /*
+            The rotate handle sits *above* the picture, outside the fit element's
+            overflow, so it is drawn as a sibling positioned from the top edge rather
+            than as a child of the clipped box. It is a translate handle: pointer-down
+            anywhere on it starts a rotate about the anchor.
+          */
+          <div
+            data-testid="preview-rotate-handle"
+            aria-label="Rotate the clip"
+            onPointerDown={(event) => {
+              // Without this the pointer-down would bubble to the layer and start a
+              // move as well, so the clip would translate and rotate at once.
+              event.stopPropagation();
+              event.preventDefault();
+              onRotateStart?.(event);
+            }}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              // 24 px above the top edge, per SPEC 10 §8.2's control table.
+              top: -24,
+              width: 14,
+              height: 14,
+              marginLeft: -7,
+              borderRadius: '50%',
+              background: 'var(--surface-card)',
+              border: '1px solid var(--brand)',
+              cursor: 'grab',
+              // Above the video, which is absolutely positioned over this element.
+              zIndex: 2,
+            }}
+          />
+        ) : null}
         {editable ? (
           <div
             data-testid="preview-selection"

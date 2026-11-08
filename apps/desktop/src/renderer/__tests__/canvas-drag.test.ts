@@ -7,11 +7,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_ROTATION,
   MIN_CROP_EXTENT,
+  MIN_ROTATION,
+  angleAbout,
+  angleDelta,
   croppedEdge,
   handleAt,
   movedOffset,
   pixelsToFraction,
+  rotatedBy,
 } from '../features/editor/canvas-drag.js';
 
 const canvas = { width: 1080, height: 1920 };
@@ -194,5 +199,93 @@ describe('finding the handle under the pointer', () => {
 
   it('finds no handle well outside the clip', () => {
     expect(handleAt({ x: 900, y: 900 }, rect)).toBeNull();
+  });
+});
+
+describe('the rotate handle (SPEC 10 §8.2)', () => {
+  const pivot = { x: 100, y: 100 };
+
+  it('reads straight up as zero', () => {
+    // The handle sits above the picture, so "no turn yet" is the pointer being
+    // directly above the pivot. Any other zero would make the first degree of every
+    // drag jump the clip.
+    expect(angleAbout(pivot, { x: 100, y: 0 })).toBeCloseTo(0, 6);
+  });
+
+  it('increases clockwise, which is the direction the model stores', () => {
+    // `transform.rotation` is degrees clockwise, and CSS space has +y down, so this
+    // needs no sign flip. A flip here would make the handle turn the opposite way to
+    // the picture, which is the single most confusing thing a rotate handle can do.
+    expect(angleAbout(pivot, { x: 200, y: 100 })).toBeCloseTo(90, 6);
+    expect(angleAbout(pivot, { x: 100, y: 200 })).toBeCloseTo(180, 6);
+    expect(angleAbout(pivot, { x: 0, y: 100 })).toBeCloseTo(-90, 6);
+  });
+
+  it('measures a quarter turn as a quarter turn', () => {
+    const from = angleAbout(pivot, { x: 100, y: 0 });
+    const to = angleAbout(pivot, { x: 200, y: 100 });
+    expect(angleDelta(from, to)).toBeCloseTo(90, 6);
+  });
+
+  it('takes the short way across the wrap', () => {
+    /*
+      The bug this exists to prevent: a pointer at 170° dragged to −170° has moved 20°
+      clockwise, but the raw subtraction is −340°, which would spin the clip three
+      quarters of a turn the wrong way. Every rotate handle has this bug until someone
+      drags past the seam.
+    */
+    expect(angleDelta(170, -170)).toBeCloseTo(20, 6);
+    expect(angleDelta(-170, 170)).toBeCloseTo(-20, 6);
+  });
+
+  it('never reports more than half a turn for one sample', () => {
+    // A delta beyond ±180 cannot be distinguished from its complement, so reporting a
+    // smaller number is both correct and what keeps a fast drag from overshooting.
+    expect(Math.abs(angleDelta(0, 179))).toBeLessThanOrEqual(180);
+    expect(Math.abs(angleDelta(0, -179))).toBeLessThanOrEqual(180);
+  });
+
+  it('wraps past a whole turn instead of jamming at the limit', () => {
+    /*
+      The model stores −180…180. A drag from 170° that adds 90° would reach 260, and
+      clamping there would pin the clip while the handle kept moving under the
+      pointer. Wrapping keeps the picture following the handle.
+    */
+    expect(rotatedBy(170, 90)).toBeCloseTo(-100, 6);
+    expect(rotatedBy(-170, -90)).toBeCloseTo(100, 6);
+  });
+
+  it('keeps an in-range result untouched', () => {
+    expect(rotatedBy(10, 20)).toBeCloseTo(30, 6);
+    expect(rotatedBy(0, 0)).toBe(0);
+  });
+
+  it('ignores a drag that is not a number', () => {
+    // A pointer sample can arrive as NaN if a client rect is 0×0; NaN would propagate
+    // into the transform and make the layer vanish.
+    expect(rotatedBy(15, Number.NaN)).toBe(15);
+  });
+
+  it('does not manufacture NaN from a missing starting rotation', () => {
+    /*
+      The first version of this guarded only `delta`, so a `start` that had arrived as
+      `undefined` — a hand-written fixture, or a project whose transform predates the
+      field — sailed through as `undefined + delta` and reached the document as `NaN`.
+      A NaN rotation blanks the layer silently: nothing throws, the picture is simply
+      not drawn. The guard belongs on the result.
+    */
+    const next = rotatedBy(undefined as unknown as number, 30);
+    expect(Number.isFinite(next)).toBe(true);
+    expect(next).toBeCloseTo(30, 6);
+  });
+
+  it('reports a result inside the model range for any drag', () => {
+    for (const start of [-180, -90, 0, 90, 180]) {
+      for (const delta of [-720, -181, -1, 0, 1, 179, 721]) {
+        const next = rotatedBy(start, delta);
+        expect(next).toBeGreaterThanOrEqual(MIN_ROTATION);
+        expect(next).toBeLessThanOrEqual(MAX_ROTATION);
+      }
+    }
   });
 });
