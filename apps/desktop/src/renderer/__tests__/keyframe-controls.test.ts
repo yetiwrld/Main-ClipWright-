@@ -14,8 +14,10 @@ import {
   isUniformScale,
   keyframeAt,
   keyframeWriteRefusal,
+  commitKeyed,
   planPairedEdit,
   planPropertyEdit,
+  type KeyframeCommitWriter,
 } from '../features/editor/keyframe-controls.js';
 
 const key = (timeUs: number, value: number): Keyframe =>
@@ -233,5 +235,91 @@ describe('keying an edit that moves two axes at once', () => {
   it('respects the clip boundary like a single-property edit', () => {
     const keys = [key(0, 1)];
     expect(planPairedEdit([keys, keys], clip, 0, 1.5)).toEqual({ kind: 'static' });
+  });
+});
+
+describe('committing an edit, from the sidebar or the canvas', () => {
+  function writer(playheadUs: number) {
+    const added: Array<[string, string, number, number]> = [];
+    const updated: Array<[string, string, number, number]> = [];
+    const api: KeyframeCommitWriter = {
+      playheadUs,
+      addKeyframe: (itemId, path, timeUs, value) => (added.push([itemId, path, timeUs, value]), true),
+      updateKeyframe: (itemId, path, timeUs, patch) =>
+        (updated.push([itemId, path, timeUs, patch.value]), true),
+    };
+    return { api, added, updated };
+  }
+
+  const animated = { ...clip, id: 'item-1', keyframes: { opacity: [key(0, 0), key(2_000_000, 1)] } };
+
+  it('agrees with planPropertyEdit for a single property', () => {
+    /*
+      The sidebar's own path and this one must not drift: one of them drives every
+      slider and the other drives every canvas drag, and a disagreement would mean a
+      keyframe written by dragging but not by typing — the kind of inconsistency that
+      looks like a rendering bug rather than an editing one.
+    */
+    for (const playheadUs of [1_500_000, 1_000_000, 3_500_000]) {
+      const plan = planPropertyEdit(animated.keyframes!['opacity'], animated, playheadUs, 0.5);
+      const { api, added, updated } = writer(playheadUs);
+      const staticEdits: string[] = [];
+      const outcome = commitKeyed(api, animated, [{ path: 'opacity', value: 0.5 }], () =>
+        staticEdits.push('static'),
+      );
+      expect(outcome).toBe(plan.kind === 'static' ? 'static' : 'keyed');
+      if (plan.kind === 'static') {
+        expect(staticEdits).toHaveLength(1);
+        expect(added).toHaveLength(0);
+      } else if (plan.kind === 'insert-key') {
+        expect(added).toEqual([['item-1', 'opacity', plan.timeUs, 0.5]]);
+      } else {
+        expect(updated).toEqual([['item-1', 'opacity', plan.timeUs, 0.5]]);
+      }
+    }
+  });
+
+  it('keys every property of a multi-property gesture, with each one\'s own value', () => {
+    /*
+      Dragging a clip changes x and y at once. Both must be keyed: keying x and
+      statically setting y would make the horizontal half animate and the vertical
+      half snap, producing a diagonal path the user never drew.
+    */
+    const state = {
+      ...clip,
+      id: 'item-1',
+      keyframes: { 'transform.x': [key(0, 0)], 'transform.y': [key(0, 0)] },
+    };
+    const { api, added } = writer(inside);
+    commitKeyed(api, state, [{ path: 'transform.x', value: 0.3 }, { path: 'transform.y', value: -0.2 }], () => {
+      throw new Error('should have keyed');
+    });
+    expect(added).toEqual([
+      ['item-1', 'transform.x', 500_000, 0.3],
+      ['item-1', 'transform.y', 500_000, -0.2],
+    ]);
+  });
+
+  it('stays static when none of the gesture\'s properties is animated', () => {
+    // Dragging an un-animated clip must move it, not start an animation — the same
+    // rule the sliders follow.
+    const { api, added } = writer(inside);
+    const staticEdits: string[] = [];
+    const outcome = commitKeyed(api, { ...clip, id: 'item-1' }, [{ path: 'transform.x', value: 0.3 }], () =>
+      staticEdits.push('static'),
+    );
+    expect(outcome).toBe('static');
+    expect(staticEdits).toHaveLength(1);
+    expect(added).toHaveLength(0);
+  });
+
+  it('keys both properties when only one of the gesture\'s pair is animated', () => {
+    // The same paired rule as the uniform Scale field: half a gesture is not an edit.
+    const state = { ...clip, id: 'item-1', keyframes: { 'transform.x': [key(0, 0)] } };
+    const { api, added } = writer(inside);
+    commitKeyed(api, state, [{ path: 'transform.x', value: 0.3 }, { path: 'transform.y', value: -0.2 }], () => {
+      throw new Error('should have keyed');
+    });
+    expect(added.map((call) => call[1])).toEqual(['transform.x', 'transform.y']);
   });
 });

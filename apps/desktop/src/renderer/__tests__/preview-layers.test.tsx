@@ -13,8 +13,8 @@
  * something a unit test can prove; it is exercised by hand in the app.
  */
 import React from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createDefaultTimeline, type TimelineState } from '@clipwright/timeline-engine';
 import { PreviewPane, volumeKeyframesFor } from '../features/editor/PreviewPane.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
@@ -373,5 +373,296 @@ describe('volume keyframes in the preview (SPEC 12 §6)', () => {
     expect(
       volumeKeyframesFor({ startUs: 0, keyframes: { opacity: [{ timeUs: 0, value: 0.5 }] } }),
     ).toBeUndefined();
+  });
+});
+
+describe('on-canvas drag editing (SPEC 12 Phase 4)', () => {
+  /** A timeline double with just the commands a drag calls. */
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  /**
+   * jsdom gives every element a 0×0 box, and the drag measures the canvas to convert
+   * pixels into fractions. Without a stubbed rectangle the conversion divides by zero
+   * and the drag is correctly ignored — which would make these tests pass by doing
+   * nothing. The size is set once and deliberately non-square (400×600) so a drag
+   * measured against the wrong axis cannot pass.
+   */
+  function stubCanvasBox() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('does not make the picture draggable without a timeline', () => {
+    // The preview is also rendered standalone; with no commands to call, the
+    // outline must not appear and must not promise an edit that cannot happen.
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} />);
+    expect(screen.queryByTestId('preview-selection')).toBeNull();
+  });
+
+  it('outlines the selected clip', () => {
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline()} />);
+    expect(screen.getByTestId('preview-selection')).toBeTruthy();
+  });
+
+  it('does not outline a clip that is not selected', () => {
+    render(
+      <PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline(['other'])} />,
+    );
+    expect(screen.queryByTestId('preview-selection')).toBeNull();
+  });
+
+  it('moves the clip by the drag, in canvas fractions', () => {
+    /*
+      40 pixels across a 400-wide canvas is a tenth of the width; 60 down a 600-tall
+      one is a tenth of the height. The two differ in pixels precisely so that a
+      conversion measured against the wrong axis produces a different number.
+    */
+    stubCanvasBox();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 240, 360));
+    fireEvent(layer, pointer('pointerup', 240, 360));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
+      transform: { x: 0.1, y: 0.1 },
+    });
+  });
+
+  it('commits once on release, not on every pointer move', () => {
+    /*
+      A drag is one undo step. Writing on every move would put forty entries on the
+      undo stack for one gesture, and "undo" would walk the clip back pixel by pixel.
+    */
+    stubCanvasBox();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 210, 300));
+    fireEvent(layer, pointer('pointermove', 220, 300));
+    fireEvent(layer, pointer('pointermove', 230, 300));
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    fireEvent(layer, pointer('pointerup', 230, 300));
+    expect(timeline.setItemProperties).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not commit a drag that ended where it started', () => {
+    // A plain click on the picture would otherwise cost an empty undo step.
+    stubCanvasBox();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointerup', 200, 300));
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('follows the pointer while the drag is in flight, before anything is written', () => {
+    /*
+      The picture has to move under the cursor; waiting for the commit would show
+      nothing until release. The check is on the wrapper's own transform, which is
+      what carries `transform.x/y`.
+    */
+    stubCanvasBox();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 280, 300));
+    expect(layer.style.transform).toContain('translate(20%');
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+});
+
+describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  /**
+   * The canvas is 400×600 and the layer fills it, so its drawn rectangle is the whole
+   * canvas — which puts the left edge at x=0. A pointer 2 px inside that edge is
+   * within the handle band; one at the centre is the move grip.
+   */
+  function stubBoxes() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('drags a crop edge instead of moving the clip', () => {
+    /*
+      A drag that began on an edge must write crop, not position. Getting this wrong
+      is subtle: the clip would slide instead of being framed, and the picture would
+      still change under the pointer, so it looks like "something happened".
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    // 2 px from the left edge, mid-height. 40 px of travel = a tenth of the width.
+    fireEvent(layer, pointer('pointerdown', 2, 300));
+    fireEvent(layer, pointer('pointermove', 42, 300));
+    fireEvent(layer, pointer('pointerup', 42, 300));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
+      crop: { left: 0.1 },
+    });
+    // The position must be untouched: one gesture, one property.
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.every((call) => !('transform' in (call[1] as object)))).toBe(true);
+  });
+
+  it('does not crop when the drag began in the middle of the picture', () => {
+    // The mirror case: a centre drag must not crop. Without this, a handle-zone that
+    // was too generous would silently crop every time someone repositioned a clip.
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 240, 300));
+    fireEvent(layer, pointer('pointerup', 240, 300));
+
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.every((call) => !('crop' in (call[1] as object)))).toBe(true);
+  });
+});
+
+describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC 12 §2.4)', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  function stubBox() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  const dragCentre = (layer: HTMLElement) => {
+    fireEvent(layer, pointer('pointerdown', 200, 300));
+    fireEvent(layer, pointer('pointermove', 240, 360));
+    fireEvent(layer, pointer('pointerup', 240, 360));
+  };
+
+  it('keys both position axes when the clip is already position-animated', () => {
+    /*
+      The rule is the same one the sliders follow: editing an animated property writes
+      a key at the playhead, because the evaluator reads the keys and ignores the
+      static value — so a static write here would be invisible. Both axes are keyed
+      because one drag moves the clip in two: keying x and statically setting y would
+      make the horizontal half animate and the vertical half snap, a diagonal path the
+      user never drew.
+    */
+    stubBox();
+    const timeline = fakeTimeline();
+    const state = makeState([{ id: 'a', keyframes: { 'transform.x': [{ timeUs: 0, value: 0, interpolation: 'linear' }] } }]);
+    render(<PreviewPane state={state} fps={30} timeline={timeline} />);
+    dragCentre(document.querySelector('[data-layer-id="a"]') as HTMLElement);
+
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    /*
+      The fixture's one key sits at time 0 and so does the playhead, so the writing
+      branch is *update*, not insert — a duplicate key at the same time would break
+      the model's "unique per property" rule. Both axes are updated even though only
+      x had a key: half a gesture is not an edit.
+    */
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('a', 'transform.x', 0, { value: 0.1 });
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('a', 'transform.y', 0, { value: 0.1 });
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+  });
+
+  it('inserts keys at the playhead when it sits between existing ones', () => {
+    // The insert branch: animated, but nothing keyed on this exact frame. The local
+    // time is the playhead minus the clip's start, since key times are item-local.
+    stubBox();
+    const timeline = fakeTimeline();
+    const state = makeState([
+      {
+        id: 'a',
+        startUs: 1_000_000,
+        keyframes: { 'transform.x': [{ timeUs: 0, value: 0, interpolation: 'linear' }] },
+      },
+    ]);
+    act(() => playheadStore.set(1_500_000));
+    render(<PreviewPane state={state} fps={30} timeline={timeline} />);
+    dragCentre(document.querySelector('[data-layer-id="a"]') as HTMLElement);
+
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('a', 'transform.x', 500_000, 0.1);
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('a', 'transform.y', 500_000, 0.1);
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    act(() => playheadStore.set(0));
+  });
+
+  it('moves the clip statically when it has no position keys', () => {
+    // The other half of the rule: a drag on a never-animated clip must move it, not
+    // silently start an animation.
+    stubBox();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    dragCentre(document.querySelector('[data-layer-id="a"]') as HTMLElement);
+
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], { transform: { x: 0.1, y: 0.1 } });
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+  });
+
+  it('keys a crop edge that is already animated', () => {
+    stubBox();
+    const timeline = fakeTimeline();
+    const state = makeState([
+      { id: 'a', keyframes: { 'crop.left': [{ timeUs: 0, value: 0, interpolation: 'linear' }] } },
+    ]);
+    render(<PreviewPane state={state} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 2, 300));
+    fireEvent(layer, pointer('pointermove', 42, 300));
+    fireEvent(layer, pointer('pointerup', 42, 300));
+
+    // A key already sits at the playhead, so this updates rather than inserting.
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('a', 'crop.left', 0, { value: 0.1 });
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
   });
 });

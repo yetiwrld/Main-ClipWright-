@@ -198,3 +198,54 @@ export function planPairedEdit(
     ? { kind: 'update-key', timeUs: local, value }
     : { kind: 'insert-key', timeUs: local, value };
 }
+
+/** The commands a keyframe write needs, so this logic stays out of React. */
+export interface KeyframeCommitWriter {
+  /** The playhead, already quantised to the project's frame grid. */
+  playheadUs: number;
+  addKeyframe: (itemId: string, path: string, timeUs: number, value: number) => boolean;
+  updateKeyframe: (itemId: string, path: string, timeUs: number, patch: { value: number }) => boolean;
+}
+
+/**
+ * Commit one edit — from the sidebar or from a canvas drag — following §2.4's rule.
+ *
+ * `entries` is a list because a single control sometimes governs more than one
+ * property: the uniform Scale field moves both axes, and dragging a clip moves its
+ * position in two dimensions. When two properties are edited by one gesture they are
+ * *keyed* together or not at all — keying one and statically setting the other would
+ * make half the gesture animate and half of it snap, which is a path the user never
+ * drew.
+ *
+ * A one-entry call is the ordinary single-property case, and its decision is exactly
+ * `planPropertyEdit`'s; a test asserts the two agree so they cannot drift.
+ *
+ * The caller supplies `editStatic` rather than a property name because the static
+ * write differs per control — a crop edge goes in a `crop` patch, a position in a
+ * `transform` patch — and rebuilding that distinction here would duplicate it.
+ */
+export function commitKeyed(
+  writer: KeyframeCommitWriter,
+  item: { id: string; startUs: number; durationUs: number; keyframes?: Record<string, Keyframe[]> },
+  entries: ReadonlyArray<{ path: string; value: number }>,
+  editStatic: () => void,
+): 'static' | 'keyed' {
+  const plan = planPairedEdit(
+    entries.map((entry) => item.keyframes?.[entry.path]),
+    item,
+    writer.playheadUs,
+    entries[0]?.value ?? 0,
+  );
+  if (plan.kind === 'static') {
+    editStatic();
+    return 'static';
+  }
+  for (const entry of entries) {
+    if (plan.kind === 'update-key') {
+      writer.updateKeyframe(item.id, entry.path, plan.timeUs, { value: entry.value });
+      continue;
+    }
+    writer.addKeyframe(item.id, entry.path, plan.timeUs, entry.value);
+  }
+  return 'keyed';
+}

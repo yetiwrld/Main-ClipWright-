@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { IconButton } from '@clipwright/design-system';
-import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
+import { formatTimecode, projectDurationUs, quantizeUs, type TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
 import {
@@ -19,6 +19,10 @@ import {
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
+import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
+import type { TimelineApi } from './use-timeline.js';
+import { useCanvasDrag } from './use-canvas-drag.js';
+import { commitKeyed } from './keyframe-controls.js';
 
 const MEDIA_ORIGIN = 'clipwright-media://media/';
 
@@ -210,13 +214,29 @@ export function PreviewPane({
   state,
   fps,
   captionStyles = {},
+  timeline,
 }: {
   state: TimelineState;
   fps: 30 | 60;
   /** Project-local caption styles, so the preview shows what the export will. */
   captionStyles?: Readonly<Record<string, CaptionStyle>>;
+  /**
+   * Enables on-canvas editing (SPEC 12 Phase 4). Optional because the preview is
+   * also rendered without an editor around it, and a picture with no commands to
+   * call is still a valid preview — the handles simply do not appear.
+   */
+  timeline?: TimelineApi;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  /**
+   * The canvas rectangle, measured on drag start rather than tracked continuously.
+   *
+   * Measuring per frame would mean a `getBoundingClientRect` on every pointer move,
+   * and more importantly the canvas does not resize *during* a drag: capturing it
+   * once is both cheaper and steadier, since a mid-drag layout shift would otherwise
+   * change the pixels-to-fraction ratio under the user's hand.
+   */
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -227,6 +247,60 @@ export function PreviewPane({
   // moves; reading `playheadStore.get()` without subscribing would animate only
   // when something else happened to re-render.
   const playheadUs = usePlayheadUs();
+
+  /*
+    On-canvas editing (SPEC 12 Phase 4): the selected clip gets an outline and can be
+    dragged to move it, or dragged by an edge to crop it. The commit runs once, on
+    release, so the whole gesture is one undo step.
+  */
+  const drag = useCanvasDrag(
+    useCallback(
+      (change) => {
+        if (!timeline) return;
+        const item = state.items[change.itemId];
+        if (!item) return;
+        /*
+          A finished drag follows the *same* §2.4 rule as the sidebar, through the same
+          function: moving a clip whose position is already animated writes a key at the
+          playhead instead of editing the static value. Routing both surfaces through
+          `commitKeyed` is what keeps a frame made by dragging identical to one made by
+          typing, and it is why this callback passes a list — a move touches two axes.
+        */
+        const writer = {
+          playheadUs: quantizeUs(playheadStore.get(), fps),
+          addKeyframe: (id: string, path: string, at: number, value: number) =>
+            timeline.addKeyframe(id, path, at, value),
+          updateKeyframe: (id: string, path: string, at: number, patch: { value: number }) =>
+            timeline.updateKeyframe(id, path, at, patch),
+        };
+        if (change.crop) {
+          const path = `crop.${change.crop.edge}`;
+          commitKeyed(
+            writer,
+            item,
+            [{ path, value: change.crop.value }],
+            () => timeline.setItemProperties([change.itemId], { crop: { [change.crop!.edge]: change.crop!.value } }),
+          );
+          return;
+        }
+        if (!change.transform) return;
+        const move = change.transform;
+        commitKeyed(
+          writer,
+          item,
+          [
+            { path: 'transform.x', value: move.x },
+            { path: 'transform.y', value: move.y },
+          ],
+          () => timeline.setItemProperties([change.itemId], { transform: { x: move.x, y: move.y } }),
+        );
+      },
+      // `state` is read for the item's stored values; changing it re-creates the
+      // callback, which is what makes the next gesture see the latest document.
+      [timeline, state, fps],
+    ),
+  );
+  const selectedId = timeline?.selection.length === 1 ? timeline.selection[0] : undefined;
 
 
 
@@ -433,6 +507,8 @@ export function PreviewPane({
         }}
       >
         <div
+          ref={canvasRef}
+          data-testid="preview-canvas"
           style={{
             position: 'relative',
             aspectRatio: state.canvas?.aspect ?? '9:16',
@@ -455,11 +531,55 @@ export function PreviewPane({
                 ...activeEffects(state.items[layer.id]?.effects),
                 ...effectsForLayer(adjustmentLayers, layer.trackOrder),
               ];
+              const item = state.items[layer.id]!;
+              const live = drag.preview(layer.id);
+              /*
+                The in-flight drag overrides the stored values, so the picture follows
+                the pointer without the document changing under the user's hand. Both
+                the *geometry* and the *element* have to read the live value: updating
+                only one would draw the picture in one place while its outline sat in
+                another.
+              */
+              const geometry = itemGeometry({
+                ...item,
+                ...(live ? { transform: { ...item.transform, x: live.x, y: live.y } } : {}),
+                ...(live ? { crop: live.crop } : {}),
+                timeUs: playheadUs,
+              });
+              const editable = Boolean(timeline) && selectedId === layer.id;
               return (
               <PreviewLayer
                 key={layer.id}
-                item={state.items[layer.id]!}
-                geometry={itemGeometry({ ...state.items[layer.id]!, timeUs: playheadUs })}
+                item={item}
+                geometry={geometry}
+                editable={editable}
+                dragging={drag.dragging}
+                onPointerDown={(event) => {
+                  if (!editable) return;
+                  // The drag surface is the layer's own wrapper: the clamp inside
+                  // `handleAt` measures against the drawn rectangle, so the edges
+                  // land where the picture's edges are.
+                  const box = event.currentTarget.getBoundingClientRect();
+                  drag.begin(
+                    event,
+                    {
+                      itemId: layer.id,
+                      x: live?.x ?? item.transform.x,
+                      y: live?.y ?? item.transform.y,
+                      crop: live?.crop ?? item.crop,
+                      rect: { x: 0, y: 0, width: box.width, height: box.height },
+                    },
+                    canvasRef.current,
+                  );
+                }}
+                onPointerMove={(event) => {
+                  if (!editable) return;
+                  drag.move(event);
+                }}
+                onPointerUp={(event) => {
+                  if (!editable) return;
+                  drag.end(event);
+                }}
                 opacity={layer.opacity * (transition?.fromOpacity ?? 1)}
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
@@ -715,9 +835,21 @@ const PreviewLayer = memo(function PreviewLayer({
   onPlayRejected,
   audio,
   reffed,
+  editable = false,
+  dragging = false,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
 }: {
   item: TimelineState['items'][string];
   geometry: ItemGeometry;
+  /** Whether this layer is the selected clip and the preview can edit it. */
+  editable?: boolean;
+  /** Whether a drag is in flight, which keeps the outline solid. */
+  dragging?: boolean;
+  onPointerDown?: (event: React.PointerEvent) => void;
+  onPointerMove?: (event: React.PointerEvent) => void;
+  onPointerUp?: (event: React.PointerEvent) => void;
   opacity: number;
   blendMode: string;
   /** Canvas aspect, used until the source reports its own. */
@@ -783,11 +915,18 @@ const PreviewLayer = memo(function PreviewLayer({
     <div
       data-testid="preview-item"
       data-layer-id={item.id}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
       style={{
         position: 'absolute',
         inset: 0,
         opacity,
         mixBlendMode: CSS_BLEND_MODE[blendMode] ?? 'normal',
+        // The edit surface must receive the pointer even at full transparency, or a
+        // clip faded to zero becomes impossible to select or drag — the one moment a
+        // user most wants to grab it.
+        ...(editable ? { cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' } : {}),
         // The transition's slide adds to the item's own offset: both are frame
         // fractions, so they compose without conversion.
         transform: `translate(${(geometry.offsetX + transitionOffsetX) * 100}%, ${
@@ -820,6 +959,50 @@ const PreviewLayer = memo(function PreviewLayer({
           overflow: 'hidden',
         }}
       >
+        {/*
+          The selection outline sits on the *fit* element, not the layer wrapper: this
+          is the rectangle the crop actually carves out, so the handles land where the
+          visible edges are. Putting it on the wrapper would outline the whole canvas
+          and the edge drags would be measured against the wrong rectangle.
+        */}
+        {editable ? (
+          <div
+            data-testid="preview-selection"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              outline: `1px solid ${dragging ? 'var(--brand)' : 'var(--text-secondary)'}`,
+              outlineOffset: 0,
+              // A second, dashed ring inside keeps the edge visible over both bright
+              // and dark footage; one colour alone disappears against one or the other.
+              boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.45)',
+            }}
+          >
+            {/*
+              Corner grips, drawn only as a cue — the hit test is along the whole edge
+              (`handleAt`), so a user who grabs slightly off a corner still crops.
+            */}
+            {(['left', 'right', 'top', 'bottom'] as const).map((edge) => (
+              <div
+                key={edge}
+                data-testid={`preview-handle-${edge}`}
+                style={{
+                  position: 'absolute',
+                  ...(edge === 'left' ? { left: 0, top: '50%' } : {}),
+                  ...(edge === 'right' ? { right: 0, top: '50%' } : {}),
+                  ...(edge === 'top' ? { top: 0, left: '50%' } : {}),
+                  ...(edge === 'bottom' ? { bottom: 0, left: '50%' } : {}),
+                  width: HANDLE_SIZE / 2,
+                  height: HANDLE_SIZE / 2,
+                  transform: 'translate(-50%, -50%)',
+                  background: 'var(--brand)',
+                  border: '1px solid var(--surface-app)',
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
         <video
           ref={reffed}
           src={src}

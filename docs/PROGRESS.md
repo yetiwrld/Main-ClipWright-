@@ -132,8 +132,11 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — canvas editing (drag to crop, framing, anchor grid) and
-proxy playback. The keyframe **curve editor** now exists as a bottom drawer
+**1. Finish Phase 4 ⚠️** — the anchor grid, rotation and scale handles, and proxy
+playback. Canvas drag editing landed: a selected clip's picture can be dragged to
+move it and its edges dragged to crop, converted from pixels into canvas fractions
+so a gesture means the same at any preview size, and committed once on release so
+the whole drag is one undo step. The keyframe **curve editor** now exists as a bottom drawer
 (`Ctrl+Shift+C`): it graphs each keyframed numeric property, lets a control handle
 be dragged and writes it as a single undo step, and it is what made `bezier`
 reachable at all — the schema and the evaluator carried the field while no command

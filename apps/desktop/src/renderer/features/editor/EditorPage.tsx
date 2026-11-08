@@ -270,7 +270,7 @@ export function EditorPage({
             }}
           >
             {state ? (
-              <PreviewPane state={state} fps={timeline.fps} captionStyles={captionStyles.styles} />
+              <PreviewPane state={state} fps={timeline.fps} captionStyles={captionStyles.styles} timeline={timeline} />
             ) : (
               <div style={{ padding: 'var(--space-3)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 {timeline.loadError || 'Loading the preview…'}
