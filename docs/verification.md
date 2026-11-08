@@ -157,7 +157,7 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | Gap | Why |
 |---|---|
 | A packaged Windows installer has been produced | No installer exists here: `electron-builder` needs the Electron binary and the Windows toolchain, and neither can be downloaded in this environment (`Cannot compute electron version from installed node modules`). The app bundle itself is built and verified; the packaging step after it never ran |
-| `electron-builder` has ever completed | **Never, in any environment.** It failed at the first step here for two reasons, both now fixed statically: Electron was declared only at the workspace root, and `electronVersion` was not pinned. Both would have failed the release job at its last step. `check-repo` now cross-checks the builder config against `package.json` so at least the configuration is not the thing that fails |
+| `electron-builder` has ever completed | **Never, in any environment.** It now gets as far as reading the config (`loaded configuration … electron-builder.yml`) and pinning `electronVersion=34.2.0`, then fails cross-compiling `better-sqlite3` from Linux — `node-gyp does not support cross-compiling native modules from source`. The release workflow runs on `windows-latest`, where that step is native, so the configuration is no longer what stands in the way; the Windows toolchain is |
 | A real GitHub release, end to end | No published release exists yet; the tests use a fake network with real cryptography |
 | `electron-updater` driving an actual download | `electron-updater` is injected and faked in tests; the real library is exercised only in a packaged build |
 | Installing an update and relaunching | Needs Windows and a published release |
@@ -193,6 +193,7 @@ Verified by `update-service.test.ts` (36 tests), `update-core` (135 tests),
 | Main process builds to `dist/main/index.cjs` | Yes; 561 KB across 12 files, loads under stubbed Electron |
 | Renderer uses relative URLs (`file://` safe) | `index.html` references `./assets/...` |
 | `assert-package.mjs` catches a package with no installer | Yes — exits 1 on this checkout, naming the missing artefacts |
+| `assert-package.mjs` catches a package missing its native module | Yes — proven against a synthetic package tree: a stripped `better-sqlite3`, a missing `app.asar.unpacked`, and a corrupt asar each exit 1 with a specific message; the healthy tree passes |
 | `verify-binaries.mjs` catches unpinned hashes | Yes — exits 1, naming all three binaries and the missing `checksums.json` |
 | `extract-notes.mjs` produces notes from the CHANGELOG | Yes; refuses a version that has no section |
 | `make-manifest.mjs` signs and self-verifies | Yes, with real keys over real files |
