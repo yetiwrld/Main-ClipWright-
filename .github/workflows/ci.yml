@@ -79,46 +79,44 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          VERSION=8.24.3
+          # Pinned in the repository rather than fetched alongside the binary.
+          # The release CDN (release-assets.githubusercontent.com) has returned a
+          # 404, a 504 and a dropped TLS connection for these assets on three
+          # separate runs. A scanner whose integrity depends on a second request
+          # to the same flaky host is one request too many: the checksum is a
+          # value, so it belongs in version control where a change to it shows up
+          # in review.
+          #
+          # The digest is the one GitHub reports for the release asset
+          # (`gh api repos/gitleaks/gitleaks/releases/tags/v8.30.1`).
+          VERSION=8.30.1
           ASSET="gitleaks_${VERSION}_windows_x64.zip"
+          EXPECTED="d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
           BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
 
           echo "Downloading ${ASSET}"
-          # Retry, then fall back to `gh`, which is authenticated. The release CDN
-          # returned a 404 and then an HTTP error on consecutive runs for an asset
-          # that exists — a security gate that fails on a flaky CDN teaches people
-          # to re-run the job rather than to read it.
-          fetch() {
-            local url="$1" out="$2"
-            for attempt in 1 2 3; do
-              if curl -sSfL --retry 2 --retry-delay 2 -o "$out" "$url"; then return 0; fi
-              echo "attempt ${attempt} failed for ${url}"
-              sleep $((attempt * 2))
-            done
+          # Three sources, tried in order. `gh` takes a different route to the
+          # same bytes and is authenticated, so it survives CDN wobble that
+          # `curl` does not.
+          obtain() {
+            [ -s "$ASSET" ] && return 0
+            if curl -sSfL --retry 3 --retry-delay 2 --retry-all-errors \
+                 --max-time 120 -o "$ASSET" "$1"; then return 0; fi
+            echo "curl did not get ${ASSET}; trying gh release download"
+            rm -f "$ASSET"
+            if gh release download "v${VERSION}" --repo gitleaks/gitleaks \
+                 --pattern "$ASSET" --clobber; then return 0; fi
             return 1
           }
-          if ! fetch "${BASE}/${ASSET}" "$ASSET"; then
-            echo "curl failed; falling back to gh release download"
-            gh release download "v${VERSION}" --repo gitleaks/gitleaks --pattern "$ASSET" --clobber \
-              || { echo "::error::could not download ${ASSET} from ${BASE}"; exit 1; }
-          fi
-          ls -l "$ASSET"
-          # The published checksums, checked before the binary is run: fetching an
-          # scanner over the network and executing it is a supply-chain step, and
-          # an unpinned one would be a poor example for this repository.
-          fetch "${BASE}/gitleaks_${VERSION}_checksums.txt" checksums.txt \
-            || { echo "::error::could not download the checksum file"; exit 1; }
-          expected=$(grep " ${ASSET}$" checksums.txt | cut -d' ' -f1)
-          if [ -z "$expected" ]; then
-            echo "::error::no checksum published for ${ASSET}"
-            exit 1
-          fi
+          obtain "${BASE}/${ASSET}" \
+            || { echo "::error::could not download ${ASSET}"; exit 1; }
+
           actual=$(sha256sum "$ASSET" | cut -d' ' -f1)
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::checksum mismatch for ${ASSET}: expected $expected, got $actual"
+          if [ "$EXPECTED" != "$actual" ]; then
+            echo "::error::checksum mismatch for ${ASSET}: expected ${EXPECTED}, got ${actual}"
             exit 1
           fi
-          echo "Checksum verified: $actual"
+          echo "Checksum verified: ${actual} ($(wc -c < "$ASSET") bytes)"
 
           powershell -Command "Expand-Archive -Path '$ASSET' -DestinationPath . -Force"
           ./gitleaks.exe version
