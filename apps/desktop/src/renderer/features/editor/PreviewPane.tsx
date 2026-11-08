@@ -1,14 +1,32 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { IconButton } from '@clipwright/design-system';
 import { formatTimecode, projectDurationUs, type TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
-import { itemGeometry } from '@clipwright/compositor';
+import { itemGeometry, visibleLayers, type ItemGeometry, type VisibleLayer } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
 
 const MEDIA_ORIGIN = 'clipwright-media://media/';
+
+/**
+ * The timeline's blend mode name → the CSS keyword that means the same thing.
+ *
+ * Only `add` differs: the schema calls additive blending `add` (the name ffmpeg's
+ * `addition` mode is reported under in our own export), while CSS calls it
+ * `plus-lighter`. Passing `add` through unchanged is invalid CSS, so the browser
+ * silently drops the declaration and the layer paints as if it were `normal` —
+ * a bug that looks like blending being ignored. The rest happen to agree.
+ */
+const CSS_BLEND_MODE: Record<string, React.CSSProperties['mixBlendMode']> = {
+  normal: 'normal',
+  multiply: 'multiply',
+  screen: 'screen',
+  overlay: 'overlay',
+  add: 'plus-lighter',
+  'soft-light': 'soft-light',
+};
 
 /**
  * Preview canvas (SPEC 10 first slice): shows the frame under the playhead from
@@ -29,79 +47,15 @@ export function PreviewPane({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [missing, setMissing] = useState(false);
-  // The source's own aspect ratio, known only after the first frame's metadata.
-  // Until then the canvas ratio is the best guess, which is also what the element
-  // was doing before crop existed.
-  const [sourceAspect, setSourceAspect] = useState((state.canvas?.width ?? 1080) / (state.canvas?.height ?? 1920));
   const durationUs = projectDurationUs(state);
 
-  // The item that is showing at a given time; read imperatively so playback does
-  // not re-render the whole editor.
-  const itemAt = useCallback(
-    (us: number) =>
-      Object.values(state.items)
-        .filter((item) => (item.type === 'video' || item.type === 'image') && item.mediaId)
-        .filter((item) => us >= item.startUs && us < item.startUs + item.durationUs)
-        .sort((a, b) => b.startUs - a.startUs)[0] ?? null,
-    [state],
-  );
+  const canvas = state.canvas ?? { width: 1080, height: 1920, aspect: '9:16' };
+  // Subscribing to the playhead is what makes a keyframed property redraw as time
+  // moves; reading `playheadStore.get()` without subscribing would animate only
+  // when something else happened to re-render.
+  const playheadUs = usePlayheadUs();
 
-  const syncVideo = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const us = playheadStore.get();
-    const item = itemAt(us);
-    if (!item) {
-      setMissing(true);
-      video.pause();
-      return;
-    }
-    setMissing(false);
-    const sourceUs = item.sourceInUs + (us - item.startUs) * (item.speed ?? 1);
-    const target = sourceUs / 1_000_000;
-    if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.08) {
-      video.currentTime = target;
-    }
 
-    // The preview's level comes from the same envelope the export mixes with
-    // (SPEC 12 §6.1). Reading the item's own volume is not enough: a fade or a
-    // keyframed volume lives in the envelope, and a preview that ignores it sounds
-    // different from the file — which is the one thing a preview must not do.
-    //
-    // The track's mute/solo state is folded in here too, because the video element
-    // has no notion of tracks.
-    const track = state.tracks.find((candidate) => candidate.id === item.trackId);
-    const anySolo = state.tracks.some((candidate) => candidate.solo);
-    video.volume = gainAt(
-      {
-        startUs: item.startUs,
-        durationUs: item.durationUs,
-        gainDb: item.gainDb ?? 0,
-        volumeDb: item.volumeDb ?? 0,
-        fadeInUs: item.fadeInUs,
-        fadeOutUs: item.fadeOutUs,
-        fadeCurve: item.fadeCurve,
-        muted: Boolean(item.muted),
-        trackMuted: Boolean(track?.muted),
-        silencedBySolo: anySolo && !track?.solo,
-      },
-      us,
-    );
-  }, [itemAt, state]);
-
-  // Follow the playhead while it moves (scrubbing and playback alike).
-  useEffect(() => {
-    const unsubscribe = playheadStore.subscribe(syncVideo);
-    syncVideo();
-    return unsubscribe;
-  }, [syncVideo]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (playing) void video.play().catch(() => setPlaying(false));
-    else video.pause();
-  }, [playing]);
 
   // Playback clock (SPEC 09 §23): advance on animation frames, stop at the end.
   useEffect(() => {
@@ -130,19 +84,85 @@ export function PreviewPane({
     return () => window.removeEventListener('clipwright:toggle-play', toggle);
   }, []);
 
-  const activeItemId = useSyncExternalStore(
-    playheadStore.subscribe,
-    () => itemAt(playheadStore.get())?.id ?? null,
-    () => null,
+
+
+  /**
+   * Every picture layer at the playhead, bottom first (SPEC 10 §2/§6).
+   *
+   * The preview used to draw exactly one item — the one that started last — so an
+   * overlay clip was invisible and the main video showed through it. Layering is
+   * resolved by the same `visibleLayers` the export uses, which is what stops the
+   * two from disagreeing about which clip is on top.
+   */
+  const layers = useMemo(
+    () =>
+      visibleLayers(
+        Object.values(state.items)
+          .filter((entry) => (entry.type === 'video' || entry.type === 'image') && entry.mediaId)
+          .map((entry) => ({
+            id: entry.id,
+            startUs: entry.startUs,
+            durationUs: entry.durationUs,
+            trackOrder: state.tracks.find((track) => track.id === entry.trackId)?.order ?? 0,
+            opacity: entry.opacity,
+            blendMode: entry.blendMode,
+            keyframes: entry.keyframes,
+            disabled: entry.disabled,
+            hiddenTrack: Boolean(state.tracks.find((track) => track.id === entry.trackId)?.hidden),
+          })),
+        playheadUs,
+      ),
+    [state, playheadUs],
   );
-  const item = activeItemId ? (state.items[activeItemId] ?? null) : null;
-  const src = item?.mediaId ? `${MEDIA_ORIGIN}${encodeURIComponent(item.mediaId)}` : undefined;
-  const canvas = state.canvas ?? { width: 1080, height: 1920, aspect: '9:16' };
-  // The playhead is read through the same subscription as `item`, so a keyframed
-  // property redraws as time moves. Reading `playheadStore.get()` here without
-  // subscribing would animate only when something else happened to re-render.
-  const playheadUs = usePlayheadUs();
-  const geometry = itemGeometry({ ...(item ?? {}), timeUs: playheadUs });
+
+  // Sound comes from the bottom picture layer only — the one `videoRef` points at.
+  // Each layer seeks itself; this function must not seek or the two would fight
+  // over the same element.
+  const syncVideo = useCallback(() => {
+    const video = videoRef.current;
+    const us = playheadStore.get();
+    const bottom = layers[0] ? state.items[layers[0].id] : undefined;
+    if (!video || !bottom) {
+      setMissing(true);
+      video?.pause();
+      return;
+    }
+    setMissing(false);
+
+    // The preview's level comes from the same envelope the export mixes with
+    // (SPEC 12 §6.1). Reading the item's own volume is not enough: a fade or a
+    // keyframed volume lives in the envelope, and a preview that ignores it sounds
+    // different from the file — which is the one thing a preview must not do.
+    //
+    // The track's mute/solo state is folded in here too, because the video element
+    // has no notion of tracks.
+    const track = state.tracks.find((candidate) => candidate.id === bottom.trackId);
+    const anySolo = state.tracks.some((candidate) => candidate.solo);
+    video.volume = gainAt(
+      {
+        startUs: bottom.startUs,
+        durationUs: bottom.durationUs,
+        gainDb: bottom.gainDb ?? 0,
+        volumeDb: bottom.volumeDb ?? 0,
+        fadeInUs: bottom.fadeInUs,
+        fadeOutUs: bottom.fadeOutUs,
+        fadeCurve: bottom.fadeCurve,
+        muted: Boolean(bottom.muted),
+        trackMuted: Boolean(track?.muted),
+        silencedBySolo: anySolo && !track?.solo,
+      },
+      us,
+    );
+  }, [layers, state]);
+
+  // Follow the playhead while it moves (scrubbing and playback alike).
+  useEffect(() => {
+    const unsubscribe = playheadStore.subscribe(syncVideo);
+    syncVideo();
+    return unsubscribe;
+  }, [syncVideo]);
+
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -170,71 +190,24 @@ export function PreviewPane({
             border: '1px solid var(--line-subtle)',
           }}
         >
-          {src && !missing ? (
-            /*
-              Crop is a source-rectangle selection, not a clip: the surviving part
-              of the source is fitted to the canvas exactly as the whole source
-              would have been, so an uncropped item looks the same as before and a
-              cropped one does not stretch (SPEC 14 §3.2: never stretch). The
-              fitted box is sized from the crop's own aspect ratio; the video inside
-              it is oversized by the crop factors and offset, which makes the box
-              show precisely the cropped region.
-
-              The transform sits on a wrapper rather than the <video> so it does not
-              also move or scale the caption canvas drawn above it (SPEC 10 §4).
-            */
-            <div
-              data-testid="preview-item"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                // `inset: 0` makes this the canvas, so these percentages are
-                // percentages of the frame — the unit `transform.x/y` is stored in.
-                transform: `translate(${geometry.offsetX * 100}%, ${geometry.offsetY * 100}%)`,
-              }}
-            >
-              <div
-                data-testid="preview-item-fit"
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: `translate(-50%, -50%) scale(${
-                    geometry.scaleX * (geometry.flipH ? -1 : 1)
-                  }, ${geometry.scaleY * (geometry.flipV ? -1 : 1)}) rotate(${geometry.rotation}deg)`,
-                  // Fitted inside the canvas, preserving the cropped aspect.
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  aspectRatio: `${geometry.source.width * sourceAspect} / ${
-                    geometry.source.height
-                  }`,
-                  width: '100%',
-                  overflow: 'hidden',
-                }}
-              >
-                <video
-                  ref={videoRef}
-                  src={src}
-                  muted={muted}
-                  playsInline
-                  crossOrigin="anonymous"
-                  onLoadedMetadata={(event) => {
-                    const { videoWidth, videoHeight } = event.currentTarget;
-                    if (videoWidth > 0 && videoHeight > 0) setSourceAspect(videoWidth / videoHeight);
-                  }}
-                  style={{
-                    position: 'absolute',
-                    // Oversized by 1/crop and shifted by the crop origin: the box
-                    // then shows the cropped rectangle and nothing else.
-                    left: `${-(geometry.source.x / geometry.source.width) * 100}%`,
-                    top: `${-(geometry.source.y / geometry.source.height) * 100}%`,
-                    width: `${100 / geometry.source.width}%`,
-                    height: `${100 / geometry.source.height}%`,
-                    objectFit: 'fill',
-                  }}
-                />
-              </div>
-            </div>
+          {layers.length > 0 ? (
+            layers.map((layer: VisibleLayer, index: number) => (
+              <PreviewLayer
+                key={layer.id}
+                item={state.items[layer.id]!}
+                geometry={itemGeometry({ ...state.items[layer.id]!, timeUs: playheadUs })}
+                opacity={layer.opacity}
+                blendMode={layer.blendMode}
+                initialAspect={canvas.width / canvas.height}
+                muted={muted}
+                playing={playing}
+                onPlayRejected={() => setPlaying(false)}
+                // Only the bottom layer carries sound: two <video> elements both
+                // playing the same source double the volume and echo by a frame.
+                audio={index === 0}
+                reffed={index === 0 ? videoRef : undefined}
+              />
+            ))
           ) : (
             <div
               style={{
@@ -325,3 +298,134 @@ function TransportTimecode({ fps, durationUs }: { fps: 30 | 60; durationUs: numb
     </span>
   );
 }
+
+
+/**
+ * One picture layer of the preview (SPEC 10 §2/§6).
+ *
+ * Extracted from the canvas so the frame can hold more than one. The crop,
+ * transform and flip work exactly as they did when there was a single item; what
+ * is new is that each layer carries its own opacity and blend mode, applied with
+ * CSS because the browser already composites this way and re-implementing the
+ * blend maths in JavaScript would be slower *and* a second definition of what a
+ * `multiply` is.
+ *
+ * `mix-blend-mode` blends against everything painted below it inside the same
+ * stacking context, which is the canvas — so a `screen` overlay picks up the main
+ * video, not the app chrome behind it.
+ */
+const PreviewLayer = memo(function PreviewLayer({
+  item,
+  geometry,
+  opacity,
+  blendMode,
+  initialAspect,
+  muted,
+  playing,
+  onPlayRejected,
+  audio,
+  reffed,
+}: {
+  item: TimelineState['items'][string];
+  geometry: ItemGeometry;
+  opacity: number;
+  blendMode: string;
+  /** Canvas aspect, used until the source reports its own. */
+  initialAspect: number;
+  muted: boolean;
+  playing: boolean;
+  onPlayRejected: () => void;
+  /** Whether this layer supplies sound. Only the bottom layer does. */
+  audio: boolean;
+  reffed?: React.MutableRefObject<HTMLVideoElement | null>;
+}) {
+  // The source's own aspect ratio, known only after the first frame's metadata.
+  // Until then the canvas ratio is the best guess, which is also what the element
+  // was doing before crop existed.
+  const [sourceAspect, setSourceAspect] = useState(initialAspect);
+  const src = item.mediaId ? `${MEDIA_ORIGIN}${encodeURIComponent(item.mediaId)}` : undefined;
+  const fitRef = useRef<HTMLDivElement>(null);
+
+  // Each layer's <video> has to follow the playhead on its own: they carry
+  // different source in-points, so one shared `currentTime` would put every layer
+  // at the same frame of the same file.
+  useEffect(() => {
+    const video = fitRef.current?.querySelector('video');
+    if (!video) return;
+    const sync = () => {
+      const us = playheadStore.get();
+      const sourceUs = item.sourceInUs + (us - item.startUs) * (item.speed ?? 1);
+      const target = sourceUs / 1_000_000;
+      if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.08) {
+        video.currentTime = target;
+      }
+    };
+    const unsubscribe = playheadStore.subscribe(sync);
+    sync();
+    return unsubscribe;
+  }, [item.sourceInUs, item.startUs, item.speed]);
+
+  // Every layer plays its own element: the parent used to call `play()` on the
+  // single <video>, and with a stack the overlays would sit frozen on their first
+  // frame while the layer beneath them ran.
+  useEffect(() => {
+    const video = fitRef.current?.querySelector('video');
+    if (!video) return;
+    if (playing) void video.play().catch(onPlayRejected);
+    else video.pause();
+  }, [playing, onPlayRejected]);
+
+  if (!src) return null;
+
+  return (
+    <div
+      data-testid="preview-item"
+      data-layer-id={item.id}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity,
+        mixBlendMode: CSS_BLEND_MODE[blendMode] ?? 'normal',
+        transform: `translate(${geometry.offsetX * 100}%, ${geometry.offsetY * 100}%)`,
+      }}
+    >
+      <div
+        ref={fitRef}
+        data-testid="preview-item-fit"
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: `translate(-50%, -50%) scale(${
+            geometry.scaleX * (geometry.flipH ? -1 : 1)
+          }, ${geometry.scaleY * (geometry.flipV ? -1 : 1)}) rotate(${geometry.rotation}deg)`,
+          maxWidth: '100%',
+          maxHeight: '100%',
+          aspectRatio: `${geometry.source.width * sourceAspect} / ${geometry.source.height}`,
+          width: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        <video
+          ref={reffed}
+          src={src}
+          muted={muted || !audio}
+          playsInline
+          crossOrigin="anonymous"
+          onLoadedMetadata={(event) => {
+            const { videoWidth, videoHeight } = event.currentTarget;
+            if (videoWidth > 0 && videoHeight > 0) setSourceAspect(videoWidth / videoHeight);
+          }}
+          style={{
+            position: 'absolute',
+            left: `${-(geometry.source.x / geometry.source.width) * 100}%`,
+            top: `${-(geometry.source.y / geometry.source.height) * 100}%`,
+            width: `${100 / geometry.source.width}%`,
+            height: `${100 / geometry.source.height}%`,
+            objectFit: 'fill',
+          }}
+        />
+      </div>
+    </div>
+  );
+});

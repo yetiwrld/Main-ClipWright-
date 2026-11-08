@@ -76,6 +76,20 @@ export interface PlannedItem {
    * as several constant segments rather than one expression.
    */
   keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
+  /**
+   * Opacity at the start of the item, 0–1 (SPEC 10 §6). Absent means opaque.
+   * Carried so the export can fade a layer instead of painting it solid, which is
+   * what the inspector's slider has always looked like it does.
+   */
+  opacity?: number;
+  /** Blend mode against the layers below (SPEC 10 §6). Absent means `normal`. */
+  blendMode?: string;
+  /**
+   * Track stacking order, larger is nearer the viewer. Needed to composite: two
+   * visible items are otherwise an unordered set, and the export would have to
+   * guess which one is on top.
+   */
+  trackOrder?: number;
 }
 
 /** Export plan describing the full render. */
@@ -139,6 +153,14 @@ export interface ExportPlan {
   targetLufs: number;
   /** Whether this is a draft export. */
   isDraft: boolean;
+  /**
+   * Canvas colour behind every layer, as `#rrggbb` (SPEC 10 §4.1).
+   *
+   * The compositor needs it: a faded bottom layer mixes toward the canvas, not
+   * toward black, so a project on a white canvas must not export a grey frame just
+   * because its only clip is at 50 %. Absent means black.
+   */
+  backgroundColor?: string;
 }
 
 /** Export settings input to the planner. */
@@ -162,6 +184,8 @@ export interface ExportSettings {
   normaliseLoudness: boolean;
   targetLufs: number;
   isDraft: boolean;
+  /** Canvas colour behind every layer, `#rrggbb`. */
+  backgroundColor?: string;
   /** Timeline range to export: [startUs, endUs]. */
   rangeUs: [number, number];
   /** Composition fps for re-sampling checks. */
@@ -205,6 +229,12 @@ export interface ExportSettings {
         flipV?: boolean;
       };
     };
+    /** Item opacity, 0–1 (SPEC 10 §6). */
+    opacity?: number;
+    /** Blend mode against the layers below (SPEC 10 §6). */
+    blendMode?: string;
+    /** Stacking order of the item's track; larger is nearer the viewer. */
+    trackOrder?: number;
   }>;
 }
 
@@ -277,6 +307,9 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         captionStyleId: item.captionStyleId,
         geometry: item.geometry,
         keyframes: item.keyframes,
+        opacity: item.opacity,
+        blendMode: item.blendMode,
+        trackOrder: item.trackOrder,
         captionSegment: item.captionSegment,
       };
     })
@@ -316,6 +349,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
     normaliseLoudness: settings.normaliseLoudness,
     targetLufs: settings.targetLufs,
     isDraft: settings.isDraft,
+    backgroundColor: settings.backgroundColor,
   };
 }
 

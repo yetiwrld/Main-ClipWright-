@@ -8,7 +8,7 @@
  * footage, or a frame-count drift would all be caught here.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDecodeFrameSource, blankFrame } from '../export/decode-frame-source.js';
@@ -504,4 +504,239 @@ describe.skipIf(!HAS_FFMPEG)('segmented decode arguments', () => {
     expect(chain).toContain('trim=0.500000:1.000000');
     expect(chain).toContain('concat=n=2:v=1:a=0[out]');
   });
+});
+
+/**
+ * SPEC 10 §2/§6 — layering has to change the exported pixels.
+ *
+ * The frame source used to return the topmost visible item and throw the rest
+ * away, so an overlay clip's opacity, blend mode and even its *existence* were
+ * invisible in the file. These tests decode the produced file and measure it: a
+ * solid-colour layer over a solid-colour base makes the expected result a number,
+ * and a compositor that quietly does nothing gives a different number.
+ */
+describe.skipIf(!HAS_FFMPEG)('layering during export', () => {
+  /** A one-second solid-colour video at the export's own resolution. */
+  function makeSolidSource(name: string, rgb: [number, number, number], width = 1280, height = 720): string {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, name);
+    const rawPath = join(TMP, `${name}.rgb`);
+    const frame = Buffer.alloc(width * height * 3);
+    for (let index = 0; index < frame.length; index += 3) {
+      frame[index] = rgb[0];
+      frame[index + 1] = rgb[1];
+      frame[index + 2] = rgb[2];
+    }
+    writeFileSync(rawPath, Buffer.concat(Array.from({ length: 30 }, () => frame)));
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-nostdin', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+        '-s', `${width}x${height}`, '-framerate', '30', '-i', rawPath,
+        // Force BT.709 through RGB so the source is tagged and converted the same
+        // way the compositor decodes it; swscale would otherwise pick BT.601.
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-c:v', 'libx264', '-crf', '12', '-preset', 'ultrafast',
+        '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_primaries', 'bt709',
+        '-color_trc', 'bt709', '-color_range', 'tv', '-y', path],
+      { stdio: 'ignore' },
+    );
+    rmSync(rawPath, { force: true });
+    return path;
+  }
+
+  /** Decode the last frame of a file straight to RGB and average each channel. */
+  function decodedChannelMeans(path: string): [number, number, number] {
+    const rgbPath = join(TMP, 'probe.rgb');
+    execFileSync(
+      ffmpegPath(),
+      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-sseof', '-0.1', '-i', path,
+        '-frames:v', '1',
+        '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-y', rgbPath],
+      { stdio: 'ignore' },
+    );
+    const raw = readFileSync(rgbPath);
+    rmSync(rgbPath, { force: true });
+    const sums = [0, 0, 0];
+    for (let index = 0; index < raw.length; index += 3) {
+      sums[0] += raw[index]!;
+      sums[1] += raw[index + 1]!;
+      sums[2] += raw[index + 2]!;
+    }
+    const pixels = raw.length / 3;
+    return [sums[0]! / pixels, sums[1]! / pixels, sums[2]! / pixels];
+  }
+
+  /** Plan + settings for a base clip plus one overlay on a higher track. */
+  function twoLayerJob(options: {
+    base: string;
+    overlay: string;
+    opacity?: number;
+    blendMode?: string;
+    overlayOrder?: number;
+  }) {
+    const resolvePath = (mediaId: string) =>
+      mediaId === 'media-base' ? options.base : options.overlay;
+    const items = [
+      {
+        id: 'item-base',
+        trackId: 'track-main',
+        type: 'video',
+        mediaId: 'media-base',
+        startUs: 0,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        sourceDurationUs: 1_000_000,
+        disabled: false,
+        muted: false,
+        hasAudio: false,
+        trackOrder: 0,
+      },
+      {
+        id: 'item-overlay',
+        trackId: 'track-overlay',
+        type: 'video',
+        mediaId: 'media-overlay',
+        startUs: 0,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        sourceDurationUs: 1_000_000,
+        disabled: false,
+        muted: false,
+        hasAudio: false,
+        opacity: options.opacity,
+        blendMode: options.blendMode,
+        trackOrder: options.overlayOrder ?? 10,
+      },
+    ];
+    const settings = makeSettings({ items: items as never, rangeUs: [0, 500_000] });
+    const plan = buildExportPlan(settings);
+    return { plan, settings, resolveMediaPath: resolvePath };
+  }
+
+  it('blends an overlay onto the video underneath instead of replacing it', async () => {
+    // Base light grey, overlay mid grey at 50 %: the result must be between them.
+    // "Topmost wins" would give exactly the overlay's own colour.
+    const base = makeSolidSource('layer-base.mp4', [200, 200, 200]);
+    const overlay = makeSolidSource('layer-overlay.mp4', [100, 100, 100]);
+    const job = twoLayerJob({ base, overlay, opacity: 0.5 });
+    const outputPath = join(TMP, 'layer-blend.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-layer-blend',
+      settings: job.settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan: job.plan, resolveMediaPath: job.resolveMediaPath }),
+      fullDecode: true,
+    });
+    expect(result.status, JSON.stringify(result.validation?.checks, null, 2)).toBe('verified');
+
+    const [red, green, blue] = decodedChannelMeans(outputPath);
+    // 0.5·100 + 0.5·200 = 150. Allow a wide-ish window for two rounds of 4:2:0
+    // chroma subsampling and x264, but nothing near the 100 or 200 endpoints —
+    // either of those means the layer was not composited at all.
+    for (const channel of [red, green, blue]) {
+      expect(channel).toBeGreaterThan(135);
+      expect(channel).toBeLessThan(165);
+    }
+  }, 120_000);
+
+  it('multiplies rather than covering when the layer asks for it', async () => {
+    // 200 × 0.5 ≈ 100 for the grey means multiply is a real darkening, not a fade.
+    const base = makeSolidSource('mul-base.mp4', [200, 200, 200]);
+    const overlay = makeSolidSource('mul-overlay.mp4', [128, 128, 128]);
+    const job = twoLayerJob({ base, overlay, opacity: 1, blendMode: 'multiply' });
+    const outputPath = join(TMP, 'layer-multiply.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-layer-multiply',
+      settings: job.settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan: job.plan, resolveMediaPath: job.resolveMediaPath }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red] = decodedChannelMeans(outputPath);
+    // 200/255 × 128/255 × 255 ≈ 100. `normal` would leave 128.
+    expect(red).toBeGreaterThan(85);
+    expect(red).toBeLessThan(115);
+  }, 120_000);
+
+  it('honours track order, not plan order, when deciding what is on top', async () => {
+    // Two opaque, full-opacity layers: whichever is composited last wins. The plan
+    // lists them in id order (`item-base` before `item-overlay`), and the base sits
+    // on the lower track — so a compositor that trusted plan order would paint the
+    // overlay and then cover it with the base. Swapping the two items' *ids* while
+    // keeping their tracks makes the two orderings disagree, which is what makes
+    // this test able to fail.
+    const base = makeSolidSource('ord-base.mp4', [200, 200, 200]);
+    const overlay = makeSolidSource('ord-overlay.mp4', [40, 40, 40]);
+    const resolvePath = (mediaId: string) =>
+      mediaId === 'media-base' ? base : overlay;
+    // `a-item` sorts before `z-item`, but `z-item` is the one on the lower track.
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'a-overlay', trackId: 'track-overlay', type: 'video', mediaId: 'media-overlay',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 10,
+        },
+        {
+          id: 'z-base', trackId: 'track-main', type: 'video', mediaId: 'media-base',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, trackOrder: 0,
+        },
+      ] as never,
+      rangeUs: [0, 500_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'layer-order.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-layer-order',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan, resolveMediaPath: resolvePath }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red] = decodedChannelMeans(outputPath);
+    // Overlay (40) is on top of base (200), so the frame must be dark.
+    expect(red).toBeLessThan(70);
+  }, 120_000);
+  it('fades a lone layer toward the canvas colour, not toward black', async () => {
+    // The bug this pins: compositing a 50 % bottom layer "over black" happens to be
+    // right for the default black canvas, so the mistake hides until someone sets a
+    // white one — and then every export is too dark by half.
+    const base = makeSolidSource('canvas-base.mp4', [200, 200, 200]);
+    const settings = makeSettings({
+      items: [
+        {
+          id: 'only', trackId: 'track-main', type: 'video', mediaId: 'media-base',
+          startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+          disabled: false, muted: false, hasAudio: false, opacity: 0.5, trackOrder: 0,
+        },
+      ] as never,
+      backgroundColor: '#ffffff',
+      rangeUs: [0, 500_000],
+    });
+    const plan = buildExportPlan(settings);
+    const outputPath = join(TMP, 'layer-canvas.mp4');
+
+    const result = await runExportJob({
+      jobId: 'job-layer-canvas',
+      settings,
+      outputPath,
+      frameSource: createDecodeFrameSource({ plan, resolveMediaPath: () => base }),
+      fullDecode: true,
+    });
+    expect(result.status).toBe('verified');
+
+    const [red] = decodedChannelMeans(outputPath);
+    // 0.5·200 + 0.5·255 ≈ 228 over white; over black it would be 100.
+    expect(red).toBeGreaterThan(200);
+    expect(red).toBeLessThan(250);
+  }, 120_000);
 });

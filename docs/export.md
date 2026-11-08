@@ -236,10 +236,12 @@ Raw ffmpeg output is never shown in the interface. It stays in the job log.
 - **Video is decoded and composited, but the full compositor is not yet in the
   export path.** Each video/image item is decoded by its own ffmpeg process
   (§4.2) at the export resolution and rate, with the item's own crop, scale,
-  rotation, flip and offset applied, and the canvas shows the topmost visible
-  item; where nothing is on the timeline you get the canvas colour. Captions are
-  burnt in from a generated ASS script. Still to come: effects, transitions,
-  *keyframed* transforms and blend modes from `renderFrame` (§4.1, §4.3, §4.4).
+  rotation, flip and offset applied. Every visible picture layer is then composited
+  bottom-first at its own opacity and blend mode, using the same layer resolution
+  the preview uses; where nothing is on the timeline you get the canvas colour.
+  Captions are burnt in from a generated ASS script, and keyframed geometry renders
+  as per-keyframe segments. Still to come: effects, transitions and masks from
+  `renderFrame` (§4.1, §4.3, §4.4).
   Everything around it —
   the plan, the encoder arguments, the queue, the measurements and the verdict —
   is real and covered by tests that run the bundled ffmpeg on actual footage. See

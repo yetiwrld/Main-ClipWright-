@@ -60,9 +60,11 @@ This document tracks architectural scope boundaries and honest limitations per `
    `.cwstyle` and match the preview (SPEC 11 §3). Each video/image item is decoded
    by its own ffmpeg process, and the item's *static* crop, scale, rotation, flip
    and offset are applied to the decoded frame, so a clip framed in the editor
-   exports framed. What is still missing is the rest of the *video* compositor:
-   only the topmost visible item is written, so effects, transitions, blend
-   modes, opacity, masks and the `rotationJitterDeg` per-caption tilt are **not
+   exports framed. Layering is composited too: every visible picture layer is
+   decoded, blended bottom-first at its own opacity and blend mode, and the result
+   is written — so an overlay track, a faded clip and a `multiply` layer all reach
+   the file. What is still missing is the rest of the *video* compositor: effects,
+   transitions, masks and the `rotationJitterDeg` per-caption tilt are **not
    rendered**. Where nothing is on the timeline you get the canvas colour. The
    export dialog says so before you press Export.
 2. **Keyframed geometry exports as steps, not ramps.** ffmpeg 4.1 evaluates
@@ -93,18 +95,28 @@ This document tracks architectural scope boundaries and honest limitations per `
    be renamed or deleted from a dedicated manage screen (a copy can only be
    replaced by editing it again), and a project opened in a build that predates the
    style editor shows the presets — the copies are simply invisible to it, not lost.
-6. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-7. **No resumable export.** A failed or interrupted export restarts from the
+6. **Blend parity is approximate at the edges.** The preview blends with CSS
+   `mix-blend-mode` and the export blends in software, in 8-bit non-linear sRGB,
+   with both sides following the W3C formula — but they are two implementations of
+   one spec, not one implementation used twice. Chroma is upsampled
+   nearest-neighbour when the export reads a frame and box-filtered when it writes
+   one, so a colour sitting exactly on a 4:2:0 chroma boundary can differ by a few
+   levels between the preview and the file. The difference is invisible on real
+   footage and measurable on synthetic test cards, which is how it was caught. The
+   exact `renderFrame` path in `specs/10` §2.1 — one compositor feeding both — is
+   what would remove it.
+7. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+8. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
-8. **Hardware encoding is validated, not assumed — and not proven here.** The
+9. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-9. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+10. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
    normalisation are; the equaliser, reverb and other audio-rack effects are not
    yet in the mix.
-10. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+11. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 
 ### Updates

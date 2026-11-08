@@ -68,3 +68,40 @@ export {
   type KeyframeValue,
   type PropertyPath,
 } from './keyframes.js';
+
+/**
+ * SPEC 10 §2/§6 — what a frame looks like when more than one item is on it.
+ *
+ * The preview drew one item and the export wrote one item; an overlay track was
+ * invisible in the first and silently won in the second. Both now ask this module
+ * which layers contribute, at what opacity, with what blend mode.
+ */
+export {
+  ffmpegBlendMode,
+  layerBlendFilter,
+  needsCompositing,
+  visibleLayers,
+  type BlendMode,
+  type LayerItem,
+  type VisibleLayer,
+} from './layers.js';
+
+/**
+ * SPEC 10 §2/§6 — software compositing of decoded frames.
+ *
+ * The export has raw `yuv420p` frames rather than a DOM, so the same layer stack
+ * the preview paints with CSS has to be applied by hand here. Kept in this package
+ * next to `layers` so the two cannot disagree about what `multiply` means.
+ */
+export {
+  compositeLayers,
+  compositeRgb,
+  joinYuv,
+  rgbToYuv,
+  splitYuv,
+  yuvFrameBytes,
+  yuvToRgb,
+  type ColorMatrix,
+  type RgbFrame,
+  type YuvFrame,
+} from './composite.js';

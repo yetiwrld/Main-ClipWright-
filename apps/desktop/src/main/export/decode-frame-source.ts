@@ -29,7 +29,17 @@ import {
   type ExportPlan,
   type PlannedItem,
 } from '@clipwright/export-core';
-import { evaluateProperty, type ItemGeometryInput } from '@clipwright/compositor';
+import {
+  compositeRgb,
+  evaluateProperty,
+  joinYuv,
+  rgbToYuv,
+  splitYuv,
+  yuvToRgb,
+  type BlendMode,
+  type ItemGeometryInput,
+  type RgbFrame,
+} from '@clipwright/compositor';
 import { ffmpegPath, CancelledError } from './ffmpeg-runner.js';
 import { expectedFrameBytes, type FrameSource } from './export-runner.js';
 
@@ -78,12 +88,23 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
     .filter((item) => (item.type === 'video' || item.type === 'image') && item.mediaId)
     .sort((a, b) => a.startUs - b.startUs);
 
-  /** Items visible at a given output frame, bottom layer first. */
+  /**
+   * Items visible at a given output frame, **bottom layer first**.
+   *
+   * Painting order is the track's `order` (larger is nearer the viewer), and two
+   * items on the same track are ordered by id so a decoder restart cannot swap
+   * them between frames. Without this sort the composite would depend on the order
+   * the plan happened to list items in, which is a bug that shows up once every few
+   * exports.
+   */
   const visibleAt = (frameIndex: number): PlannedItem[] => {
     const timeUs = frameIndex * frameDurationUs;
-    return videoItems.filter(
-      (item) => timeUs >= item.startUs && timeUs < item.startUs + item.durationUs,
-    );
+    return videoItems
+      .filter((item) => timeUs >= item.startUs && timeUs < item.startUs + item.durationUs)
+      .sort((a, b) => {
+        const order = (a.trackOrder ?? 0) - (b.trackOrder ?? 0);
+        return order !== 0 ? order : a.itemId.localeCompare(b.itemId);
+      });
   };
 
   const startDecoder = (item: PlannedItem): ItemDecoder | null => {
@@ -265,20 +286,81 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         }
       }
 
-      // Topmost visible item that has a decoder provides the picture; lower
-      // layers are not blended until the compositor drives export.
-      const topDown = [...visible].reverse();
-      for (const item of topDown) {
+      /*
+        Composite every visible layer, bottom first (SPEC 10 §2/§6).
+
+        This used to keep the topmost item that still had a frame and discard the
+        rest, which meant an overlay clip replaced the video underneath it and a
+        faded or multiplied layer arrived in the file as an opaque, normal
+        rectangle. Each layer is now decoded, converted to RGB, and blended onto the
+        frame below with its own opacity and mode — the same operation the preview
+        performs with CSS.
+
+        When only one layer is visible and it is fully opaque and `normal`, the
+        decoded bytes are returned untouched: that is the overwhelmingly common
+        case (one clip on the main track) and it keeps the old, cheap path exactly
+        as it was rather than round-tripping every frame through RGB for nothing.
+      */
+      const stack: Array<{ frame: Buffer; opacity: number; blendMode: BlendMode }> = [];
+      for (const item of visible) {
         const decoder = decoders.get(item.itemId);
         if (!decoder) continue;
         const frame = await readFrame(decoder);
-        if (frame) return Buffer.from(frame);
-        // Shortfall on this layer: fall through to the next one down.
-        warnings.push(`The source video for ${item.itemId} ended early.`);
-        decoder.child.kill('SIGKILL');
-        decoders.delete(item.itemId);
+        if (!frame) {
+          // Shortfall on this layer: drop it and let the ones below show through,
+          // rather than failing the whole export over one bad clip.
+          warnings.push(`The source video for ${item.itemId} ended early.`);
+          decoder.child.kill('SIGKILL');
+          decoders.delete(item.itemId);
+          continue;
+        }
+        stack.push({
+          frame,
+          opacity: clampOpacity(item.opacity),
+          blendMode: asBlendMode(item.blendMode),
+        });
       }
-      return blankFrame(plan.width, plan.height);
+
+      if (stack.length === 0) return blankFrame(plan.width, plan.height);
+
+      // The single opaque layer fast path: only valid when there is nothing behind
+      // it to show through. On a black canvas an opaque `normal` layer covers the
+      // backdrop completely, so the decoded bytes are the frame and the RGB
+      // round-trip would only cost time. On any other canvas the layer still covers
+      // it, so the test is opacity and mode, not the colour.
+      const simple =
+        stack.length === 1 && stack[0]!.opacity >= 1 && stack[0]!.blendMode === 'normal';
+      if (simple) return Buffer.from(stack[0]!.frame);
+
+      /*
+        Paint every layer onto a canvas-coloured backdrop, bottom first.
+
+        The backdrop matters. Blending a 50 % bottom layer *toward black* is only
+        right when the canvas happens to be black — on a white canvas the export
+        would produce a grey frame where the preview shows a pale one. Compositing
+        onto the real canvas colour makes the bottom layer an ordinary layer rather
+        than a special case, and it makes the bottom layer's blend mode behave like
+        every other layer's instead of being silently ignored.
+
+        Buffers are allocated once per call, not per layer: a 1080p RGB frame is
+        6 MB and an export runs thousands of them.
+      */
+      const base: RgbFrame = {
+        width: plan.width,
+        height: plan.height,
+        data: new Uint8ClampedArray(plan.width * plan.height * 3),
+      };
+      fillCanvas(base, plan.backgroundColor);
+      const scratch: RgbFrame = {
+        width: plan.width,
+        height: plan.height,
+        data: new Uint8ClampedArray(base.data.length),
+      };
+      for (const layer of stack) {
+        const rgb = yuvToRgb(splitYuv(layer.frame, plan.width, plan.height), scratch);
+        compositeRgb(base, rgb, layer.opacity, layer.blendMode);
+      }
+      return joinYuv(rgbToYuv(base));
     },
     async close() {
       for (const decoder of decoders.values()) {
@@ -334,4 +416,44 @@ export function blankFrame(width: number, height: number): Buffer {
   const frame = Buffer.alloc(ySize + chroma * 2, 128);
   frame.fill(16, 0, ySize);
   return frame;
+}
+
+/**
+ * Fill an RGB frame with the canvas colour.
+ *
+ * `#rrggbb` in, and anything unparseable becomes black — which is what the canvas
+ * default was before the colour was configurable, so a bad value degrades to the
+ * old behaviour instead of failing the export.
+ */
+function fillCanvas(frame: RgbFrame, color: string | undefined): void {
+  const match = /^#?([0-9a-f]{6})$/i.exec(color ?? '');
+  const value = match ? parseInt(match[1]!, 16) : 0;
+  const red = (value >> 16) & 0xff;
+  const green = (value >> 8) & 0xff;
+  const blue = value & 0xff;
+  for (let index = 0; index < frame.data.length; index += 3) {
+    frame.data[index] = red;
+    frame.data[index + 1] = green;
+    frame.data[index + 2] = blue;
+  }
+}
+
+/** Opacity of a planned item, clamped to the range the schema stores. */
+function clampOpacity(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0, value));
+}
+
+const BLEND_MODES: readonly BlendMode[] = [
+  'normal',
+  'multiply',
+  'screen',
+  'overlay',
+  'add',
+  'soft-light',
+];
+
+/** A planned item's blend mode, falling back to `normal` for anything unknown. */
+function asBlendMode(value: string | undefined): BlendMode {
+  return BLEND_MODES.includes(value as BlendMode) ? (value as BlendMode) : 'normal';
 }

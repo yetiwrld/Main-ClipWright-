@@ -87,6 +87,7 @@ export function ExportDialog({
       compositionDurationUs: durationUs,
       compositionFps: fps,
       items,
+      backgroundColor: state?.canvas?.backgroundColor,
       clashPolicy: 'auto-number',
       fullDecode: true,
       captionStyles,
@@ -96,7 +97,7 @@ export function ExportDialog({
       return;
     }
     setMessage('Export queued. Rendering starts now and the editor stays usable.');
-  }, [exports, panel, compositionName, projectId, compositionId, rangeUs, durationUs, fps, items, captionStyles]);
+  }, [exports, panel, compositionName, projectId, compositionId, rangeUs, durationUs, fps, items, captionStyles, state?.canvas?.backgroundColor]);
 
   const activeRunning = running.length > 0;
   const etaLine = useMemo(() => {
@@ -292,6 +293,14 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       // (SPEC 12 §2.2). Without them the export freezes the clip at its static
       // values, which is the one thing a keyframed move must not do.
       keyframes: item.keyframes,
+      // Layering (SPEC 10 §2/§6): without opacity and blend mode the export
+      // paints every clip solid and normally, so a faded or multiplied overlay
+      // arrives in the file as an opaque rectangle.
+      opacity: item.opacity,
+      blendMode: item.blendMode,
+      // The export needs to know which clip is on top, and the item itself does
+      // not store that — the track's order does.
+      trackOrder: state.tracks.find((track) => track.id === item.trackId)?.order ?? 0,
     });
   }
   return items;

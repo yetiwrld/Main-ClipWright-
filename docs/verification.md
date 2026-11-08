@@ -16,17 +16,17 @@ pnpm test:unit
 ```
 
 ```
-Test Files  68 passed (68)
-     Tests  1552 passed (1552)
+Test Files  71 passed (71)
+     Tests  1611 passed (1611)
 ```
 
 | Area | Tests | What they actually check |
 |---|---:|---|
 | `packages/export-core` | 315 | Encoder arguments, plan determinism, validation rules, audio mix DSP, presets, the ASS caption script (field order, colour byte order, anchor mapping, karaoke timing, range shifting), and the decode filter chain: crop, scale, rotation, offset and flip, with every stage kept even-sized and landing on the exact output size, and the keyframe segmenter: boundaries, merging equal neighbours, the segment cap |
-| `packages/compositor` | 114 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios), the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop, and item geometry (crop rectangles, per-axis and legacy scale, flips, offsets) and the keyframe evaluator: holding outside the key range, hold segments, cubic-bezier and preset easing, duplicate timestamps |
+| `packages/compositor` | 160 | Text layout (wrapping, alignment, word rectangles, background boxes, karaoke timing, every preset at four aspect ratios), the frame builder: karaoke sweeps, word-by-word hiding, keyword emphasis, palette cycling, in/out animation, per-word pop, and item geometry (crop rectangles, per-axis and legacy scale, flips, offsets) and the keyframe evaluator: holding outside the key range, hold segments, cubic-bezier and preset easing, duplicate timestamps; layer resolution and blend modes (which layers are visible, ordering, opacity clamping); and software compositing: every blend formula against its closed form, opacity mixing toward the backdrop rather than black, layer ordering, and YUV↔RGB conversion checked against the bundled ffmpeg in both directions and in both colour matrices |
 | `packages/caption-styles` | 37 | The `.cwstyle` schema, migrations, unknown-field preservation, style resolution, contrast and the documented examples |
-| `apps/desktop/src/main` | 278 | Export service, queue, ffmpeg orchestration, audio mixing, keyframed segmentation over real footage, karaoke word resolution, updates, journal, binary integrity, releases, packaging |
-| `apps/desktop/src/renderer` | 296 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector, preview geometry (jsdom) |
+| `apps/desktop/src/main` | 282 | Export service, queue, ffmpeg orchestration, audio mixing, keyframed segmentation over real footage, and layer compositing measured in the produced file, karaoke word resolution, updates, journal, binary integrity, releases, packaging |
+| `apps/desktop/src/renderer` | 305 | Export dialog (including the caption styles it forwards), queue panel, update dialog, update notice and chip, recovery dialog, command palette, caption painter draw order, caption overlay resolution, caption list and word editor, caption style editor and its save-a-copy rule, project-local style store, clip inspector, preview geometry (jsdom), and the preview's layer stack: overlay clips kept rather than dropped, paint order, opacity, blend modes including the `add`→`plus-lighter` mapping and keyframed opacity |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
 | `packages/timeline-engine` | 144 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation (§09 §17) |
@@ -34,7 +34,7 @@ Test Files  68 passed (68)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 8 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **1552** | 68 files |
+| **Total** | **1611** | 71 files |
 
 ### Tests that run real processes
 
@@ -47,7 +47,7 @@ cannot tell you whether the ffmpeg arguments are right.
 | `__tests__/export-runner.test.ts` | A complete encode end to end, then validates the produced file |
 | `__tests__/export-service.test.ts` | Real footage through the service: published file, audio stream, temp cleanup |
 | `__tests__/audio-mixer.test.ts` | Real PCM decoding, mixing, EBU R128 measurement, normalisation |
-| `__tests__/decode-frame-source.test.ts` | Per-item decoders over real clips |
+| `__tests__/decode-frame-source.test.ts` | Per-item decoders over real clips, plus layered exports decoded back and measured channel by channel |
 | `__tests__/release-roundtrip.test.ts` | The real signing script, verified with the app's own verification code |
 | `__tests__/smoke-test.test.ts` | The real bundled binaries, reporting their real versions |
 
@@ -79,6 +79,29 @@ which is the odd-pixel remainder of an aspect fit rather than the torn edge the
 uncapped chain produced.
 
 ---
+
+### Blending and colour, checked against real ffmpeg
+
+Layering is composited in software (`packages/compositor/src/composite.ts`) because
+the export has raw `yuv420p` frames rather than a DOM. Every blend mode was checked
+against the W3C compositing spec's closed form, and the two ends of the pipeline
+were measured against the bundled binary. Three findings changed the design:
+
+| Finding | Consequence |
+|---|---|
+| `blend`'s `all_expr` **silently overrides** `all_mode` — a `multiply` graph and a `normal` graph produced byte-identical output when both also carried an `all_expr` | a mode and an opacity need two separate `blend` stages, never one |
+| ffmpeg 4.1's expression language has no blend functions (`multiply(A,B)` → `Unknown function`) | a mode cannot be expressed as an expression at all, so `all_mode` is the only way to get one |
+| `-colorspace bt709` only **tags** the output; swscale still converts with **BT.601** by default. Converting RGB→YUV with no `scale` filter gave Y=100 for a colour whose BT.709 luma is 83 | every comparison forces `scale=in_color_matrix=bt709:out_color_matrix=bt709`, and the compositor takes the matrix as an argument instead of assuming one |
+
+A fourth finding came from a test rather than from ffmpeg: fading a *bottom* layer
+toward black is correct only when the canvas is black, so a project on a white
+canvas exported a frame half as bright as the preview. Every layer is now
+composited onto the canvas colour instead, which also means a bottom layer's own
+blend mode behaves like any other layer's rather than being ignored.
+
+The compositor's RGB→YUV conversion matches ffmpeg's to within ±3 levels of luma
+and ±8 of chroma on a three-colour test card; decoding ffmpeg's own BT.709 and
+BT.601 frames comes back within ±4 levels of the original colour.
 
 ## 2. Static checks
 

@@ -23,6 +23,8 @@ export interface ExportRequestInput {
   compositionFps: number;
   /** Timeline items to render. */
   items: unknown[];
+  /** Canvas colour behind the layers, `#rrggbb`. */
+  backgroundColor?: string;
   outputDir?: string;
   fileName?: string;
   clashPolicy?: 'auto-number' | 'replace' | 'ask';
@@ -38,6 +40,7 @@ export function toExportSettings(input: {
   compositionDurationUs: number;
   compositionFps: number;
   items: unknown[];
+  backgroundColor?: string;
 }): Record<string, unknown> {
   return {
     compositionId: input.compositionId,
@@ -57,6 +60,9 @@ export function toExportSettings(input: {
     normaliseLoudness: input.panel.normaliseLoudness,
     targetLufs: input.panel.targetLufs,
     isDraft: false,
+    // The compositor mixes a faded layer toward this, so a project on a white
+    // canvas does not export the grey that "fade toward black" would give.
+    backgroundColor: input.backgroundColor,
     rangeUs: input.rangeUs,
     compositionFps: input.compositionFps,
     compositionDurationUs: input.compositionDurationUs,
@@ -119,6 +125,8 @@ export interface ExportApi {
     compositionDurationUs: number;
     compositionFps: number;
     items: unknown[];
+    /** Canvas colour behind the layers, `#rrggbb`. */
+    backgroundColor?: string;
     outputDir?: string;
     fileName?: string;
     clashPolicy?: 'auto-number' | 'replace' | 'ask';
@@ -212,6 +220,7 @@ export function useExport(projectId?: string): ExportApi {
       compositionDurationUs: input.compositionDurationUs,
       compositionFps: input.compositionFps,
       items: input.items,
+      backgroundColor: input.backgroundColor,
     });
     try {
       const result = await api.startExport({
