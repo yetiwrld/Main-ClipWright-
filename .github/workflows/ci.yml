@@ -74,6 +74,9 @@ jobs:
       # download visible and the version pinned in one place.
       - name: Secret scan
         shell: bash
+        env:
+          # Only used for the `gh release download` fallback.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION=8.24.3
@@ -81,12 +84,30 @@ jobs:
           BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
 
           echo "Downloading ${ASSET}"
-          curl -sSfL -o "$ASSET" "${BASE}/${ASSET}" || { echo "::error::curl failed for ${BASE}/${ASSET}"; exit 1; }
+          # Retry, then fall back to `gh`, which is authenticated. The release CDN
+          # returned a 404 and then an HTTP error on consecutive runs for an asset
+          # that exists — a security gate that fails on a flaky CDN teaches people
+          # to re-run the job rather than to read it.
+          fetch() {
+            local url="$1" out="$2"
+            for attempt in 1 2 3; do
+              if curl -sSfL --retry 2 --retry-delay 2 -o "$out" "$url"; then return 0; fi
+              echo "attempt ${attempt} failed for ${url}"
+              sleep $((attempt * 2))
+            done
+            return 1
+          }
+          if ! fetch "${BASE}/${ASSET}" "$ASSET"; then
+            echo "curl failed; falling back to gh release download"
+            gh release download "v${VERSION}" --repo gitleaks/gitleaks --pattern "$ASSET" --clobber \
+              || { echo "::error::could not download ${ASSET} from ${BASE}"; exit 1; }
+          fi
           ls -l "$ASSET"
           # The published checksums, checked before the binary is run: fetching an
           # scanner over the network and executing it is a supply-chain step, and
           # an unpinned one would be a poor example for this repository.
-          curl -sSfL -o checksums.txt "${BASE}/gitleaks_${VERSION}_checksums.txt"
+          fetch "${BASE}/gitleaks_${VERSION}_checksums.txt" checksums.txt \
+            || { echo "::error::could not download the checksum file"; exit 1; }
           expected=$(grep " ${ASSET}$" checksums.txt | cut -d' ' -f1)
           if [ -z "$expected" ]; then
             echo "::error::no checksum published for ${ASSET}"
