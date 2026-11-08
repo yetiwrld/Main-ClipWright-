@@ -11,8 +11,11 @@ import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import {
   adjacentKeyTime,
+  displayedScale,
+  isUniformScale,
   keyframeAt,
   keyframeWriteRefusal,
+  planPairedEdit,
   planPropertyEdit,
 } from './keyframe-controls.js';
 
@@ -154,6 +157,36 @@ function applyAnimatable(
 }
 
 /**
+ * Apply an edit to two axes that are shown as one control (the uniform Scale field).
+ *
+ * Both axes are written together whatever the plan is — static or keyed — so the
+ * picture cannot stretch. That is the whole reason the two axes share a row.
+ */
+function applyAnimatablePair(
+  timeline: TimelineApi,
+  item: TimelineState['items'][string],
+  paths: readonly [string, string],
+  value: number,
+  editStatic: () => void,
+): void {
+  const plan = planPairedEdit(
+    paths.map((path) => item.keyframes?.[path]),
+    item,
+    quantizeUs(playheadStore.get(), timeline.fps),
+    value,
+  );
+  if (plan.kind === 'insert-key') {
+    for (const path of paths) timeline.addKeyframe(item.id, path, plan.timeUs, plan.value);
+    return;
+  }
+  if (plan.kind === 'update-key') {
+    for (const path of paths) timeline.updateKeyframe(item.id, path, plan.timeUs, { value: plan.value });
+    return;
+  }
+  editStatic();
+}
+
+/**
  * A property row with its keyframe diamond and ◀ ▶ jumpers (SPEC 12 §2.4).
  *
  * A `Field` is a `<label>`, so a button placed inside one would forward its clicks
@@ -167,14 +200,29 @@ function applyAnimatable(
  */
 function KeyframeRow({
   label,
+  accessibleName,
   path,
+  alsoPaths,
   value,
   item,
   timeline,
   children,
 }: {
   label: string;
+  /**
+   * Longer name for the buttons' accessible names, when the short display label
+   * would be ambiguous. "Left" is fine under a Crop heading and useless in a
+   * screen reader's list of controls.
+   */
+  accessibleName?: string;
   path: string;
+  /**
+   * Additional paths written alongside `path`, for a control that governs several
+   * properties at once. The uniform Scale field is the only one: both axes share it,
+   * so the diamond has the same obligation the slider does — keying one half of a
+   * pair the user set together would stretch the clip.
+   */
+  alsoPaths?: readonly string[];
   /** The property's current value, recorded when a key is created. */
   value: number;
   item: TimelineState['items'][string];
@@ -186,17 +234,21 @@ function KeyframeRow({
   const animated = (keys?.length ?? 0) > 0;
   const refusal = keyframeWriteRefusal(item, playheadUs);
   const local = playheadUs - item.startUs;
-  const onKey = animated && keyframeAt(keys, local) !== undefined;
+  const name = accessibleName ?? label;
+
   const previous = adjacentKeyTime(keys, local, 'previous');
   const next = adjacentKeyTime(keys, local, 'next');
 
+  // Every path this row governs, so a shared control never writes half of itself.
+  const paths = [path, ...(alsoPaths ?? [])];
+  const onKey = paths.some((candidate) => keyframeAt(item.keyframes?.[candidate], local) !== undefined);
   const toggle = () => {
     if (refusal) return;
     if (onKey) {
-      timeline.removeKeyframe(item.id, path, local);
+      for (const candidate of paths) timeline.removeKeyframe(item.id, candidate, local);
       return;
     }
-    timeline.addKeyframe(item.id, path, local, value);
+    for (const candidate of paths) timeline.addKeyframe(item.id, candidate, local, value);
   };
 
   const jump = (target: number | null) => {
@@ -212,7 +264,7 @@ function KeyframeRow({
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingBottom: 2 }}>
         <button
           type="button"
-          aria-label={`Previous ${label} keyframe`}
+          aria-label={`Previous ${name} keyframe`}
           disabled={previous === null}
           onClick={() => jump(previous)}
           style={{
@@ -229,11 +281,11 @@ function KeyframeRow({
         </button>
         <button
           type="button"
-          aria-label={`Keyframe ${label} at the playhead`}
+          aria-label={`Keyframe ${name} at the playhead`}
           aria-pressed={onKey}
           // The tooltip is the entire user-facing half of the "blocked outside the
           // clip" rule, so it carries the reason rather than being a generic label.
-          title={refusal ?? (onKey ? `Remove the ${label} keyframe here` : `Add a ${label} keyframe here`)}
+          title={refusal ?? (onKey ? `Remove the ${name} keyframe here` : `Add a ${name} keyframe here`)}
           disabled={refusal !== null}
           onClick={toggle}
           style={{
@@ -251,7 +303,7 @@ function KeyframeRow({
         />
         <button
           type="button"
-          aria-label={`Next ${label} keyframe`}
+          aria-label={`Next ${name} keyframe`}
           disabled={next === null}
           onClick={() => jump(next)}
           style={{
@@ -513,7 +565,15 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
       <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Crop (% of source)</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
         {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
-          <Field key={edge} label={edge[0]!.toUpperCase() + edge.slice(1)}>
+          <KeyframeRow
+            key={edge}
+            label={edge[0]!.toUpperCase() + edge.slice(1)}
+            accessibleName={`Crop ${edge}`}
+            path={`crop.${edge}`}
+            value={item.crop[edge]}
+            item={item}
+            timeline={timeline}
+          >
             <Input
               type="number"
               min={0}
@@ -526,49 +586,164 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
                 if (event.target.value.trim() === '') return;
                 const percent = Number(event.target.value);
                 if (!Number.isFinite(percent)) return;
-                timeline.setItemProperties([item.id], { crop: { [edge]: Math.min(95, Math.max(0, percent)) / 100 } });
+                // The schema floor (0) and ceiling (0.95) are the real limits: a crop
+                // that met itself edge to edge would leave no picture at all.
+                const fraction = Math.min(95, Math.max(0, percent)) / 100;
+                applyAnimatable(timeline, item, `crop.${edge}`, fraction, () =>
+                  timeline.setItemProperties([item.id], { crop: { [edge]: fraction } }),
+                );
               }}
             />
-          </Field>
+          </KeyframeRow>
         ))}
       </div>
 
       <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Transform</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
-        <Field label="Scale">
+      {/*
+        A single Scale field is only honest for a uniformly-scaled clip. When the two
+        axes differ it is replaced by one field per axis, so the sidebar never shows
+        one axis's value while the picture uses both.
+      */}
+      {isUniformScale(item.transform) ? (
+        <KeyframeRow
+          label="Scale"
+          path="transform.scaleX"
+          alsoPaths={['transform.scaleY']}
+          value={displayedScale(item.transform)}
+          item={item}
+          timeline={timeline}
+        >
           <Input
             type="number"
             min={10}
             max={400}
-            value={Math.round(item.transform.scaleX * 100)}
+            value={Math.round(displayedScale(item.transform) * 100)}
             aria-label="Scale as a percentage"
             onChange={(event) => {
               if (event.target.value.trim() === '') return;
               const percent = Number(event.target.value);
               if (!Number.isFinite(percent)) return;
               const scale = Math.min(4, Math.max(0.1, percent / 100));
-              timeline.setItemProperties([item.id], { transform: { scaleX: scale, scaleY: scale } });
+              // Both axes move together here, so the legacy field must be retired at
+              // the same time: leaving it set would let it win again once the axes
+              // returned to 1.
+              applyAnimatablePair(timeline, item, ['transform.scaleX', 'transform.scaleY'], scale, () =>
+                timeline.setItemProperties([item.id], {
+                  transform: { scaleX: scale, scaleY: scale, scale: 1 },
+                }),
+              );
             }}
           />
-        </Field>
-        <Field label="Rotation">
-          <Input
-            type="number"
-            min={-180}
-            max={180}
-            value={Math.round(item.transform.rotation)}
-            aria-label="Rotation in degrees"
-            onChange={(event) => {
-              if (event.target.value.trim() === '') return;
-              const degrees = Number(event.target.value);
-              if (!Number.isFinite(degrees)) return;
-              timeline.setItemProperties([item.id], {
-                transform: { rotation: Math.min(180, Math.max(-180, degrees)) },
-              });
-            }}
-          />
-        </Field>
+        </KeyframeRow>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+          <KeyframeRow
+            label="Scale X"
+            path="transform.scaleX"
+            value={item.transform.scaleX}
+            item={item}
+            timeline={timeline}
+          >
+            <Input
+              type="number"
+              min={10}
+              max={400}
+              value={Math.round(item.transform.scaleX * 100)}
+              aria-label="Horizontal scale as a percentage"
+              onChange={(event) => {
+                if (event.target.value.trim() === '') return;
+                const percent = Number(event.target.value);
+                if (!Number.isFinite(percent)) return;
+                const scale = Math.min(4, Math.max(0.1, percent / 100));
+                applyAnimatable(timeline, item, 'transform.scaleX', scale, () =>
+                  timeline.setItemProperties([item.id], { transform: { scaleX: scale } }),
+                );
+              }}
+            />
+          </KeyframeRow>
+          <KeyframeRow
+            label="Scale Y"
+            path="transform.scaleY"
+            value={item.transform.scaleY}
+            item={item}
+            timeline={timeline}
+          >
+            <Input
+              type="number"
+              min={10}
+              max={400}
+              value={Math.round(item.transform.scaleY * 100)}
+              aria-label="Vertical scale as a percentage"
+              onChange={(event) => {
+                if (event.target.value.trim() === '') return;
+                const percent = Number(event.target.value);
+                if (!Number.isFinite(percent)) return;
+                const scale = Math.min(4, Math.max(0.1, percent / 100));
+                applyAnimatable(timeline, item, 'transform.scaleY', scale, () =>
+                  timeline.setItemProperties([item.id], { transform: { scaleY: scale } }),
+                );
+              }}
+            />
+          </KeyframeRow>
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+        {(['x', 'y'] as const).map((axis) => (
+          <KeyframeRow
+            key={axis}
+            label={axis === 'x' ? 'Position X' : 'Position Y'}
+            path={`transform.${axis}`}
+            value={item.transform[axis]}
+            item={item}
+            timeline={timeline}
+          >
+            <Input
+              type="number"
+              min={-100}
+              max={100}
+              value={Math.round(item.transform[axis] * 100)}
+              // A percentage of the canvas side: the stored value is a fraction so it
+              // means the same thing at proxy size and at export size, and showing it
+              // raw would put a range of −1…1 in front of the user.
+              aria-label={`${axis === 'x' ? 'Horizontal' : 'Vertical'} position as a percentage of the canvas`}
+              onChange={(event) => {
+                if (event.target.value.trim() === '') return;
+                const percent = Number(event.target.value);
+                if (!Number.isFinite(percent)) return;
+                const fraction = Math.min(1, Math.max(-1, percent / 100));
+                applyAnimatable(timeline, item, `transform.${axis}`, fraction, () =>
+                  timeline.setItemProperties([item.id], { transform: { [axis]: fraction } }),
+                );
+              }}
+            />
+          </KeyframeRow>
+        ))}
       </div>
+
+      <KeyframeRow
+        label="Rotation"
+        path="transform.rotation"
+        value={item.transform.rotation}
+        item={item}
+        timeline={timeline}
+      >
+        <Input
+          type="number"
+          min={-180}
+          max={180}
+          value={Math.round(item.transform.rotation)}
+          aria-label="Rotation in degrees"
+          onChange={(event) => {
+            if (event.target.value.trim() === '') return;
+            const degrees = Number(event.target.value);
+            if (!Number.isFinite(degrees)) return;
+            const clamped = Math.min(180, Math.max(-180, degrees));
+            applyAnimatable(timeline, item, 'transform.rotation', clamped, () =>
+              timeline.setItemProperties([item.id], { transform: { rotation: clamped } }),
+            );
+          }}
+        />
+      </KeyframeRow>
 
       {/* Effects section (SPEC 09 §17) */}
       {(

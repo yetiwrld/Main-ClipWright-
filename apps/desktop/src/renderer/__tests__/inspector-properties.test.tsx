@@ -16,6 +16,7 @@ import { createDefaultTimeline, createMediaItem, type TimelineState } from '@cli
 import type { TimelineApi } from '../features/editor/use-timeline.js';
 import { ItemInspector } from '../features/editor/Inspector.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
+import { ANIMATABLE_PROPERTIES } from '../features/editor/keyframe-controls.js';
 
 afterEach(() => cleanup());
 
@@ -155,11 +156,39 @@ describe('crop and transform', () => {
   it('sets both scale axes together, so a clip does not squash', () => {
     // A single scale control that wrote only `scaleX` would stretch the picture —
     // the kind of thing that looks like a bug in the renderer.
+    //
+    // It also retires the legacy `transform.scale` field. Without that write a
+    // project that carries `{ scale: 1.5, scaleX: 1, scaleY: 1 }` comes back to 150%
+    // the moment the user types 100%, because the compositor lets the legacy field
+    // win whenever both axes are at their default. Verified against the real
+    // `effectiveScale`: stored 1.5 → set 200% → set 100% renders 1.5 again until the
+    // field is cleared.
     const timeline = renderInspector(makeState());
     fireEvent.change(screen.getByLabelText('Scale as a percentage'), { target: { value: '150' } });
     expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], {
-      transform: { scaleX: 1.5, scaleY: 1.5 },
+      transform: { scaleX: 1.5, scaleY: 1.5, scale: 1 },
     });
+  });
+
+  it('shows the legacy scale rather than claiming 100% for a clip rendered at 150%', () => {
+    const state = makeState({ transform: { ...makeState().items['item-1']!.transform, scale: 1.5 } });
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect((screen.getByLabelText('Scale as a percentage') as HTMLInputElement).value).toBe('150');
+  });
+
+  it('splits the scale into two axes when the clip is already non-uniform', () => {
+    /*
+      A single field cannot show 120% wide by 80% tall. Showing one axis would let the
+      user "correct" a value that the picture does not use, and the next edit would
+      collapse the other axis.
+    */
+    const state = makeState({
+      transform: { ...makeState().items['item-1']!.transform, scaleX: 1.2, scaleY: 0.8 },
+    });
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(screen.queryByLabelText('Scale as a percentage')).toBeNull();
+    expect((screen.getByLabelText('Horizontal scale as a percentage') as HTMLInputElement).value).toBe('120');
+    expect((screen.getByLabelText('Vertical scale as a percentage') as HTMLInputElement).value).toBe('80');
   });
 
   it('writes rotation in degrees', () => {
@@ -663,5 +692,236 @@ describe('keyframe controls on the property rows (SPEC 12 §2.4)', () => {
     });
     expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { volumeDb: -12 });
     expect(timeline.addKeyframe).not.toHaveBeenCalled();
+  });
+});
+
+describe('the remaining animatable rows (SPEC 12 §2.4)', () => {
+  it('offers a diamond on scale, position, rotation and every crop edge', () => {
+    /*
+      §2.4 asks for a diamond "per animatable property row". These are the rows the
+      compositor actually reads — `itemGeometry` samples `transform.x/y`, both scale
+      axes, rotation and the four crop edges every frame — so a row without a diamond
+      would be a property the picture can animate and the sidebar cannot.
+    */
+    renderInspector(makeState());
+    for (const label of [
+      'Scale',
+      'Rotation',
+      'Position X',
+      'Position Y',
+      'Crop left',
+      'Crop right',
+      'Crop top',
+      'Crop bottom',
+    ]) {
+      expect(screen.getByLabelText(`Keyframe ${label} at the playhead`), label).toBeTruthy();
+    }
+  });
+
+  it('writes position as a fraction of the canvas, not as a raw number', () => {
+    // `transform.x` is a fraction so it means the same at proxy size and at export
+    // size; the field shows a percentage because −1…1 is not a range users think in.
+    const timeline = renderInspector(makeState());
+    fireEvent.change(
+      screen.getByLabelText('Horizontal position as a percentage of the canvas'),
+      { target: { value: '25' } },
+    );
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], {
+      transform: { x: 0.25 },
+    });
+  });
+
+  it('shows an existing position as a percentage', () => {
+    const base = makeState();
+    const state = makeState({ transform: { ...base.items['item-1']!.transform, x: -0.4, y: 0.1 } });
+    render(<ItemInspector state={state} timeline={fakeTimeline(state)} />);
+    expect(
+      (screen.getByLabelText('Horizontal position as a percentage of the canvas') as HTMLInputElement).value,
+    ).toBe('-40');
+    expect(
+      (screen.getByLabelText('Vertical position as a percentage of the canvas') as HTMLInputElement).value,
+    ).toBe('10');
+  });
+
+  it('keys both scale axes from the Scale row\'s diamond too', () => {
+    /*
+      The diamond is the other way to create a key on this row, and it has the same
+      obligation as the slider: a uniform scale is one control over two properties, so
+      keying only `scaleX` would pin `scaleY` and stretch the clip the moment the
+      animation started — with the stretch appearing at the click, not at the edit the
+      user thought they were making.
+    */
+    const state = makeState();
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.click(screen.getByLabelText('Keyframe Scale at the playhead'));
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleX', 0, 1);
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleY', 0, 1);
+  });
+
+  it('removes both scale axes when the diamond clears a key', () => {
+    // The mirror of the case above: leaving one axis keyed would animate half the
+    // transform, which reads as the clip drifting apart.
+    const state = makeState({
+      keyframes: {
+        'transform.scaleX': [{ timeUs: 0, value: 1, interpolation: 'linear' }],
+        'transform.scaleY': [{ timeUs: 0, value: 1, interpolation: 'linear' }],
+      },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.click(screen.getByLabelText('Keyframe Scale at the playhead'));
+    expect(timeline.removeKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleX', 0);
+    expect(timeline.removeKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleY', 0);
+  });
+
+  it('keys both scale axes from the single Scale field', () => {
+    /*
+      The static write already moves both axes; keying only `scaleX` would leave
+      `scaleY` pinned and stretch the clip as the animation played. This is the one
+      place where the "one row, one property" rule has to bend.
+
+      A *uniform* clip is required for this test, because a non-uniform one shows two
+      separate axis rows — each of which keys only its own axis, correctly, since the
+      user set them separately and can see both.
+    */
+    const state = makeState({
+      // Flat, dotted keys: the model stores keyframes in one record keyed by the
+      // property path, not in a nested object per section.
+      keyframes: { 'transform.scaleX': [{ timeUs: 0, value: 1, interpolation: 'linear' }] },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Scale as a percentage'), { target: { value: '150' } });
+    // The playhead is at the clip's start, where a key already exists on X, so this
+    // updates rather than inserts — on both axes.
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleX', 0, { value: 1.5 });
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleY', 0, { value: 1.5 });
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('keys both axes even when only one was animated', () => {
+    // An axis the user never touched must still move with its twin: leaving it
+    // static would stretch the clip, which is what the shared field prevents.
+    const state = makeState({
+      keyframes: { 'transform.scaleX': [{ timeUs: 0, value: 1, interpolation: 'linear' }] },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    act(() => playheadStore.set(1_000_000));
+    fireEvent.change(screen.getByLabelText('Scale as a percentage'), { target: { value: '150' } });
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleX', 1_000_000, 1.5);
+    expect(timeline.addKeyframe).toHaveBeenCalledWith('item-1', 'transform.scaleY', 1_000_000, 1.5);
+    act(() => playheadStore.set(0));
+  });
+
+  it('auto-keys a crop edge when that edge is already animated', () => {
+    const state = makeState({
+      keyframes: {
+        'crop.left': [
+          { timeUs: 0, value: 0, interpolation: 'linear' },
+          { timeUs: 2_000_000, value: 0.5, interpolation: 'linear' },
+        ],
+      },
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Crop left'), { target: { value: '20' } });
+    expect(timeline.updateKeyframe).toHaveBeenCalledWith('item-1', 'crop.left', 0, { value: 0.2 });
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-key the other crop edges when only one is animated', () => {
+    // These are genuinely independent properties: cropping the left edge over time
+    // says nothing about the right one, and keying all four would animate edges the
+    // user never touched.
+    const state = makeState({
+      keyframes: {
+        crop: {
+          left: [
+            { timeUs: 0, value: 0, interpolation: 'linear' },
+            { timeUs: 2_000_000, value: 0.5, interpolation: 'linear' },
+          ],
+        },
+      } as never,
+    });
+    const timeline = fakeTimeline(state);
+    render(<ItemInspector state={state} timeline={timeline} />);
+    fireEvent.change(screen.getByLabelText('Crop right'), { target: { value: '20' } });
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { crop: { right: 0.2 } });
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+  });
+});
+
+describe('the animatable-property list is the contract (SPEC 12 §2.4)', () => {
+  it('every listed property has a diamond in the inspector', () => {
+    /*
+      Walked from the list rather than restated in the test, so adding a property to
+      the list without drawing its row fails here instead of quietly promising a
+      control that does not exist. A uniform clip is used because that is the case
+      where the two scale axes share one field.
+    */
+    renderInspector(makeState());
+    for (const property of ANIMATABLE_PROPERTIES) {
+      expect(
+        screen.getByLabelText(`Keyframe ${property.label} at the playhead`),
+        `${property.path} is listed as animatable but has no diamond`,
+      ).toBeTruthy();
+    }
+  });
+
+  it('every listed property, when animated, turns an edit into a keyframe', () => {
+    /*
+      The other half of §2.4: a diamond is easy to draw, but the rule is that an edit
+      to an *animated* property becomes a keyframe. A listed property whose control
+      still wrote the static value would make the user's edit invisible, because the
+      evaluator reads the keys and ignores the static field.
+
+      Driven through each row's own input, by its aria-label, so a row that loses its
+      wiring fails here by name rather than passing on a neighbour's behaviour.
+    */
+    const inputFor: Record<string, { label: string; value: string }> = {
+      opacity: { label: 'Clip opacity as a percentage', value: '50' },
+      volumeDb: { label: 'Clip volume in decibels', value: '-12' },
+      'transform.scaleX': { label: 'Scale as a percentage', value: '150' },
+      'transform.scaleY': { label: 'Scale as a percentage', value: '150' },
+      'transform.x': { label: 'Horizontal position as a percentage of the canvas', value: '25' },
+      'transform.y': { label: 'Vertical position as a percentage of the canvas', value: '25' },
+      'transform.rotation': { label: 'Rotation in degrees', value: '15' },
+      'crop.left': { label: 'Crop left', value: '20' },
+      'crop.right': { label: 'Crop right', value: '20' },
+      'crop.top': { label: 'Crop top', value: '20' },
+      'crop.bottom': { label: 'Crop bottom', value: '20' },
+    };
+
+    for (const property of ANIMATABLE_PROPERTIES) {
+      const driver = inputFor[property.path];
+      expect(driver, `no input is mapped for ${property.path}`).toBeTruthy();
+
+      const state = makeState({
+        // The playhead is at 0, where a key already exists, so the edit takes the
+        // update branch for every property.
+        keyframes: {
+          [property.path]: [
+            { timeUs: 0, value: property.path === 'volumeDb' ? 0 : 1, interpolation: 'linear' },
+            { timeUs: 3_000_000, value: property.path === 'volumeDb' ? -6 : 2, interpolation: 'linear' },
+          ],
+        },
+      });
+      const timeline = fakeTimeline(state);
+      const { unmount } = render(<ItemInspector state={state} timeline={timeline} />);
+      fireEvent.change(screen.getByLabelText(driver!.label), { target: { value: driver!.value } });
+      expect(
+        timeline.setItemProperties,
+        `${property.path} was animated but the edit still wrote the static value`,
+      ).not.toHaveBeenCalled();
+      // The uniform Scale field keys both axes, so either axis's key counts here.
+      const keyed =
+        (timeline.updateKeyframe as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+          (call) => call[0] === 'item-1' && call[1] === property.path,
+        );
+      expect(keyed, `${property.path} was animated but no keyframe was written`).toBe(true);
+      unmount();
+    }
   });
 });

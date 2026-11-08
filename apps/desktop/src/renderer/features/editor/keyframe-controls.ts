@@ -16,29 +16,43 @@
  * clip, a key that already exists at the playhead, and the difference between
  * "update the key that is already here" and "insert a new one".
  */
+import { effectiveScale } from '@clipwright/compositor';
 import type { Keyframe } from '@clipwright/project-schema/schemas';
 
 /** A property the inspector exposes a diamond for, and how it maps onto the model. */
 export interface AnimatableProperty {
   /** Path used in `item.keyframes`, matching the compositor's `PropertyPath`. */
   path: string;
-  /** Label the row shows. */
+  /**
+   * Accessible name the row's diamond and jumpers use.
+   *
+   * Both scale axes share the single "Scale" field when the clip is uniform, so that
+   * one diamond governs the pair; when the axes differ the inspector splits the row
+   * and each axis gets its own "Scale X" / "Scale Y" diamond. Both spellings
+   * therefore exist in the interface, which is why this list names "Scale" rather
+   * than claiming only one of the two axis rows.
+   */
   label: string;
 }
 
 /**
- * The properties the inspector can animate.
+ * Every property the inspector draws a keyframe diamond for.
  *
- * Deliberately conservative: each entry here is a path the compositor or the audio
- * envelope actually reads. Exposing a diamond for a path nothing evaluates would
- * let a user animate something and see no change, which is the failure mode this
- * whole audit keeps finding.
+ * This list is the contract, and a test walks it against the rendered inspector —
+ * an entry here with no row behind it fails, and so does a row that offers a diamond
+ * for a path the renderer never evaluates. Both directions matter: the first would
+ * promise a control that is not there, the second would let a user animate something
+ * and see nothing move.
+ *
+ * `label` is the row's visible label, which is not always unique on its own — the
+ * crop rows read "Left"/"Top"/… under a "Crop" heading — so `accessibleName` carries
+ * the longer form used in the buttons' accessible names.
  */
 export const ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   { path: 'opacity', label: 'Opacity' },
   { path: 'volumeDb', label: 'Volume' },
-  { path: 'transform.scaleX', label: 'Scale X' },
-  { path: 'transform.scaleY', label: 'Scale Y' },
+  { path: 'transform.scaleX', label: 'Scale' },
+  { path: 'transform.scaleY', label: 'Scale' },
   { path: 'transform.x', label: 'Position X' },
   { path: 'transform.y', label: 'Position Y' },
   { path: 'transform.rotation', label: 'Rotation' },
@@ -131,4 +145,56 @@ export function planPropertyEdit(
   const local = playheadUs - (item?.startUs ?? 0);
   if (keyframeAt(existingKeys, local)) return { kind: 'update-key', timeUs: local, value };
   return { kind: 'insert-key', timeUs: local, value };
+}
+
+/**
+ * The scale the renderer will actually apply, for display and for keying.
+ *
+ * The inspector used to read `transform.scaleX` directly, which disagrees with the
+ * picture whenever a project carries the legacy `transform.scale` field: the
+ * compositor honours that field while *both* axes sit at their default of 1, so a
+ * clip stored as `{ scale: 1.5, scaleX: 1, scaleY: 1 }` renders at 150% while the
+ * sidebar says 100%. Worse for §2.4 — a diamond on that row would record 1 and
+ * create a key that silently resizes the clip the instant it is made.
+ *
+ * Delegated to the compositor rather than reimplemented here, so the number the
+ * user sees cannot drift from the number the renderer uses.
+ */
+export function displayedScale(transform: { scaleX?: number; scaleY?: number; scale?: number }): number {
+  // A clip scaled on one axis only is not representable by a single number. The
+  // caller checks `isUniformScale` first and shows both axes when it is false.
+  return effectiveScale(transform).x;
+}
+
+/** Whether both axes agree, so a single Scale field can represent the clip. */
+export function isUniformScale(transform: { scaleX?: number; scaleY?: number; scale?: number }): boolean {
+  const scale = effectiveScale(transform);
+  return scale.x === scale.y;
+}
+
+/**
+ * Plan an edit that moves several properties together, as the single Scale field does.
+ *
+ * Two axes that are shown as one control have to be *keyed* as one control too. The
+ * static write sets `scaleX` and `scaleY` at once, so keying only one of them would
+ * leave the other pinned while the keyed one animates — the picture would stretch,
+ * which is precisely what the single field exists to prevent.
+ *
+ * If either axis is already animated, both are keyed: keeping them apart would give
+ * the animation a shape the user never drew for the axis they cannot see.
+ */
+export function planPairedEdit(
+  existingKeys: ReadonlyArray<readonly Keyframe[] | undefined>,
+  item: { startUs: number; durationUs: number } | undefined,
+  playheadUs: number,
+  value: number,
+): PropertyEditPlan {
+  const anyAnimated = existingKeys.some((keys) => (keys?.length ?? 0) > 0);
+  if (!anyAnimated) return { kind: 'static' };
+  if (keyframeWriteRefusal(item, playheadUs) !== null) return { kind: 'static' };
+  const local = playheadUs - (item?.startUs ?? 0);
+  const alreadyKeyed = existingKeys.some((keys) => keyframeAt(keys, local) !== undefined);
+  return alreadyKeyed
+    ? { kind: 'update-key', timeUs: local, value }
+    : { kind: 'insert-key', timeUs: local, value };
 }

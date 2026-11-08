@@ -53,13 +53,14 @@ This document tracks architectural scope boundaries and honest limitations per `
    depends on a viewport (zoom, pan, fit) is absent rather than half-working, and
    the transform tools are not written. There is also no box-select of keys in the
    drawer: keys are selected by clicking a diamond, one at a time.
-8. **The inspector's keyframe controls cover opacity and volume only.** SPEC 12
-   §2.4's diamond, the ◀ ▶ jumpers and auto-keyframing are built, but they are wired
-   to the two rows that have a slider in the sidebar. Transform scale, position,
-   rotation and the four crop edges are animatable — the compositor reads every one
-   of them, and `ANIMATABLE_PROPERTIES` lists them — but the inspector does not draw
-   those rows at all yet, so they can only be keyed from the timeline lane. The rule
-   they follow is the same one the two wired rows use.
+8. **§2.4's diamond, ◀ ▶ jumpers and auto-keyframing cover the eleven properties the
+   inspector draws.** Every path the compositor and the audio envelope read has a row
+   with a diamond, and a test walks the list so the two cannot drift apart. What is
+   missing is on the *canvas* side: a property can be keyed and auto-keyed from the
+   sidebar but not dragged, and `transform.anchorX`/`anchorY` are in the model and in
+   the `PropertyPath` union while `item-geometry.ts` never reads them, so they are
+   deliberately absent from the list rather than offered as a diamond that would do
+   nothing.
 9. **The left panel has the Media and Captions tabs.** Text/Graphics,
    Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
    there.

@@ -10,8 +10,11 @@ import type { Keyframe } from '@clipwright/project-schema/schemas';
 import {
   ANIMATABLE_PROPERTIES,
   adjacentKeyTime,
+  displayedScale,
+  isUniformScale,
   keyframeAt,
   keyframeWriteRefusal,
+  planPairedEdit,
   planPropertyEdit,
 } from '../features/editor/keyframe-controls.js';
 
@@ -165,5 +168,70 @@ describe('the animatable property list', () => {
   it('has no duplicate paths', () => {
     const paths = ANIMATABLE_PROPERTIES.map((property) => property.path);
     expect(new Set(paths).size).toBe(paths.length);
+  });
+});
+
+describe('the scale the inspector shows (legacy `transform.scale`)', () => {
+  it('reports the legacy scale while both axes are untouched', () => {
+    /*
+      The compositor honours `transform.scale` while `scaleX`/`scaleY` are both still
+      at their default of 1. Reading `scaleX` alone therefore shows 100% for a clip
+      that renders at 150% — and a §2.4 diamond on that row would record 1 and resize
+      the clip the moment it was clicked.
+    */
+    expect(displayedScale({ scale: 1.5, scaleX: 1, scaleY: 1 })).toBeCloseTo(1.5, 6);
+    expect(isUniformScale({ scale: 1.5, scaleX: 1, scaleY: 1 })).toBe(true);
+  });
+
+  it('reports the per-axis scale once an axis has been set', () => {
+    // Touching an axis retires the legacy field, exactly as the compositor does.
+    expect(displayedScale({ scale: 1.5, scaleX: 2, scaleY: 2 })).toBe(2);
+  });
+
+  it('agrees with a plain untransformed clip', () => {
+    expect(displayedScale({})).toBe(1);
+    expect(isUniformScale({})).toBe(true);
+  });
+
+  it('reports a non-uniform scale as non-uniform rather than picking an axis', () => {
+    // A single field cannot show 120% wide by 80% tall; the inspector has to show
+    // both axes instead of silently displaying one of them.
+    expect(isUniformScale({ scaleX: 1.2, scaleY: 0.8 })).toBe(false);
+  });
+});
+
+describe('keying an edit that moves two axes at once', () => {
+  it('stays static when neither axis is animated', () => {
+    expect(planPairedEdit([undefined, []], clip, inside, 1.5)).toEqual({ kind: 'static' });
+  });
+
+  it('keys both axes when either one is already animated', () => {
+    /*
+      The single Scale field writes `scaleX` and `scaleY` together. Keying only one
+      would pin the other, so the picture would stretch — the exact failure the shared
+      field exists to prevent.
+    */
+    const keys = [key(0, 1), key(2_000_000, 2)];
+    expect(planPairedEdit([keys, undefined], clip, inside, 1.5)).toEqual({
+      kind: 'insert-key',
+      timeUs: 500_000,
+      value: 1.5,
+    });
+  });
+
+  it('updates when a key already sits on the playhead on either axis', () => {
+    // A key on only one of the two axes still means "this frame is keyed"; inserting
+    // a second key on that axis would collide.
+    const keyed = [key(0, 1), key(500_000, 2)];
+    expect(planPairedEdit([undefined, keyed], clip, inside, 1.5)).toEqual({
+      kind: 'update-key',
+      timeUs: 500_000,
+      value: 1.5,
+    });
+  });
+
+  it('respects the clip boundary like a single-property edit', () => {
+    const keys = [key(0, 1)];
+    expect(planPairedEdit([keys, keys], clip, 0, 1.5)).toEqual({ kind: 'static' });
   });
 });

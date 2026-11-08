@@ -143,7 +143,10 @@ the volume slider that used to be a read-only placeholder, now work, and the val
 they write are drawn by the preview and applied by the export — including
 auto-keyframing, which writes a key at the playhead when a property already has
 keys and leaves the static value alone when it does not, so a slider drag on an
-un-animated clip cannot start an animation by accident.
+un-animated clip cannot start an animation by accident. All eleven animatable
+properties the renderer reads now have a row with a diamond — scale, both position
+axes, rotation and the four crop edges included — and the visible scale is the one
+the compositor applies rather than `scaleX` alone.
 
 **2. Finish Phase 5 ⚠️** — the style editor's colour pickers and anchor grid,
 text and shape items, brand kits, and the audio tools beyond the envelope.
