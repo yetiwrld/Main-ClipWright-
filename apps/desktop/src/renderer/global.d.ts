@@ -824,6 +824,11 @@ export interface ExportStartRequestPayload {
   fileName?: string;
   clashPolicy?: 'auto-number' | 'replace' | 'ask';
   fullDecode?: boolean;
+  /**
+   * Project-local caption styles, keyed by id, so a burn-in honours edits rather
+   * than falling back to the preset a style started from (SPEC 11 §6).
+   */
+  captionStyles?: Record<string, unknown>;
 }
 
 export type ExportStartResultPayload =

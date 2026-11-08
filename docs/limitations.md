@@ -60,19 +60,25 @@ This document tracks architectural scope boundaries and honest limitations per `
 2. **ASS is a smaller language than the style format.** A blurred drop shadow is
    approximated by its vertical offset, and letter-spacing is in pixels rather than
    ems, so a style with a heavy blur will look slightly cleaner on export than in
-   the preview. Everything the ten presets ask for is expressible.
-3. **No frame blending.** Frame-rate conversion uses nearest-time selection.
-4. **No resumable export.** A failed or interrupted export restarts from the
+   the preview. Everything the ten presets ask for is expressible. The per-caption
+   `rotationJitterDeg` tilt is not applied — ASS has no per-event rotation, so the
+   tilt exists in the preview and the editable style but not in the burned-in file.
+3. **Project-local style copies are not stored yet.** The resolver supports
+   preset → project copy → item overrides (SPEC 11 §6), and the export path accepts
+   a style map, but nothing writes one to the project file, so `styleOverrides` on
+   an item is the only per-caption customisation that currently survives to export.
+4. **No frame blending.** Frame-rate conversion uses nearest-time selection.
+5. **No resumable export.** A failed or interrupted export restarts from the
    beginning (SPEC 14 §9 is not implemented).
-5. **Hardware encoding is validated, not assumed — and not proven here.** The
+6. **Hardware encoding is validated, not assumed — and not proven here.** The
    app tests a candidate encoder with a real short encode before using it, and
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-6. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
+7. **Audio effects are not applied.** Gain, fades, panning, ducking and loudness
    normalisation are; the equaliser, reverb and other audio-rack effects are not
    yet in the mix.
-7. **4K 60 fps on CPU is slower than real time.** It completes and validates;
+8. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 
 ### Updates

@@ -123,6 +123,8 @@ export interface ExportApi {
     fileName?: string;
     clashPolicy?: 'auto-number' | 'replace' | 'ask';
     fullDecode?: boolean;
+    /** Project-local caption styles so a burn-in uses the edited look. */
+    captionStyles?: Record<string, unknown>;
   }): Promise<{ ok: true; jobId: string } | { ok: false; error: string; action: string }>;
   cancel(jobId: string): Promise<void>;
   retry(jobId: string): Promise<void>;
@@ -220,6 +222,7 @@ export function useExport(projectId?: string): ExportApi {
         fileName: input.fileName,
         clashPolicy: input.clashPolicy ?? 'auto-number',
         fullDecode: input.fullDecode ?? true,
+        captionStyles: input.captionStyles,
       });
       if (!result.ok) {
         setError(result.error);

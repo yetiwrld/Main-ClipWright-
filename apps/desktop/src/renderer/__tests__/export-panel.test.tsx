@@ -24,9 +24,10 @@ describe('ExportPanel', () => {
     expect(screen.getByTestId('export-button')).toBeTruthy();
   });
 
-  it('tells the user that text and effects are not rendered yet', () => {
+  it('tells the user what is rendered and what is still missing', () => {
     // SPEC 16's honesty rule: a user who adds a title must find out before the
-    // export runs, not after waiting for a file with no title in it.
+    // export runs, not after waiting for a file with no title in it. Captions are
+    // now rendered, so claiming otherwise would be the same failure in reverse.
     render(
       <ExportPanel
         state={DEFAULT_EXPORT_STATE}
@@ -35,10 +36,13 @@ describe('ExportPanel', () => {
         onCancel={() => {}}
       />,
     );
-    const note = screen.getByTestId('export-limits-note');
-    expect(note.textContent).toContain('Text, effects');
-    expect(note.textContent).toContain('transitions');
-    expect(note.textContent).toContain('not rendered yet');
+    const note = screen.getByTestId('export-limits-note').textContent ?? '';
+    expect(note).toContain('captions');
+    expect(note).toContain('transitions');
+    expect(note).toContain('not rendered yet');
+    // The old wording said text was missing; captions are now burnt in, so
+    // repeating it would be the same failure pointed the other way.
+    expect(note).not.toContain('Text, effects');
   });
 
   it('shows resolution summary', () => {

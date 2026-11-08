@@ -230,9 +230,9 @@ export function ExportPanel({
           lineHeight: 'var(--lh-sm)',
         }}
       >
-        Video and audio are exported from your timeline. Text, effects,
-        transitions and keyframed moves are not rendered yet — see Export limits
-        in the docs.
+        Video and audio are exported from your timeline, and burned-in captions
+        use the style you picked in the editor. Effects, transitions and keyframed
+        moves are not rendered yet — see Export limits in the docs.
       </p>
 
       {/* Buttons */}

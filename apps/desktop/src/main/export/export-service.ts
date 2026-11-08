@@ -23,6 +23,7 @@ import {
   type ValidationReport,
 } from '@clipwright/export-core';
 import type { ExportHistoryRecord } from '@clipwright/project-schema';
+import type { CaptionStyle } from '@clipwright/caption-styles';
 import { ExportQueue, cleanupPartialFiles, type QueueSnapshot } from './export-queue.js';
 import { solidColourFrameSource, writeSubtitleSidecars, type FrameSource } from './export-runner.js';
 import { createDecodeFrameSource } from './decode-frame-source.js';
@@ -45,6 +46,11 @@ export interface StartExportRequest {
   clashPolicy?: ClashPolicy;
   /** Run the slow full decode during validation (default true). */
   fullDecode?: boolean;
+  /**
+   * Project-local caption styles, keyed by id. Omit to use the built-in presets,
+   * which is correct for a composition that never edited a style.
+   */
+  captionStyles?: Record<string, CaptionStyle>;
   /**
    * Frame source factory. Supplied by the caller (render window integration)
    * or omitted, in which case a compositor-free source renders canvas colours.
@@ -182,6 +188,9 @@ export class ExportService {
         createFrameSource,
         snapshotLabel: request.snapshotLabel,
         fullDecode: request.fullDecode ?? true,
+        // Without these a burn-in silently uses the built-in preset, so a caption
+        // the user restyled exports in the look it started from.
+        captionStyles: request.captionStyles as Record<string, CaptionStyle> | undefined,
       });
       // Sidecar subtitles are written next to the finished file on success;
       // see `record`.

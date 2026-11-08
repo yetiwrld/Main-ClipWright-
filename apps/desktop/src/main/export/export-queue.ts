@@ -25,6 +25,7 @@ import {
   type ExportSettings,
   type ValidationReport,
 } from '@clipwright/export-core';
+import type { CaptionStyle } from '@clipwright/caption-styles';
 import { CancelledError, runExportJob, type ExportProgress, type FrameSource } from './export-runner.js';
 
 /** A queued export plus the pieces the queue needs to run it. */
@@ -40,6 +41,10 @@ export interface QueuedExport {
   /** Immutable snapshot label shown in the banner (§6). */
   snapshotLabel: string;
   fullDecode: boolean;
+  /** Project-local caption styles, for a burn-in that honours edits (§11 §6). */
+  captionStyles?: Readonly<Record<string, CaptionStyle>>;
+  /** Word text by word id, from the transcript, for karaoke burn-in. */
+  resolveWordText?: (wordId: string) => string | undefined;
 }
 
 export interface QueueSnapshot {
@@ -121,6 +126,8 @@ export class ExportQueue {
     createFrameSource: (plan: ExportPlan) => FrameSource | Promise<FrameSource>;
     snapshotLabel?: string;
     fullDecode?: boolean;
+    captionStyles?: Record<string, CaptionStyle>;
+    resolveWordText?: (wordId: string) => string | undefined;
   }): ExportJob {
     // SPEC 14 §6: the planner takes an immutable snapshot, so editing the
     // composition during an export cannot change the output. Everything below
@@ -142,6 +149,8 @@ export class ExportQueue {
       audioPath: options.audioPath,
       audioWarnings: options.audioWarnings,
       createFrameSource: options.createFrameSource,
+      captionStyles: options.captionStyles,
+      resolveWordText: options.resolveWordText,
       snapshotLabel: options.snapshotLabel ?? `the version from ${new Date().toLocaleTimeString()}`,
       fullDecode: options.fullDecode ?? true,
     });
@@ -268,6 +277,8 @@ export class ExportQueue {
           frameSource,
           title: job.name,
           fullDecode: entry.fullDecode,
+          captionStyles: entry.captionStyles,
+          resolveWordText: entry.resolveWordText,
         },
         {
           signal: controller.signal,
