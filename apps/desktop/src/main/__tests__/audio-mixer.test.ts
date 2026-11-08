@@ -105,7 +105,9 @@ function planWithAudio(mediaId = 'media-a'): ExportPlan {
 }
 
 describe('writeWav', () => {
-  it('writes a header ffprobe recognises as 48 kHz stereo float', async () => {
+  // Gated on the test, not the describe: the rest of this block reads the bytes
+  // back directly and needs no encoder. Only this one shells out to ffprobe.
+  it.skipIf(!HAS_FFMPEG)('writes a header ffprobe recognises as 48 kHz stereo float', async () => {
     mkdirSync(TMP, { recursive: true });
     const path = join(TMP, 'written.wav');
     const clip = createClip(MIX_SAMPLE_RATE);

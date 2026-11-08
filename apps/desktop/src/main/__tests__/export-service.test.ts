@@ -8,7 +8,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ExportService,
@@ -176,7 +176,11 @@ describe('resolveOutputDir', () => {
   });
 
   it('honours an absolute request', () => {
-    expect(resolveOutputDir('/ws', '/elsewhere', 'proj-1')).toBe('/elsewhere');
+    // Built with `resolve`, not a literal: `/elsewhere` is not an absolute path
+    // on Windows, where absolute means `D:\\elsewhere`. Hard-coding the POSIX form
+    // asserted the host platform rather than the behaviour.
+    const elsewhere = resolve(sep, 'elsewhere');
+    expect(resolveOutputDir('/ws', elsewhere, 'proj-1')).toBe(elsewhere);
   });
 });
 
