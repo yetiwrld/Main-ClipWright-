@@ -104,11 +104,15 @@ jobs:
           # --redact so a real finding is not printed into a public log; the file
           # and rule are still reported, which is what a fix needs.
           set +e
-          ./gitleaks.exe detect --source . --verbose --redact --exit-code 1
+          ./gitleaks.exe detect --source . --redact --exit-code 1 \
+            --report-format json --report-path gitleaks-report.json
           code=$?
           set -e
           if [ "$code" -ne 0 ]; then
-            echo "::error::gitleaks exited ${code} — see the Secret scan step output"
+            # Name every finding. "exit code 1" cannot distinguish a leaked
+            # credential from a test fixture that quotes the pattern the redactor
+            # is meant to strip.
+            node scripts/ci-annotate-leaks.mjs gitleaks-report.json || true
             exit "$code"
           fi
 
