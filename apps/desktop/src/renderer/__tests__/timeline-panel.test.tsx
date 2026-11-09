@@ -105,6 +105,8 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     renameTrack: vi.fn(() => true),
     addTrack: vi.fn(() => true),
     addAdjustmentLayer: vi.fn(() => true),
+    addText: vi.fn(() => true),
+    addShape: vi.fn(() => true),
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
     deleteTrack: vi.fn(() => true),
@@ -440,6 +442,34 @@ describe('timeline panel', () => {
     fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
     fireEvent.click(screen.getByText('Add adjustment layer'));
     expect(timeline.addAdjustmentLayer).toHaveBeenCalledTimes(1);
+  });
+
+  it('the context menu adds a text item (SPEC 11 §7)', () => {
+    /*
+      The reachability test. The schema has carried the `text` type from the start and
+      nothing could create one, so the item type was decorative — a project could
+      declare a title and no renderer would draw it, and no user could ask for one.
+    */
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    fireEvent.click(screen.getByText('Add text'));
+    expect(timeline.addText).toHaveBeenCalledTimes(1);
+    // A placeholder rather than an empty string: an invisible item on the track is
+    // indistinguishable from a command that failed.
+    expect(timeline.addText).toHaveBeenCalledWith('Text');
+  });
+
+  it('the context menu adds a shape', () => {
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    fireEvent.click(screen.getByText('Add shape'));
+    expect(timeline.addShape).toHaveBeenCalledWith('rect');
   });
 
   it('Escape closes the context menu', () => {

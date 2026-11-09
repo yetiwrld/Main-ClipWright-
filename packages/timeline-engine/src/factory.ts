@@ -195,3 +195,104 @@ export function createCaptionItem(params: CreateCaptionItemParams): TimelineItem
     },
   }) as TimelineItem;
 }
+
+/**
+ * A text item (SPEC 11 §7): free-standing text on the canvas, rather than a caption
+ * bound to a transcript.
+ *
+ * It is deliberately a *caption without words*: the same `captionStyleId` and
+ * `styleOverrides`, resolved by the same `resolveStyle` and laid out by the same
+ * `layoutText`. A title that used a different styling system from the captions would
+ * be two systems to keep in agreement, and the project has spent a lot of effort
+ * making sure the preview and the export are one.
+ *
+ * `textContent` is the whole text — no word timings, no karaoke. A text item is on
+ * screen for its duration and does not follow a transcript.
+ */
+export interface CreateTextItemParams {
+  id?: string;
+  trackId: string;
+  startUs: number;
+  durationUs: number;
+  text: string;
+  styleId?: string;
+  /** A label for the timeline; defaults to the start of the text. */
+  label?: string;
+}
+
+export function createTextItem(params: CreateTextItemParams): TimelineItem {
+  const text = params.text;
+  return TimelineItemSchema.parse({
+    id: params.id ?? nextId('txt'),
+    trackId: params.trackId,
+    type: 'text',
+    startUs: params.startUs,
+    durationUs: params.durationUs,
+    /*
+      The label is the text itself, trimmed to a readable length, because the timeline
+      shows it rather than an id: a row of "Text 1, Text 2, Text 3" tells a user
+      nothing about which title is which. An empty string falls back rather than
+      producing a blank chip.
+    */
+    label: params.label ?? (text.trim().substring(0, 60) || 'Text'),
+    disabled: false,
+    opacity: 1,
+    blendMode: 'normal',
+    transform: { x: 0, y: 0, scale: 1 },
+    crop: {},
+    keyframes: {},
+    effects: [],
+    textContent: text,
+    captionStyleId: params.styleId,
+  }) as TimelineItem;
+}
+
+/**
+ * A shape item (SPEC 11 §12): a rectangle, ellipse, star and so on.
+ *
+ * `shapeKind` is what the renderer switches on; the geometry comes from the schema's
+ * own enum rather than a second list here, so a kind the renderer cannot draw cannot
+ * be created either.
+ */
+export interface CreateShapeItemParams {
+  id?: string;
+  trackId: string;
+  startUs: number;
+  durationUs: number;
+  shapeKind: NonNullable<TimelineItem['shapeKind']>;
+  label?: string;
+  styleId?: string;
+}
+
+export function createShapeItem(params: CreateShapeItemParams): TimelineItem {
+  return TimelineItemSchema.parse({
+    id: params.id ?? nextId('shp'),
+    trackId: params.trackId,
+    type: 'shape',
+    startUs: params.startUs,
+    durationUs: params.durationUs,
+    label: params.label ?? SHAPE_LABELS[params.shapeKind],
+    disabled: false,
+    opacity: 1,
+    blendMode: 'normal',
+    transform: { x: 0, y: 0, scale: 1 },
+    crop: {},
+    keyframes: {},
+    effects: [],
+    shapeKind: params.shapeKind,
+    captionStyleId: params.styleId,
+  }) as TimelineItem;
+}
+
+/** Human names for the shape kinds, so the timeline does not show "round-rect". */
+export const SHAPE_LABELS: Readonly<Record<string, string>> = {
+  rect: 'Rectangle',
+  'round-rect': 'Rounded rectangle',
+  ellipse: 'Ellipse',
+  triangle: 'Triangle',
+  polygon: 'Polygon',
+  star: 'Star',
+  line: 'Line',
+  arrow: 'Arrow',
+  bubble: 'Speech bubble',
+};

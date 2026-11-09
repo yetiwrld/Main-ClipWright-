@@ -20,7 +20,16 @@ import type { CaptionSegment, Marker } from '@clipwright/project-schema/schemas'
 type CaptionWordRef = CaptionSegment['wordRefs'][number];
 import { frameDurationUs, quantizeUs, type Fps } from './time';
 import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
-import { createCaptionItem } from './factory';
+import { createCaptionItem, createShapeItem, createTextItem } from './factory';
+
+/**
+ * How long a new text item or shape lasts (SPEC 11 §7 — "3 s default").
+ *
+ * A constant rather than a parameter on every caller: the default is a product
+ * decision, and three call sites computing `3_000_000` themselves is three places to
+ * change it.
+ */
+export const DEFAULT_TEXT_DURATION_US = 3_000_000;
 
 export type TimelineState = CompositionPayload;
 export type EditMode = 'normal' | 'insert' | 'overwrite';
@@ -1166,6 +1175,178 @@ export function addAdjustmentLayer(
     affectedItemIds: [params.id],
     notes: ['Adjustment layer added — it grades the tracks below it.'],
     trackId: `trk_adj_${params.id}`,
+  };
+}
+
+
+/**
+ * Add a text item, creating a text track for it when there is not one (SPEC 11 §7).
+ *
+ * Like an adjustment layer, this creates its own track: a text item cannot live on a
+ * picture track (`canHold` refuses it), and a user pressing "Add text" has not asked
+ * to manage tracks first. An existing text track is reused when it has room, because
+ * otherwise every title would stack a new row and the timeline would grow sideways
+ * while the canvas showed one line of type.
+ *
+ * Reusing a track means *finding* one with room rather than picking the first: a text
+ * track already carrying a title for the same moment would refuse the item, and the
+ * fallback path in `addItem` only searches within the same track kind.
+ */
+export function addTextItem(
+  state: TimelineState,
+  params: {
+    id: string;
+    text: string;
+    startUs: number;
+    durationUs?: number;
+    fps: Fps;
+    styleId?: string;
+    /** A track to try first; the command still creates one rather than failing. */
+    trackId?: string;
+  },
+): CommandResult & { trackId?: string } {
+  if (state.items[params.id]) return fail('invalid', 'That item already exists.');
+  const durationUs = params.durationUs ?? DEFAULT_TEXT_DURATION_US;
+  if (durationUs < frameDurationUs(params.fps)) {
+    return fail('too_short', 'A text item must be at least one frame long.');
+  }
+  const startUs = quantizeUs(params.startUs, params.fps);
+
+  // A text track with a gap at this moment, preferring the one the user named.
+  const named = state.tracks.find((track) => track.id === params.trackId && track.kind === 'text');
+  const candidates = [
+    ...(named ? [named] : []),
+    ...state.tracks.filter((track) => track.kind === 'text' && track.id !== named?.id),
+  ];
+  const free = candidates.find(
+    (track) =>
+      !track.locked &&
+      !overlapsAny(sortedItemsOfTrack(state, track.id), startUs, durationUs),
+  );
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    let trackId = free?.id;
+    if (!trackId) {
+      // Above every existing track, so a new title is drawn over the footage rather
+      // than behind it — an invisible text item is the worst possible first result.
+      const topOrder = draft.tracks.reduce((top, track) => Math.max(top, track.order), -1);
+      trackId = `trk_text_${params.id}`;
+      draft.tracks.push({
+        id: trackId,
+        role: 'text',
+        kind: 'text',
+        name: 'Text',
+        order: topOrder + 1,
+        hidden: false,
+        locked: false,
+        muted: false,
+        solo: false,
+        heightPx: 48,
+        itemIds: [],
+        auto: false,
+      } as (typeof draft.tracks)[number]);
+    }
+    const item = createTextItem({
+      id: params.id,
+      trackId,
+      startUs,
+      durationUs,
+      text: params.text,
+      styleId: params.styleId,
+    });
+    draft.items[item.id] = item;
+    addToTrack(draft, trackId, item.id);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.id],
+    notes: free ? ['Text added.'] : ['Text added on a new text track.'],
+    trackId: nextState.items[params.id]?.trackId,
+  };
+}
+
+/**
+ * Add a shape item, on a graphics track of its own (SPEC 11 §12).
+ *
+ * Shapes go on `text` tracks rather than a separate kind: the schema's track kinds are
+ * video/audio/caption/text/effect, and a graphics track would be a sixth kind that the
+ * compositor does not need — a shape and a title draw in the same way and the same
+ * order. `canHold` already permits it.
+ */
+export function addShapeItem(
+  state: TimelineState,
+  params: {
+    id: string;
+    shapeKind: NonNullable<TimelineItem['shapeKind']>;
+    startUs: number;
+    durationUs?: number;
+    fps: Fps;
+    styleId?: string;
+    trackId?: string;
+  },
+): CommandResult & { trackId?: string } {
+  if (state.items[params.id]) return fail('invalid', 'That item already exists.');
+  const durationUs = params.durationUs ?? DEFAULT_TEXT_DURATION_US;
+  if (durationUs < frameDurationUs(params.fps)) {
+    return fail('too_short', 'A shape must be at least one frame long.');
+  }
+  const startUs = quantizeUs(params.startUs, params.fps);
+
+  const named = state.tracks.find((track) => track.id === params.trackId && track.kind === 'text');
+  const candidates = [
+    ...(named ? [named] : []),
+    ...state.tracks.filter((track) => track.kind === 'text' && track.id !== named?.id),
+  ];
+  const free = candidates.find(
+    (track) =>
+      !track.locked &&
+      !overlapsAny(sortedItemsOfTrack(state, track.id), startUs, durationUs),
+  );
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    let trackId = free?.id;
+    if (!trackId) {
+      const topOrder = draft.tracks.reduce((top, track) => Math.max(top, track.order), -1);
+      trackId = `trk_gfx_${params.id}`;
+      draft.tracks.push({
+        id: trackId,
+        role: 'graphics',
+        kind: 'text',
+        name: 'Graphics',
+        order: topOrder + 1,
+        hidden: false,
+        locked: false,
+        muted: false,
+        solo: false,
+        heightPx: 48,
+        itemIds: [],
+        auto: false,
+      } as (typeof draft.tracks)[number]);
+    }
+    const item = createShapeItem({
+      id: params.id,
+      trackId,
+      startUs,
+      durationUs,
+      shapeKind: params.shapeKind,
+      styleId: params.styleId,
+    });
+    draft.items[item.id] = item;
+    addToTrack(draft, trackId, item.id);
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.id],
+    notes: free ? ['Shape added.'] : ['Shape added on a new graphics track.'],
+    trackId: nextState.items[params.id]?.trackId,
   };
 }
 

@@ -345,6 +345,8 @@ export function assCuesFromPlan(
         speaker?: string;
       } | null;
       captionStyleId?: string;
+      /** Set on a `text` item: the whole string, with no word timings. */
+      textContent?: string;
     }>;
   },
   /** Words for each caption, from the transcript, keyed by word id. */
@@ -352,6 +354,26 @@ export function assCuesFromPlan(
 ): AssCue[] {
   const cues: AssCue[] = [];
   for (const item of plan.items) {
+    /*
+      Text items burn in the same way captions do (SPEC 11 §7, §12). A title is text on
+      the canvas, and the burn-in is what draws text on the canvas in the file — so a
+      text item that produced no cue would exist in the editor and vanish from the
+      export, which is the divergence this whole module is arranged to prevent.
+
+      They differ in one way only: a text item has no word timings, so it carries no
+      karaoke list. Its text is the whole string.
+    */
+    if (item.type === 'text') {
+      const text = (item.textContent ?? '').trim();
+      if (text.length === 0) continue;
+      cues.push({
+        startUs: item.startUs - plan.rangeStartUs,
+        endUs: item.startUs - plan.rangeStartUs + item.durationUs,
+        text,
+        styleId: item.captionStyleId,
+      });
+      continue;
+    }
     if (item.type !== 'caption') continue;
     const segment = item.captionSegment;
     // `captionText` is the plan's own copy and survives a segment whose `text` was

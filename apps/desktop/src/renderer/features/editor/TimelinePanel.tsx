@@ -30,6 +30,8 @@ import {
   VolumeX,
   BarChart3,
   SlidersHorizontal,
+  Square,
+  Type,
 } from 'lucide-react';
 import {
   Button,
@@ -1602,6 +1604,25 @@ function emptyMenuItems(
     { id: 'paste', label: 'Paste', icon: <ClipboardPaste size={14} />, onSelect: () => timeline.paste(playheadStore.get()) },
     { id: 'marker', label: 'Add marker here', icon: <Flag size={14} />, onSelect: () => timeline.addMarkerAt(playheadStore.get()) },
     { id: 'add-track', label: 'Add track', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },
+    {
+      /*
+        Text and shapes are added from here rather than from a media browser: neither has
+        a file to drag in, and the playhead is already where the user wants them. The
+        default text is a placeholder rather than empty, so the item is visible the
+        moment it is created and can be selected and edited — an invisible item on a
+        track is indistinguishable from a failed command (SPEC 11 §7).
+      */
+      id: 'add-text',
+      label: 'Add text',
+      icon: <Type size={14} />,
+      onSelect: () => timeline.addText('Text'),
+    },
+    {
+      id: 'add-shape',
+      label: 'Add shape',
+      icon: <Square size={14} />,
+      onSelect: () => timeline.addShape('rect'),
+    },
     {
       id: 'add-adjustment',
       label: 'Add adjustment layer',

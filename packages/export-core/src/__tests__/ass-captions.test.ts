@@ -440,3 +440,87 @@ describe('assCuesFromPlan', () => {
     expect(cue!.text).toBe('Hello there world');
   });
 });
+
+describe('text items burn in (SPEC 11 §7)', () => {
+  /*
+    The schema has carried a `text` item type since the beginning, and until this
+    existed nothing turned one into a cue — so an editor that drew a title on the
+    canvas would produce a file with no title in it, silently. These tests are about
+    that reachability first and about the details second.
+  */
+  const plan = (items: unknown[]) => ({ rangeStartUs: 0, items }) as never;
+
+  const title = (overrides: Record<string, unknown> = {}) => ({
+    type: 'text',
+    startUs: 1_000_000,
+    durationUs: 2_000_000,
+    textContent: 'Chapter One',
+    captionStyleId: 'bold-creator',
+    ...overrides,
+  });
+
+  it('turns a text item into a cue', () => {
+    const cues = assCuesFromPlan(plan([title()]));
+    expect(cues).toHaveLength(1);
+    expect(cues[0]!.text).toBe('Chapter One');
+  });
+
+  it('uses the item\'s own span, shifted by the range start', () => {
+    // A title is on screen for its whole duration — beginning to end, with no word
+    // timings to subdivide it.
+    const cues = assCuesFromPlan({ rangeStartUs: 500_000, items: [title()] } as never);
+    expect(cues[0]!.startUs).toBe(500_000);
+    expect(cues[0]!.endUs).toBe(2_500_000);
+  });
+
+  it('carries the style, so a title burns in its own look', () => {
+    // Losing this burns every title in the default preset while still producing a
+    // successful export — the same trap the caption-style test above covers.
+    const cues = assCuesFromPlan(plan([title()]));
+    expect(cues[0]!.styleId).toBe('bold-creator');
+  });
+
+  it('gives a text item no karaoke word list', () => {
+    /*
+      A title has no transcript behind it. Emitting `words` would make the burn-in try
+      to sweep a highlight across timing that does not exist, which either throws or
+      renders the title as a static-looking karaoke line.
+    */
+    const cues = assCuesFromPlan(plan([title()]));
+    expect(cues[0]!.words).toBeUndefined();
+  });
+
+  it('skips an empty title rather than emitting a blank dialogue', () => {
+    // The state between "add text" and typing. A blank cue still occupies a slot in the
+    // script and, with a background style, draws an empty box over the footage.
+    expect(assCuesFromPlan(plan([title({ textContent: '' })]))).toHaveLength(0);
+    expect(assCuesFromPlan(plan([title({ textContent: '   ' })]))).toHaveLength(0);
+    expect(assCuesFromPlan(plan([title({ textContent: undefined })]))).toHaveLength(0);
+  });
+
+  it('keeps captions and titles in the same script, in item order', () => {
+    // One burn-in draws both, so a title above a caption must not displace it.
+    const cues = assCuesFromPlan(
+      plan([
+        { type: 'caption', startUs: 0, durationUs: 1_000_000, captionText: 'a caption', captionSegment: { text: 'a caption' } },
+        title(),
+        { type: 'shape', startUs: 0, durationUs: 1_000_000, shapeKind: 'rect' },
+      ])
+    );
+    expect(cues.map((cue) => cue.text)).toEqual(['a caption', 'Chapter One']);
+  });
+
+  it('does not read caption text off a title, or the reverse', () => {
+    /*
+      The two fields mean different things and are read by different branches. A title
+      that only carried `captionText` — or a caption that only carried `textContent` —
+      must not cross over, or a future refactor could merge the fields without noticing
+      that one of them is a transcript window and the other is a fixed string.
+    */
+    const titleWithCaptionText = { type: 'text', startUs: 0, durationUs: 1_000_000, captionText: 'wrong' };
+    expect(assCuesFromPlan(plan([titleWithCaptionText]))).toHaveLength(0);
+
+    const captionWithTextContent = { type: 'caption', startUs: 0, durationUs: 1_000_000, textContent: 'wrong', captionSegment: {} };
+    expect(assCuesFromPlan(plan([captionWithTextContent]))).toHaveLength(0);
+  });
+});

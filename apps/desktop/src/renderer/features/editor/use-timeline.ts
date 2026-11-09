@@ -59,6 +59,8 @@ import {
   toggleItemDisabled,
   addTrack,
   addAdjustmentLayer,
+  addShapeItem,
+  addTextItem,
   toggleTrackLock,
   toggleTrackHidden,
   deleteTrack,
@@ -218,6 +220,10 @@ export interface TimelineApi {
    * immediately, and can be trimmed or moved like any other item afterwards.
    */
   addAdjustmentLayer: () => boolean;
+  /** Add a text item at the playhead (SPEC 11 §7). */
+  addText: (text: string) => boolean;
+  /** Add a shape at the playhead (SPEC 11 §12). */
+  addShape: (kind: NonNullable<TimelineItem['shapeKind']>) => boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
   deleteTrack: (trackId: string) => boolean;
@@ -628,6 +634,23 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
             fps,
           });
         }),
+      /*
+        A title is added at the playhead rather than at zero: the user is looking at a
+        moment and wants text on it, and dropping every title at the start would make
+        them drag it to where they already were.
+      */
+      addText: (text) => {
+        const id = nextId('txt');
+        return run('Add text', (s) =>
+          addTextItem(s, { id, text, startUs: playheadStore.get(), fps })
+        );
+      },
+      addShape: (kind) => {
+        const id = nextId('shp');
+        return run('Add shape', (s) =>
+          addShapeItem(s, { id, shapeKind: kind, startUs: playheadStore.get(), fps })
+        );
+      },
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
       deleteTrack: (trackId) => run('Delete track', (s) => deleteTrack(s, { trackId })),

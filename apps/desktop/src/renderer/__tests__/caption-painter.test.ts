@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { builtInStyle, type CaptionStyle } from '@clipwright/caption-styles';
 import { captionFrameAt, type CaptionFrame } from '@clipwright/compositor';
 import { canvasMeasure, fontString, hexToRgba, paintCaptionFrame } from '../features/editor/caption-painter.js';
+import { textItemsAt } from '../features/editor/CaptionOverlay.js';
 
 interface Call {
   op: string;
@@ -326,5 +327,77 @@ describe('canvasMeasure', () => {
     expect(measure('ab', 100)).toBe(100);
     // 'a b' is two half-em glyphs plus a quarter-em space.
     expect(measure('a b', 100)).toBeCloseTo(125, 5);
+  });
+});
+
+describe('which text items the overlay paints (SPEC 11 §7)', () => {
+  /*
+    The overlay draws text items on the same canvas as captions, so this is the only
+    thing deciding whether a title is on screen. It was extracted from the render pass
+    precisely so it could be checked without a canvas: every case here is about the
+    time range, and the half-open end is the one that is easy to get wrong.
+  */
+  const stateWith = (items: unknown[]) =>
+    ({ items: Object.fromEntries((items as Array<{ id: string }>).map((item) => [item.id, item])) }) as never;
+
+  const textItem = (overrides: Record<string, unknown> = {}) => ({
+    id: 't1',
+    type: 'text',
+    textContent: 'Title',
+    startUs: 1_000_000,
+    durationUs: 2_000_000,
+    disabled: false,
+    ...overrides,
+  });
+
+  it('finds a text item while the playhead is inside it', () => {
+    expect(textItemsAt(stateWith([textItem()]), 1_500_000)).toHaveLength(1);
+  });
+
+  it('includes the first frame and excludes the one at its end', () => {
+    /*
+      Half-open, like every other item range in the engine. A closed interval shows the
+      title for one frame longer than the export does — a difference nobody would ever
+      diagnose from the output, and exactly the kind that survives forever.
+    */
+    expect(textItemsAt(stateWith([textItem()]), 1_000_000)).toHaveLength(1);
+    expect(textItemsAt(stateWith([textItem()]), 3_000_000)).toHaveLength(0);
+    expect(textItemsAt(stateWith([textItem()]), 2_999_999)).toHaveLength(1);
+  });
+
+  it('skips a disabled text item', () => {
+    // Disabling is how a user checks the frame without the title; drawing it anyway
+    // makes the toggle look broken.
+    expect(textItemsAt(stateWith([textItem({ disabled: true })]), 1_500_000)).toHaveLength(0);
+  });
+
+  it('ignores captions, shapes and everything else', () => {
+    // Shapes are drawn by their own path, and a caption has its own overlay branch.
+    // Claiming them here would draw a caption twice — once via the ASS-style painter
+    // and once via this one — which reads as doubled, bolder text.
+    const state = stateWith([
+      textItem(),
+      { ...textItem({ id: 'c1' }), type: 'caption' },
+      { ...textItem({ id: 's1' }), type: 'shape' },
+      { ...textItem({ id: 'v1' }), type: 'video' },
+    ]);
+    const found = textItemsAt(state, 1_500_000);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.type).toBe('text');
+  });
+
+  it('returns all the titles that overlap the playhead, so one moment can carry two', () => {
+    // A lower third is a title and a subtitle at once. Returning only the first would
+    // drop one of them with no error anywhere.
+    const state = stateWith([
+      textItem({ id: 'a' }),
+      textItem({ id: 'b', textContent: 'Subtitle', startUs: 1_200_000 }),
+      textItem({ id: 'c', startUs: 6_000_000 }),
+    ]);
+    expect(textItemsAt(state, 1_500_000)).toHaveLength(2);
+  });
+
+  it('finds nothing before the item starts', () => {
+    expect(textItemsAt(stateWith([textItem()]), 0)).toHaveLength(0);
   });
 });

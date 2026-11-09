@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `26bcbe2`. 2642 automated tests, all passing.
+Last updated after commit `26bcbe2`. 2695 automated tests, all passing.
 
 ---
 
@@ -20,7 +20,7 @@ the work is committed and tagged.
 | **2 — Start flow & transcription** | Start screen, file import, URL download (yt-dlp), ffprobe inspection, proxies, Whisper transcription, transcript editor | ✅ Done, tagged `phase-2-complete` |
 | **3 — AI & moments** | AI provider settings, Ollama, moment detection and scoring, moments screen, clip creation | ✅ Done, tagged `phase-3-complete` |
 | **4 — Editor core** | Editor layout, media library, timeline, playhead, preview, undo/redo, autosave, recovery | ⚠️ Mostly done, not tagged |
-| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ⚠️ Mostly done: captions, keyframes, effects, transitions and audio envelope built; text/shape items, brand kits, equaliser, metering and voiceover not built |
+| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ⚠️ Mostly done: captions, keyframes, effects, transitions, audio envelope and text/shape items built; brand kits, equaliser, metering and voiceover not built |
 | **6 — Export, updates, packaging** | Export engine, queue, updates, installer, GitHub release, docs | ⚠️ Built, one big gap (see below) |
 
 So: **three phases fully done (1, 2, 3) and three partial (4, 5, 6)** — every phase
@@ -204,8 +204,13 @@ properties the renderer reads now have a row with a diamond — scale, both posi
 axes, rotation and the four crop edges included — and the visible scale is the one
 the compositor applies rather than `scaleX` alone.
 
-**2. Finish Phase 5 ⚠️** — text and shape items, brand kits, and the audio tools
-beyond the envelope. The style editor's **colour pickers and anchor grid are in**:
+**2. Finish Phase 5 ⚠️** — brand kits, the audio tools beyond the envelope, and the
+curve editor's viewport. **Text and shape items are in**, which closes the biggest
+hole in the phase: the schema had declared the two item types and their fields from
+the start while nothing read them, so a project could hold a title that no renderer
+would draw and no user could create. A text item is deliberately a caption without
+words — same style resolution, same layout — so the preview and the burn-in agree by
+construction rather than by a second implementation that has to be kept in step. The style editor's **colour pickers and anchor grid are in**:
 colours are hex-only (no eyedropper, recorded as a limitation), and the nine-cell
 anchor grid is a real control rather than a display — it had to be added alongside a
 fix, because the horizontal half of a caption's anchor was dead code in the layout
@@ -253,7 +258,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 2642 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 2695 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

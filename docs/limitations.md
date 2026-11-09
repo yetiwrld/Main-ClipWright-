@@ -9,7 +9,18 @@ This document tracks architectural scope boundaries and honest limitations per `
 1. **No schema downgrade migration (`specs/03` §9):** Projects saved by a newer major schema version (`schemaVersion > CURRENT_SCHEMA_VERSION`) open in **read-only mode** with a clear banner advising the user to update Clipwright Studio. Unknown JSON fields within the same schema version are preserved via `.passthrough()`.
 2. **Mixed-language transcripts (`specs/05` §6):** v1 uses one primary language per transcript (auto-detected or user-selected).
 3. **Reverse playback & clip reversal (`specs/10` §10, `specs/12` §5):** `J` in the transport steps backward by 1 second (or frames on intra-frame proxies) rather than continuous reverse audio playback; clip timeline reversal is out of scope for v1.
-4. **Text on a path / 3D text / gradient text fills (`specs/11` §11):** Text items support solid fills, strokes, shadows, backgrounds, and 12 keyframe-based animations; 3D extrusion, curved path text, and gradient text fills are out of scope in v1.
+4. **Text and shape items: built, with v1 limits (`specs/11` §7, §12).** A text item is
+   a caption without words — same style resolution, same `layoutText`, so it wraps and
+   breaks exactly as a caption in the same style does, and the burn-in draws it from
+   the same ASS path. What a text item does **not** have: per-range rich text (bold or
+   italic across part of a string), auto-size-versus-fixed-box, the ten template
+   presets (lower third, callout, bullet list), and per-item animation beyond the
+   style's own in/out. Shapes are SVG paths for all nine kinds (rectangle, rounded
+   rectangle, ellipse, triangle, polygon, star, line, arrow, speech bubble) and are
+   **previewed but not yet composited into the export**: the burn-in carries text and
+   captions, and a shape would need the rasteriser that the WebGL2 renderer brings.
+   Icons and stickers are not built. Text on a path, 3D extrusion, gradient fills and
+   `rotationJitterDeg` on a title remain out of scope for v1.
 5. **Animated GIF imports (`specs/04` §2, `specs/11` §12):** Imported `.gif` files render their first frame statically; use `.mp4` or `.webm` for animated overlays.
 6. **Audio-only composition export (`specs/12` §6.9):** v1 exports video containers (`.mp4`, `.webm`); an audio-only timeline exports as a video with the composition's canvas background colour.
 7. **Guides, safe areas and the pixel grid.** `Ctrl+;` cycles title safe (90%),
@@ -207,7 +218,9 @@ This document tracks architectural scope boundaries and honest limitations per `
    the list once the compositor started resolving them.
 9. **The left panel has the Media and Captions tabs.** Text/Graphics,
    Effects/Transitions, Audio and AI tabs are still to come; nothing pretends to be
-   there.
+   there. Text and shape items are created from the timeline's context menu instead,
+   which is where an item with no file behind it belongs — there is nothing to drag in
+   from a browser.
 10. **Panel sizes are not persisted per user/tier yet** (SPEC 08 §3.3); they reset to the defaults on reload, while timeline zoom, scroll and the playhead are persisted in the project payload.
 
 ---

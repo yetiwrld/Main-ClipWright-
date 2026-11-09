@@ -42,6 +42,15 @@ export interface PlannedItem {
    */
   captionStyleId?: string;
   /**
+   * The whole string of a `text` item (SPEC 11 §7).
+   *
+   * Separate from `captionText` rather than sharing it: the two mean different things
+   * to the burn-in — a caption's text is a window onto a transcript with word timings,
+   * a text item's is a fixed string — and `assCuesFromPlan` branches on the item type
+   * before choosing which to read.
+   */
+  textContent?: string;
+  /**
    * The caption's full segment: word timings for karaoke, overrides, speaker.
    * Absent for a caption typed into a build that did not store one.
    */
@@ -250,6 +259,8 @@ export interface ExportSettings {
     };
     /** Which `.cwstyle` the caption uses, for a styled burn-in. */
     captionStyleId?: string;
+    /** A `text` item's whole string (SPEC 11 §7). */
+    textContent?: string;
     /** Keyframed properties, so an animated item can be segmented. */
     keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
     /** Crop and transform, so the decoded frame matches the preview. */
@@ -346,6 +357,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         hasAudio,
         captionText: item.captionSegment?.text,
         captionStyleId: item.captionStyleId,
+        textContent: item.textContent,
         geometry: item.geometry,
         keyframes: item.keyframes,
         opacity: item.opacity,

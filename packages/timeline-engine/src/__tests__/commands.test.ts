@@ -4,6 +4,8 @@ import { createDefaultTimeline, createMediaItem } from '../factory';
 import {
   addAdjustmentLayer,
   addItem,
+  addShapeItem,
+  addTextItem,
   addGuide,
   clearGuides,
   setGuides,
@@ -2204,5 +2206,193 @@ describe('setKeyframesAt (SPEC 10 §8.6 reframe)', () => {
     const lockedResult = setKeyframesAt(locked, { itemId, timeUs: 0, values: { 'transform.x': 0 }, fps: 30 });
     expect(lockedResult.ok).toBe(false);
     if (!lockedResult.ok) expect(lockedResult.code).toBe('locked');
+  });
+});
+
+describe('addTextItem (SPEC 11 §7)', () => {
+  const base = () => createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+
+  it('creates a text track when there is none', () => {
+    /*
+      The default timeline ships a "Text / Graphics" track, so this case needs one
+      removed to exist at all — it is the project made before that track was added, and
+      the one a `deleteTrack` leaves behind. `canHold` refuses a text item on a picture
+      track, so a command that did not create one would fail rather than work.
+    */
+    const stripped = base();
+    stripped.tracks = stripped.tracks.filter((track) => track.kind !== 'text');
+    const result = addTextItem(stripped, { id: 'txt1', text: 'Hello', startUs: 0, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['txt1']?.type).toBe('text');
+    const track = result.state.tracks.find((candidate) => candidate.id === result.trackId);
+    expect(track?.kind).toBe('text');
+  });
+
+  it('reuses the default Text / Graphics track rather than making a new one', () => {
+    /*
+      The default timeline already has one, so the first title must land there. Creating
+      a second track would leave the project with an empty "Text / Graphics" row above
+      every title the user adds, which reads as the app losing its place.
+    */
+    const timeline = base();
+    const supplied = timeline.tracks.find((track) => track.kind === 'text')!;
+    const first = addTextItem(timeline, { id: 'txt1', text: 'One', startUs: 0, fps: 30 });
+    if (!first.ok) throw new Error(first.message);
+    expect(first.state.items['txt1']?.trackId).toBe(supplied.id);
+    const second = addTextItem(first.state, { id: 'txt2', text: 'Two', startUs: 5_000_000, fps: 30 });
+    if (!second.ok) throw new Error(second.message);
+    expect(second.state.items['txt2']?.trackId).toBe(supplied.id);
+    expect(second.state.tracks.filter((track) => track.kind === 'text')).toHaveLength(1);
+  });
+
+  it('makes a second track when the first is occupied at that moment', () => {
+    // Two titles on screen at once have to be two items on two tracks; overlapping them
+    // on one track breaks the invariant that a track holds non-overlapping items.
+    const first = addTextItem(base(), { id: 'txt1', text: 'One', startUs: 0, fps: 30 });
+    if (!first.ok) throw new Error(first.message);
+    const second = addTextItem(first.state, { id: 'txt2', text: 'Two', startUs: 0, fps: 30 });
+    if (!second.ok) throw new Error(second.message);
+    expect(second.state.items['txt2']?.trackId).not.toBe(first.state.items['txt1']?.trackId);
+    expect(second.state.tracks.filter((track) => track.kind === 'text')).toHaveLength(2);
+  });
+
+  it('puts a new text track above everything, so the title is visible', () => {
+    // A text track at the bottom of the stack draws behind the footage, which reads as
+    // "add text did nothing".
+    const stripped = base();
+    stripped.tracks = stripped.tracks.filter((track) => track.kind !== 'text');
+    const result = addTextItem(stripped, { id: 'txt1', text: 'Hello', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const order = new Map(result.state.tracks.map((track) => [track.id, track.order]));
+    const titleOrder = order.get(result.state.items['txt1']!.trackId)!;
+    for (const track of result.state.tracks) {
+      if (track.id !== result.state.items['txt1']!.trackId) {
+        expect(track.order).toBeLessThan(titleOrder);
+      }
+    }
+  });
+
+  it('defaults to three seconds and quantises the start to a frame', () => {
+    const result = addTextItem(base(), { id: 'txt1', text: 'Hi', startUs: 123_457, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const item = result.state.items['txt1']!;
+    expect(item.durationUs).toBe(3_000_000);
+    /*
+      `quantizeUs` rounds to the *nearest* frame — 123457 is nearer to frame 4
+      (133333 µs) than to frame 3 — and a 30 fps frame is 33333.33… µs, so it is not an
+      integer. A `% 33333` assertion would be testing the remainder of a number that
+      cannot exist; pinning the exact value is the only honest check.
+    */
+    expect(item.startUs).toBe(133_333);
+  });
+
+  it('refuses a duration shorter than a frame', () => {
+    const result = addTextItem(base(), { id: 't', text: 'x', startUs: 0, durationUs: 1, fps: 30 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('too_short');
+  });
+
+  it('refuses a duplicate id', () => {
+    const first = addTextItem(base(), { id: 'txt1', text: 'One', startUs: 0, fps: 30 });
+    if (!first.ok) throw new Error(first.message);
+    const again = addTextItem(first.state, { id: 'txt1', text: 'Two', startUs: 9_000_000, fps: 30 });
+    expect(again.ok).toBe(false);
+    if (again.ok) return;
+  });
+
+  it('carries the text and the style onto the item', () => {
+    const result = addTextItem(base(), {
+      id: 'txt1',
+      text: 'Chapter One',
+      startUs: 0,
+      fps: 30,
+      styleId: 'bold-creator',
+    });
+    if (!result.ok) throw new Error(result.message);
+    const item = result.state.items['txt1']!;
+    expect(item.textContent).toBe('Chapter One');
+    expect(item.captionStyleId).toBe('bold-creator');
+    // The label is what the timeline shows; the text is what the canvas draws.
+    expect(item.label).toBe('Chapter One');
+  });
+
+  it('is one undo step, track and all', () => {
+    /*
+      Creating an item *and* a track must undo together, or Ctrl+Z leaves an empty track
+      behind on every add. The track only gets created on the stripped timeline, so this
+      uses that one — the case where one patch set has to carry both.
+    */
+    const stripped = base();
+    stripped.tracks = stripped.tracks.filter((track) => track.kind !== 'text');
+    const result = addTextItem(stripped, { id: 'txt1', text: 'Hello', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.items['txt1']).toBeUndefined();
+    expect(undone.tracks.some((track) => track.kind === 'text')).toBe(false);
+  });
+
+  it('leaves the default track in place when undoing a title that reused it', () => {
+    // The other half: undoing a title must not delete the track it was added to.
+    const result = addTextItem(base(), { id: 'txt1', text: 'Hello', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.items['txt1']).toBeUndefined();
+    expect(undone.tracks.filter((track) => track.kind === 'text')).toHaveLength(1);
+  });
+});
+
+describe('addShapeItem (SPEC 11 §12)', () => {
+  const base = () => createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+
+  it('creates a graphics track only when there is no text track to use', () => {
+    // The default timeline's Text / Graphics track takes shapes too; the "Graphics"
+    // track is the fallback for a project that has none.
+    const stripped = base();
+    stripped.tracks = stripped.tracks.filter((track) => track.kind !== 'text');
+    const result = addShapeItem(stripped, { id: 'shp1', shapeKind: 'ellipse', startUs: 0, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['shp1']?.shapeKind).toBe('ellipse');
+    const track = result.state.tracks.find((candidate) => candidate.id === result.trackId);
+    expect(track?.name).toBe('Graphics');
+  });
+
+  it('reuses the Text / Graphics track, like a title does', () => {
+    // A shape and a title are drawn the same way and in the same order, so they share
+    // the track. A separate graphics row would be a second thing to scroll past.
+    const timeline = base();
+    const supplied = timeline.tracks.find((track) => track.kind === 'text')!;
+    const result = addShapeItem(timeline, { id: 's', shapeKind: 'rect', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.items['s']?.trackId).toBe(supplied.id);
+  });
+
+  it('gives the shape a readable label', () => {
+    // The timeline shows this; "round-rect" is an identifier, not a name.
+    const result = addShapeItem(base(), { id: 's', shapeKind: 'round-rect', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.items['s']?.label).toBe('Rounded rectangle');
+  });
+
+  it('puts shapes on a track the compositor draws', () => {
+    /*
+      The schema has five track kinds and no graphics kind. A shape goes on a `text`
+      track because both are drawn the same way and in the same order — inventing a
+      sixth kind would mean teaching the compositor about it for no gain.
+    */
+    const result = addShapeItem(base(), { id: 's', shapeKind: 'rect', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const track = result.state.tracks.find((candidate) => candidate.id === result.trackId);
+    expect(track?.kind).toBe('text');
+  });
+
+  it('is one undo step', () => {
+    const result = addShapeItem(base(), { id: 's', shapeKind: 'star', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.items['s']).toBeUndefined();
+    expect(undone.tracks.some((track) => track.name === 'Graphics')).toBe(false);
   });
 });

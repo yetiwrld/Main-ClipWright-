@@ -46,6 +46,9 @@ export {
   groupItems,
   ungroupItems,
   addAdjustmentLayer,
+  addShapeItem,
+  addTextItem,
+  DEFAULT_TEXT_DURATION_US,
   addGuide,
   removeGuide,
   setGuides,
@@ -105,4 +108,15 @@ export {
 
 export { TimelineHistory, type HistoryStep, type UndoResult } from './history';
 export { checkInvariants } from './invariants';
-export { createCaptionItem, createDefaultTimeline, createMediaItem, nextId, type CreateCaptionItemParams } from './factory';
+export {
+  createCaptionItem,
+  createDefaultTimeline,
+  createMediaItem,
+  createShapeItem,
+  createTextItem,
+  nextId,
+  SHAPE_LABELS,
+  type CreateCaptionItemParams,
+  type CreateShapeItemParams,
+  type CreateTextItemParams,
+} from './factory';

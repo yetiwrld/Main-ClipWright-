@@ -379,3 +379,37 @@ part changed nothing and every caption was centred.
   nine-cell anchor grid and a horizontal slider. Adding the control and fixing the arithmetic are
   the same job — either alone leaves a feature that is either wrong on screen or impossible to
   reach.
+
+## 17. A text item is a caption without words
+
+SPEC 11 §7 describes text items as a separate feature from captions: titles, lower thirds,
+callouts, with their own property list. This build implements them as the *same* thing minus the
+transcript, and that is the decision worth recording.
+
+- **One renderer.** A text item resolves its style through `resolveStyle` and lays out through
+  `layoutText`, exactly as a caption does. It therefore inherits wrapping, the nine anchors,
+  outline, shadow, background, and the preview/export agreement all of those already have tests
+  for. A second styling system for titles would be a second implementation to keep in step, in a
+  project whose central invariant is that the preview and the file are one renderer. The
+  `caption-anchor` bug (§16) is a worked example of what two implementations cost.
+- **One burn-in.** `assCuesFromPlan` emits a cue for a `text` item as it does for a `caption`,
+  branching only to read `textContent` instead of the segment. A title burns in through the same
+  ASS path, so it cannot look different in the file than on the canvas.
+- **What they differ in.** No word timings, so no karaoke: a title is fully visible for its whole
+  span, and `captionFrameAt` treats the absent timings correctly because "no timing" already means
+  "already spoken". The item's own range becomes the animation segment, so a style's entrance
+  fade plays over the title's duration rather than over a span it does not have.
+- **Negative cases decide the behaviour.** An empty text item draws *nothing* — "add text" then
+  "type" is a real intermediate state, and a background box would flash before there is any text
+  in it. An unknown `shapeKind` draws nothing rather than a rectangle: a rectangle is a claim
+  about what the file contains, and the file says something else. Both are tested.
+- **Draw order: text under captions.** Both share the preview canvas, and a caption is the thing
+  the viewer is reading. A title that covered one would be the wrong layering.
+- **Shapes are paths, in a fixed 100×100 box.** One SVG string per kind feeds the preview's `<svg>`
+  and, when the rasteriser exists, the export. Coordinates in a fixed box scaled by the caller mean
+  a stroke is crisp at any size; a shape drawn at preview scale and stretched would be the one thing
+  that looked different in the file. A test walks every path and asserts every coordinate lands
+  inside the box, which is what catches an arc or a star vertex that spills out of its own element.
+- **They are created from the timeline's context menu, not a media browser.** Neither has a file to
+  drag in. The alternative — a Text/Graphics panel tab — is a larger surface for the same command,
+  and the panel tab is still listed as missing rather than pretended.

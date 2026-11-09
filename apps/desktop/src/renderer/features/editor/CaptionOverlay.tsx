@@ -12,6 +12,7 @@ import { resolveStyle, type CaptionStyle } from '@clipwright/caption-styles';
 import { captionItemAt, captionFrameAt, type CaptionWordTiming } from '@clipwright/compositor';
 import type { TimelineState } from '@clipwright/timeline-engine';
 import { canvasMeasure, paintCaptionFrame } from './caption-painter.js';
+import { textFrameAt, type GraphicItemLike } from './graphics.js';
 import { usePlayheadUs } from './playhead-store.js';
 
 /** The words of a caption that are actually visible, with their timings. */
@@ -85,6 +86,26 @@ export function captionStyleFor(
   return resolveStyle(itemStyleId, projectCopies, styleOverrides as Parameters<typeof resolveStyle>[2]);
 }
 
+/**
+ * The text items live at `timeUs`, in item order (SPEC 11 §7).
+ *
+ * Exported and pure so this can be tested without a canvas: the interesting cases are
+ * all about the span, and the half-open end is the one that is easy to get wrong — a
+ * title whose end exactly meets the playhead is *off* screen, matching how the engine
+ * and the export treat every other item's range. A closed interval would show it for
+ * one extra frame, and the export would not, which is a one-frame difference nobody
+ * would ever diagnose.
+ */
+export function textItemsAt(state: TimelineState, timeUs: number): GraphicItemLike[] {
+  return Object.values(state.items).filter(
+    (entry) =>
+      entry.type === 'text' &&
+      !entry.disabled &&
+      timeUs >= entry.startUs &&
+      timeUs < entry.startUs + entry.durationUs
+  ) as unknown as GraphicItemLike[];
+}
+
 export function CaptionOverlay({
   state,
   width,
@@ -109,6 +130,19 @@ export function CaptionOverlay({
     [state, playheadUs]
   );
 
+  /*
+    Text items live at this instant (SPEC 11 §7), drawn on the same canvas.
+
+    Same canvas rather than a second overlay element because both are `layoutText` →
+    `paintCaptionFrame`, and a second canvas would be a second z-index to keep in step
+    with the first. Text draws *before* captions: a caption is the thing the viewer is
+    reading, and a title that covered one would be the wrong layering.
+  */
+  const graphicItems = useMemo(
+    () => textItemsAt(state, playheadUs),
+    [state, playheadUs]
+  );
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -117,6 +151,34 @@ export function CaptionOverlay({
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    /*
+      Text items first, each measuring with the style it actually draws with. The
+      measure cache is keyed by font, so a title in a different family than the caption
+      below it must not reuse the caption's metrics — that would wrap the title at the
+      wrong widths, which is invisible in a test and obvious on screen.
+    */
+    for (const graphic of graphicItems) {
+      const style = captionStyleFor(
+        (graphic as { captionStyleId?: string }).captionStyleId,
+        (graphic as { styleOverrides?: Record<string, unknown> }).styleOverrides,
+        projectCopies
+      );
+      const cacheKey = JSON.stringify(style.font);
+      if (measureRef.current?.key !== cacheKey) {
+        measureRef.current = { key: cacheKey, measure: canvasMeasure(ctx, style) };
+      }
+      const frame = textFrameAt({
+        item: graphic,
+        style,
+        timeUs: playheadUs,
+        canvasWidth: width,
+        canvasHeight: height,
+        measure: measureRef.current.measure,
+      });
+      if (frame) paintCaptionFrame(ctx, frame, style, { canvasShortSide: Math.min(width, height) });
+    }
+
     if (!caption || !item) return;
 
     const style = captionStyleFor(
@@ -149,7 +211,7 @@ export function CaptionOverlay({
     });
 
     paintCaptionFrame(ctx, frame, style, { canvasShortSide: Math.min(width, height) });
-  }, [caption, item, playheadUs, width, height, projectCopies]);
+  }, [caption, item, graphicItems, playheadUs, width, height, projectCopies]);
 
   return (
     <canvas
