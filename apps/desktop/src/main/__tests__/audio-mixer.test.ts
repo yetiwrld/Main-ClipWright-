@@ -283,6 +283,208 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     expect(amplitudeToDb(peakLevel(secondSecond))).toBeGreaterThan(-30);
   }, 120_000);
 
+  /**
+   * SPEC 12 §6.2 — Gain, Pan and the fades, which the inspector has offered since the
+   * audio section was built.
+   *
+   * The same shape of bug the keyframe test above describes, five more times: the
+   * schema declared `gainDb`, `pan`, `fadeInUs`, `fadeOutUs` and `fadeCurve`, the
+   * inspector wrote them, the mixer's `applyItemProcessing` applied them — and
+   * `planAudioItems` carried none of them onto the request. The mixer then used its own
+   * `?? ` fallbacks (0 dB, centre, no fade, equal-power), so **every one of those
+   * controls was inert in the export** while looking connected. Measured through the
+   * real mixer rather than by inspecting the request, because the request is the half
+   * that was already right.
+   */
+  it('applies clip gain from the item, not just from a keyframe line', async () => {
+    const source = makeConstantToneFile('gain.wav', { seconds: 1, volume: 0.6, frequency: 300 });
+
+    /** Peak amplitude of the rendered mix for one item at one clip gain. */
+    const renderPeak = async (gainDb: number): Promise<number> => {
+      const plan = buildExportPlan(
+        makeSettings({
+          rangeUs: [0, 1_000_000],
+          items: [
+            {
+              id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+              startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+              gainDb,
+              disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            },
+          ] as never,
+        }),
+      );
+      const wavPath = join(TMP, `gain-${gainDb}.wav`);
+      await buildAudioMix({ plan, items: planAudioItems(plan, () => source), wavPath });
+      const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE);
+      return peakLevel({ samples: decoded.samples, length: decoded.length });
+    };
+
+    const unity = await renderPeak(0);
+    const cut = await renderPeak(-6);
+    expect(unity, 'the fixture has signal to attenuate').toBeGreaterThan(0.05);
+    /*
+      −6 dB is a factor of 0.501 in amplitude. Asserted as a *ratio* with a tolerance
+      rather than against an absolute level, so the fixture's own loudness cannot make
+      a broken implementation look right: the value that has to change is the one the
+      control controls.
+    */
+    expect(cut / unity).toBeCloseTo(Math.pow(10, -6 / 20), 2);
+  }, 120_000);
+
+  it('pans hard left and hard right, from the stored percentage', async () => {
+    const source = makeConstantToneFile('pan.wav', { seconds: 1, volume: 0.6, frequency: 300 });
+
+    /** Peak per channel for one item at one stored pan. */
+    const renderChannels = async (pan: number): Promise<{ left: number; right: number }> => {
+      const plan = buildExportPlan(
+        makeSettings({
+          rangeUs: [0, 1_000_000],
+          items: [
+            {
+              id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+              startUs: 0, durationUs: 1_000_000, sourceInUs: 0, sourceDurationUs: 1_000_000,
+              pan,
+              disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            },
+          ] as never,
+        }),
+      );
+      const wavPath = join(TMP, `pan-${pan}.wav`);
+      await buildAudioMix({ plan, items: planAudioItems(plan, () => source), wavPath });
+      const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE);
+      let left = 0;
+      let right = 0;
+      for (let index = 0; index < decoded.length; index += 1) {
+        left = Math.max(left, Math.abs(decoded.samples[index * 2] ?? 0));
+        right = Math.max(right, Math.abs(decoded.samples[index * 2 + 1] ?? 0));
+      }
+      return { left, right };
+    };
+
+    /*
+      The unit matters as much as the wiring: the project stores −100…+100 and the mixer
+      wants −1…+1. A missing division would clamp every pan to hard-left or hard-right,
+      and a test asserting only "the channels differ" would pass on that.
+    */
+    const left = await renderChannels(-100);
+    expect(left.left, 'hard left keeps the left channel').toBeGreaterThan(left.right * 50);
+
+    const right = await renderChannels(100);
+    expect(right.right, 'hard right keeps the right channel').toBeGreaterThan(right.left * 50);
+
+    const centre = await renderChannels(0);
+    // Constant power with the mixer's √2 normalisation: centre is unity in both channels.
+    expect(centre.left / centre.right).toBeCloseTo(1, 2);
+
+    /*
+      A *partial* pan is the case that pins the unit, and it is here because the first
+      version of this test did not have it and a mutation survived. Treating −100…+100
+      as if it were already −1…+1 clamps every non-zero value to a hard edge, and
+      hard-left and hard-right look identical under that bug — only a pan that is meant
+      to be half-way reveals it. `+50` must be 0.5, whose constant-power coefficients
+      are cos(3π/8) ≈ 0.383 left and sin(3π/8) ≈ 0.924 right, so the right channel is
+      about 2.4× the left; clamped to hard right it would be ~50×.
+    */
+    const halfRight = await renderChannels(50);
+    const ratio = halfRight.right / halfRight.left;
+    expect(ratio).toBeGreaterThan(1.5);
+    expect(ratio, 'a half-right pan is not a hard-right one').toBeLessThan(5);
+  }, 120_000);
+
+  it('fades an item in and out over the lengths the item stores', async () => {
+    const source = makeConstantToneFile('fade.wav', { seconds: 2, volume: 0.6, frequency: 300 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+            startUs: 0, durationUs: 2_000_000, sourceInUs: 0, sourceDurationUs: 2_000_000,
+            fadeInUs: 1_000_000, fadeOutUs: 1_000_000, fadeCurve: 'linear',
+            disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+          },
+        ] as never,
+      }),
+    );
+    const wavPath = join(TMP, 'fade.wav');
+    await buildAudioMix({ plan, items: planAudioItems(plan, () => source), wavPath });
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+
+    const peakBetween = (fromSeconds: number, toSeconds: number): number => {
+      let peak = 0;
+      for (let index = Math.round(fromSeconds * MIX_SAMPLE_RATE); index < Math.round(toSeconds * MIX_SAMPLE_RATE); index += 1) {
+        peak = Math.max(peak, Math.abs(decoded.samples[index * 2] ?? 0));
+      }
+      return peak;
+    };
+
+    const start = peakBetween(0, 0.05);
+    const middle = peakBetween(0.95, 1.05);
+    const end = peakBetween(1.95, 2);
+    /*
+      A linear fade over a second, so the opening 50 ms is at most 5% of full level and
+      the middle is at full. The ratio is the assertion: an implementation that ignored
+      the fades renders all three windows at the same level.
+    */
+    expect(start).toBeLessThan(middle * 0.2);
+    expect(end).toBeLessThan(middle * 0.2);
+    expect(middle, 'the middle is untouched by either fade').toBeGreaterThan(0.05);
+  }, 120_000);
+
+  it('uses the item\'s fade curve, not the default one', async () => {
+    /*
+      The fifth property lost on the same path. The inspector offers Linear, Equal-power
+      and Exponential; `applyItemProcessing` defaults to equal-power; `planAudioItems`
+      and the mixer's own call never passed the stored curve. A *linear* fade therefore
+      exported as an equal-power one — different enough to hear, and different enough to
+      measure: at the midpoint of the fade the two are 0.5 and 0.7071.
+
+      Measured at the top of the rendered output rather than by reading the request,
+      because "a request carries `linear`" and "the file fades linearly" are two claims
+      and only the second one is the feature.
+    */
+    const source = makeConstantToneFile('curve.wav', { seconds: 2, volume: 0.6, frequency: 300 });
+
+    const renderAtMidFade = async (fadeCurve: 'linear' | 'equal-power'): Promise<number> => {
+      const plan = buildExportPlan(
+        makeSettings({
+          rangeUs: [0, 2_000_000],
+          items: [
+            {
+              id: 'a', trackId: 'track-audio', type: 'audio', mediaId: 'media-a',
+              startUs: 0, durationUs: 2_000_000, sourceInUs: 0, sourceDurationUs: 2_000_000,
+              // A one-second fade in, sampled at its midpoint — where 0.5 and 0.7071 are
+              // far enough apart that no rounding can confuse them.
+              fadeInUs: 1_000_000, fadeCurve,
+              disabled: false, muted: false, hasAudio: true, trackOrder: 0,
+            },
+          ] as never,
+        }),
+      );
+      const wavPath = join(TMP, `curve-${fadeCurve}.wav`);
+      await buildAudioMix({ plan, items: planAudioItems(plan, () => source), wavPath });
+      const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+      // Peak across a window around the midpoint, so a single zero-crossing cannot decide it.
+      let peak = 0;
+      for (let index = Math.round(0.48 * MIX_SAMPLE_RATE); index < Math.round(0.52 * MIX_SAMPLE_RATE); index += 1) {
+        peak = Math.max(peak, Math.abs(decoded.samples[index * 2] ?? 0));
+      }
+      return peak;
+    };
+
+    const linear = await renderAtMidFade('linear');
+    const equalPower = await renderAtMidFade('equal-power');
+    expect(linear, 'the fixture has signal').toBeGreaterThan(0.01);
+    /*
+      linear / equal-power = 0.5 / 0.7071 = 0.7071 at the midpoint. Asserting the ratio
+      rather than the levels keeps the fixture's own loudness out of the result.
+    */
+    expect(linear / equalPower).toBeCloseTo(0.7071, 1);
+    // And a file that ignored the curve would give exactly 1 for this ratio.
+    expect(Math.abs(linear / equalPower - 1)).toBeGreaterThan(0.2);
+  }, 120_000);
+
   it('mutes an item without removing its time slot', async () => {
     const source = makeAudioFile('muted.mp4', { seconds: 2, volume: 0.8 });
     const plan = planWithAudio();

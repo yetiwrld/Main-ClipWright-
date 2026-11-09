@@ -1299,6 +1299,12 @@ export function PreviewPane({
     // has no notion of tracks.
     const track = state.tracks.find((candidate) => candidate.id === bottom.trackId);
     const anySolo = state.tracks.some((candidate) => candidate.solo);
+    /*
+      Pan is the one audio property the preview cannot honour, and it is worth saying so
+      here rather than leaving it to a document: a `<video>` element has no pan, so the
+      preview would need a Web Audio graph to match the mixer's constant-power pan. The
+      export applies it; the preview is centred. Recorded in `docs/limitations.md`.
+    */
     video.volume = gainAt(
       {
         startUs: bottom.startUs,

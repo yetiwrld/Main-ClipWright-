@@ -107,6 +107,22 @@ export interface PlannedItem {
   /** Blend mode against the layers below (SPEC 10 §6). Absent means `normal`. */
   blendMode?: string;
   /**
+   * The item's audio properties (SPEC 12 §6.2): clip gain, volume, pan, fades and mute.
+   *
+   * Carried on the plan because the mixer reads them and nothing else does. All five were
+   * missing here while `AudioItemRequest` declared every one of them, so the mixer's
+   * `?? `-fallbacks quietly substituted 0 dB and centre — the inspector's Gain, Pan and fade
+   * controls on every clip changed nothing audible in the exported file. A control whose
+   * value never leaves the project is indistinguishable from one that does nothing.
+   */
+  gainDb?: number;
+  volumeDb?: number;
+  /** Pan, −100 hard left … +100 hard right. **Percent, as stored** — see `panToUnit`. */
+  pan?: number;
+  fadeInUs?: number;
+  fadeOutUs?: number;
+  fadeCurve?: 'linear' | 'equal-power' | 'exponential';
+  /**
    * The item's effect chain in stored order (SPEC 12 §3). Carried so the export can
    * apply the same colour maths the preview does; without it a graded clip arrives in
    * the file ungraded.
@@ -282,6 +298,13 @@ export interface ExportSettings {
     iconStrokeWidth?: number;
     /** Keyframed properties, so an animated item can be segmented. */
     keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
+    /** Audio properties, so the mix matches the inspector (SPEC 12 §6.2). */
+    gainDb?: number;
+    volumeDb?: number;
+    pan?: number;
+    fadeInUs?: number;
+    fadeOutUs?: number;
+    fadeCurve?: 'linear' | 'equal-power' | 'exponential';
     /** Crop and transform, so the decoded frame matches the preview. */
     geometry?: {
       crop?: { left?: number; top?: number; right?: number; bottom?: number };
@@ -383,6 +406,12 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         iconStrokeWidth: item.iconStrokeWidth,
         geometry: item.geometry,
         keyframes: item.keyframes,
+        gainDb: item.gainDb,
+        volumeDb: item.volumeDb,
+        pan: item.pan,
+        fadeInUs: item.fadeInUs,
+        fadeOutUs: item.fadeOutUs,
+        fadeCurve: item.fadeCurve,
         opacity: item.opacity,
         blendMode: item.blendMode,
         trackOrder: item.trackOrder,

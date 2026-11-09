@@ -36,6 +36,7 @@ import {
   type ExportPlan,
   type PcmClip,
 } from '@clipwright/export-core';
+import { dbToGain } from '@clipwright/audio-core';
 import { ffmpegPath, run, CancelledError } from './ffmpeg-runner.js';
 
 /** What the mixer needs to know about one audible item. */
@@ -53,6 +54,9 @@ export interface AudioItemRequest {
   trackVolume?: number;
   fadeInUs?: number;
   fadeOutUs?: number;
+  /** Fade shape (SPEC 12 §6.2); defaults to `equal-power`, the same as the schema. */
+  fadeCurve?: 'linear' | 'equal-power' | 'exponential';
+  /** Pan, −1 hard left … +1 hard right. The project stores −100…+100 and `planAudioItems` divides. */
   pan?: number;
   muted?: boolean;
   /**
@@ -171,6 +175,14 @@ export async function buildAudioMix(options: {
       trackVolume: item.trackVolume,
       fadeInUs: item.fadeInUs,
       fadeOutUs: item.fadeOutUs,
+      /*
+        The curve, which was the sixth property to go missing on this path. Without it
+        `applyItemProcessing` defaults to `equal-power` while the inspector stores and
+        shows whichever curve the user picked, so a *linear* fade exported as an
+        equal-power one — audible at the edges and invisible to a test that only
+        measured "it fades".
+      */
+      fadeCurve: item.fadeCurve,
       pan: item.pan,
       muted: item.muted,
       startUs: item.timelineStartUs,
@@ -502,6 +514,22 @@ export function planAudioItems(
         ...(key.interpolation ? { interpolation: key.interpolation } : {}),
       }));
 
+    /*
+      Gain, pan and the fades (SPEC 12 §6.2). `planAudioItems` left every one of these
+      off the request while `AudioItemRequest` declared them, so the mixer's fallbacks
+      supplied 0 dB, centre and no fade for every clip: the inspector's controls were
+      connected to the project file and to nothing else. Carried here with defaults that
+      mean the same thing the schema's defaults mean, so an item from a project written
+      before a field existed is not treated as a request for silence.
+
+      Mute is deliberately absent. `ExportPlan` sets `hasAudio` to false for a muted
+      item, and this function skips those entirely, so a muted clip contributes no
+      samples at all — forwarding `muted` here would be a branch no project can reach.
+
+      Pan is stored as a percentage (−100…+100) and the mixer wants −1…+1, so it is
+      divided once, here, rather than being read in two units by two modules.
+    */
+    const pan = item.pan === undefined ? 0 : clamp(item.pan / 100, -1, 1);
     items.push({
       itemId: item.itemId,
       sourcePath: path,
@@ -510,9 +538,19 @@ export function planAudioItems(
       timelineStartUs,
       crossfades,
       ...(volumeKeys.length > 0 ? { keyframes: volumeKeys } : {}),
+      gain: dbToGain(item.gainDb ?? 0),
+      pan,
+      ...(item.fadeInUs && item.fadeInUs > 0 ? { fadeInUs: item.fadeInUs } : {}),
+      ...(item.fadeOutUs && item.fadeOutUs > 0 ? { fadeOutUs: item.fadeOutUs } : {}),
+      ...(item.fadeCurve ? { fadeCurve: item.fadeCurve } : {}),
     });
   }
   return items;
+}
+
+/** Keep a value inside a range. Used for pan, which arrives as a percentage. */
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
 }
 
 function basename(path: string): string {

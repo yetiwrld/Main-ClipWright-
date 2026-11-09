@@ -207,7 +207,15 @@ axes, rotation and the four crop edges included — and the visible scale is the
 the compositor applies rather than `scaleX` alone.
 
 **2. Finish Phase 5 ⚠️** — brand kits, the audio tools beyond the envelope, and the
-curve editor's viewport. **Text and shape items are in**, which closes the biggest
+curve editor's viewport. The audio controls themselves now reach the file: **Gain, Pan,
+both fades and the fade curve were inert in the export** until this slice — the inspector
+wrote them, the project stored them, and `planAudioItems` carried none of them, so the
+mixer's fallbacks supplied 0 dB, centre and no fade for every clip. The tests read the
+rendered WAV rather than the request, which is how the volume keyframe line had been fixed
+earlier; this was the same bug shape a third time. What is still missing from the audio
+system is the **Web Audio graph** in the preview, and that one absence explains three
+symptoms at once: only the bottom picture layer is audible, pan is not previewed, and
+there is no master meter (§6.3). **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without

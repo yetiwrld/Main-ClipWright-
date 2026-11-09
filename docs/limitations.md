@@ -58,6 +58,20 @@ This document tracks architectural scope boundaries and honest limitations per `
 ## 3. Phase 4 notes (editor core, in progress)
 
 1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes the audio device position the master clock whenever audio plays. This slice advances the playhead from `performance.now()` and lets the `<video>` element follow it, so a long playback can drift from the audio by a frame. Audio-mastered playback lands with the audio tools.
+   Three consequences of there being **no Web Audio graph in the preview at all** are
+   worth naming together, because each looks like a separate bug from the outside:
+   * **Only the bottom picture layer is audible.** Sound comes from the one `<video>`
+     element the preview drives, so an audio item on its own track — a music bed, a
+     voiceover take, anything from *Extract audio* — is silent in the editor and present
+     in the export.
+   * **Pan is not previewed.** `pan` is stored, drawn in the inspector and applied by the
+     mixer, but a `<video>` element has no pan control; without a graph the preview is
+     always centred. The export is not.
+   * **There is no master meter** (SPEC 12 §6.3: stereo peak with −60…0 dB, 1.5 s peak
+     hold, a latching clip indicator, momentary LUFS). It needs the same graph, since an
+     `AnalyserNode` is what it would read.
+   The graph is the fix for all three at once, and it is the next piece of audio work
+   rather than three separate ones.
 2. **The preview plays proxies, but seeking a `<video>` element is still the scrub
    mechanism.** Import generates a proxy for 4K, Chromium-unsafe-codec, variable
    frame-rate and HDR sources (SPEC 04 §7), the media record stores its path, and the

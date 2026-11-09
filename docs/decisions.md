@@ -778,3 +778,37 @@ whole way: field → `onPick` → `addIcon` → `addShapeItem` → `createIconIt
 ASS `\bord`. The general lesson is in §26 and holds here: a control is not built until
 something downstream stores what it says, and the test that proves it has to sit on the far
 side of the boundary the value has to cross.
+
+## 28. A property is not built until something on the far side of the boundary reads it
+
+Six audio properties — `gainDb`, `pan`, `fadeInUs`, `fadeOutUs`, `fadeCurve`, and before them
+the volume keyframe line and `volumeId` — went through the same life: declared in the schema,
+given a control in the inspector, saved in the project, and **never read by the thing that
+consumes it**. Each looked finished. Each was one `.filter()`ed field short of a feature.
+
+The pattern is worth naming because it recurred three times in this project and the fix was
+the same each time:
+
+1. **The type is not the contract.** `AudioItemRequest` declared `pan`, `gain`, `fadeInUs`
+   and `muted` from the beginning. A declared, documented, typed field that no caller ever
+   sets is a comment with a compile step — and TypeScript cannot object, because every field
+   was optional, which is exactly what an optional field means.
+2. **The fallback hides the absence.** `applyItemProcessing` wrote `params.pan ?? 0` to mean
+   "no pan requested". It also meant "no pan was ever passed", and the two are
+   indistinguishable from inside the mixer. A silent default is the right ergonomics for a
+   caller that genuinely omits a value and the wrong one for a pipeline that forgot to supply
+   it; nothing in the code can tell them apart, which is why the test has to sit downstream.
+3. **Assert on the output, not the payload.** All three tests here render through the real
+   mixer and read the WAV. A test asserting `request.pan === -0.8` would have passed against
+   the broken build the moment the field was added and been wrong for the rest of the year.
+
+**Sample the inputs where the bug and the fix disagree.** The pan test used −100, 0 and +100,
+which all give the same answer whether or not the percent-to-unit division exists, so the
+mutation survived. The interpolation test for the icon picker had the same defect in a
+different costume: it searched for a term with one page, where a missing page reset is
+unobservable. Both now sample where the two implementations differ, and both were found by
+running the mutation rather than by reading the test.
+
+**Do not forward what cannot arrive.** A `muted` branch in `planAudioItems` was written,
+found unreachable (the plan already drops muted items from `hasAudio`), and deleted. An
+untestable branch is not additional safety; it is a claim that something is handled.
