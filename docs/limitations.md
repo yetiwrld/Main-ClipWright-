@@ -152,11 +152,16 @@ This document tracks architectural scope boundaries and honest limitations per `
    is met by construction rather than by a limit: one target is chosen per axis, so a
    dragged clip can draw two at most. The pivot crosshair sits behind §8.2's *Show
    anchor* toggle (`A`), and the **zoom dropdown is in** — Fit, Fill, 25–400%, plus
-   `Ctrl`+wheel about the cursor up to 1600% — but that is not all of §4's toolbar view
-   toggles: there is still no **Handles** toggle (`H`), no **preview-quality** control,
-   and no hand tool — panning is wheel-driven, through the pan that zooming about the
-   cursor produces, and there is no `Space`+drag. And the **four edge handles still crop
-   rather than scaling one axis each**:
+   `Ctrl`+wheel about the cursor up to 1600% — with §4's remaining view controls: the
+   **Handles** toggle (`H`) hides the transform grips without deselecting, and the
+   **Pan view** tool and **Space+drag** pan the view (Space still plays, because the
+   pan listener never claims the key — see `docs/decisions.md` §10). What is *not* in
+   is the **preview-quality** control (§5.1): there is no Auto/Full/Half/Quarter
+   chooser and no "Preview ½" chip. The preview draws the DOM layer stack at each
+   element's own resolution, so it has no render scale to change — the spec's quality
+   levels describe the WebGL renderer, and a control that scaled a resolution nothing
+   is rendered at would be a switch that does nothing. The **four edge handles still
+   crop rather than scaling one axis each**:
    crop is reachable along the whole edge, which keeps the gesture this app has always
    had, but it means SPEC 10 §8.2's per-axis scale has no pointer affordance.
 7. **The curve editor draws and shapes curves, but does not zoom or transform

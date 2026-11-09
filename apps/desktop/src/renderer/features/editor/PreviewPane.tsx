@@ -1,6 +1,8 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Frame,
   Grid3x3,
+  Hand,
   Lock,
   LockOpen,
   Minus,
@@ -47,6 +49,13 @@ import {
   showScrubStill,
   stillIsCurrent,
 } from './scrub-overlay.js';
+import {
+  handCursor,
+  handlesVisible,
+  isHandDrag,
+  panBy,
+  type PreviewTool,
+} from './view-tool.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
 import { SpacingHints } from './SpacingHints.js';
@@ -358,6 +367,34 @@ export function PreviewPane({
   */
   const guideDrag = useRef<{ axis: 'x' | 'y'; at: number; removing: boolean } | null>(null);
   const [showAnchor, setShowAnchor] = useState(true);
+  /*
+    The **Handles** toggle (SPEC 10 §3.1, `H`) and the **Pan view** tool (§3.1's right-hand
+    segmented control). Both are view state: neither is written to the project, journalled,
+    or reachable from an export.
+
+    The handles default on, because a selected clip with no visible way to grab it reads as
+    a bug. The tool defaults to `select`, because panning is the exception — a user who has
+    not asked to pan means the clip under their pointer.
+  */
+  const [handlesOn, setHandlesOn] = useState(true);
+  const [tool, setTool] = useState<PreviewTool>('select');
+  /*
+    Whether Space is currently held, for Space+drag (SPEC 10 §4).
+
+    Tracked separately from `playing` because the two are different questions: Space toggles
+    playback on keydown, and *holding* it arms the hand. The key is never ambiguous per
+    event — playback is a keydown, panning is a pointer-down that happens while it is held.
+  */
+  const spaceHeld = useRef(false);
+  /*
+    A pan gesture in flight: where the pointer was and the pan at the moment it started.
+
+    The start pan is kept rather than the incremental one so the drag is measured from where
+    the hand landed. Accumulating per move would compound rounding and, worse, would drift if
+    a move event were ever coalesced.
+  */
+  const panDrag = useRef<{ startX: number; startY: number; pan: Pan } | null>(null);
+  const [panning, setPanning] = useState(false);
   const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
   /**
    * The grid the user has chosen — the thirds until they say otherwise.
@@ -528,6 +565,7 @@ export function PreviewPane({
           clampPan(
             panToKeepPoint(currentPan, fromScale, toScale, point),
             { width: fittedSize.widthCss * toScale, height: fittedSize.heightCss * toScale },
+            viewportSize,
           ),
         );
         return next;
@@ -563,16 +601,60 @@ export function PreviewPane({
         setPan(NO_PAN);
         return;
       }
-      if (key !== 'a' || event.repeat) return;
+      if (key !== 'a' && key !== 'h') return;
+      if (event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
         return;
       }
       event.preventDefault();
-      setShowAnchor((value) => !value);
+      /*
+        `H` hides the transform handles (SPEC 10 §3.1). Deliberately *not* the same key or
+        state as `A`'s pivot crosshair: hiding the handles leaves the crosshair visible,
+        because the crosshair is a readout as much as a grip.
+
+        Hiding must not deselect. The selection is the document gesture's subject — the
+        inspector still edits it and the timeline still shows it — so this changes only what
+        is drawn, which is why `handlesVisible` takes both facts and owns the whole answer.
+      */
+      if (key === 'h') setHandlesOn((value) => !value);
+      else setShowAnchor((value) => !value);
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  /*
+    Space **held** arms the hand (SPEC 10 §4), without claiming the key from the transport.
+
+    This listener is deliberately passive: it never calls `preventDefault`, and
+    `TimelinePanel`'s own Space binding is what toggles playback. Suppressing the transport
+    here would trade a working shortcut away for a pan gesture, when both are in the spec and
+    neither has to lose — playback is the keydown, and the pan is a pointer-down that happens
+    while the key is down.
+
+    `blur` clears the flag because a key-up that happens while another window has focus never
+    arrives, and a stuck `spaceHeld` would silently arm the hand for the rest of the session —
+    the kind of bug a user reports as "the canvas stopped editing clips".
+  */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space') spaceHeld.current = true;
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') spaceHeld.current = false;
+    };
+    const onBlur = () => {
+      spaceHeld.current = false;
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, []);
 
   // Subscribing to the playhead is what makes a keyframed property redraw as time
@@ -1135,11 +1217,100 @@ export function PreviewPane({
     return bounds;
   }, [layerGeometry, canvas.width, canvas.height]);
 
+  /**
+   * The frame's size after the view scale, which is what bounds a pan.
+   *
+   * At Fit (scale 1) the frame exactly fits the panel, so there is nowhere to pan to and
+   * `clampPan` pins the limit to zero. That is the honest answer rather than an arbitrary
+   * lock: panning a frame that already fills its panel would only push it out of view.
+   */
+  const scaledFrame = useMemo(
+    () => ({ width: fittedSize.widthCss * scale, height: fittedSize.heightCss * scale }),
+    [fittedSize.widthCss, fittedSize.heightCss, scale],
+  );
+
+  /*
+    A pan in flight. Bound on the window rather than the frame, because the pointer routinely
+    leaves the frame during a pan — the frame is what is moving — and a drag that stopped the
+    moment it crossed the edge would be unusable at high zoom.
+  */
+  /*
+    The live `endPan`, so the pointer-up listener can remove *itself*.
+
+    A `useCallback` that removes itself by name captures the identity it had when it was
+    created, and any later re-creation leaves that closure pointing at a function that is no
+    longer installed — so the listener it was meant to remove stays on `window` forever. The
+    ref always holds the current one, which is what `removeEventListener` has to be given.
+  */
+  const endPanRef = useRef<() => void>(() => undefined);
+
+  const onPanMove = useCallback(
+    (event: PointerEvent) => {
+      const drag = panDrag.current;
+      if (!drag) return;
+      setPan(
+        clampPan(
+          panBy(drag.pan, event.clientX - drag.startX, event.clientY - drag.startY),
+          scaledFrame,
+          viewportSize,
+        ),
+      );
+    },
+    [scaledFrame, viewportSize],
+  );
+
+  const endPan = useCallback(() => {
+    if (!panDrag.current) return;
+    panDrag.current = null;
+    setPanning(false);
+    window.removeEventListener('pointermove', onPanMove);
+    window.removeEventListener('pointerup', endPanRef.current);
+  }, [onPanMove]);
+
+  useEffect(() => {
+    endPanRef.current = endPan;
+  }, [endPan]);
+
+  const beginPan = useCallback(
+    (event: React.PointerEvent) => {
+      panDrag.current = { startX: event.clientX, startY: event.clientY, pan };
+      setPanning(true);
+      window.addEventListener('pointermove', onPanMove);
+      window.addEventListener('pointerup', endPan);
+    },
+    [pan, onPanMove, endPan],
+  );
+
+  useEffect(
+    () => () => {
+      // A drag outliving the component would leave window listeners holding a dead closure.
+      window.removeEventListener('pointermove', onPanMove);
+      window.removeEventListener('pointerup', endPanRef.current);
+    },
+    [onPanMove],
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
         ref={viewportRef}
         data-testid="preview-viewport"
+        /*
+          The hand gesture is bound in the **capture** phase, and that is the whole trick.
+
+          The clip's own drag starts on the layer's `pointerdown`, which sits *inside* this
+          element — so a bubble-phase listener here runs after the clip has already begun
+          moving. Capturing lets the view claim the press first, which is what "hold Space to
+          pan instead of moving the clip" has to mean. Stopping propagation is then also what
+          keeps the crop, rotate and anchor handles from starting their gestures: those all
+          bubble to the same layer.
+        */
+        onPointerDownCapture={(event) => {
+          if (!isHandDrag({ tool, spaceHeld: spaceHeld.current, button: event.button })) return;
+          event.preventDefault();
+          event.stopPropagation();
+          beginPan(event);
+        }}
         style={{
           flex: 1,
           minHeight: 0,
@@ -1154,6 +1325,15 @@ export function PreviewPane({
             clip it — otherwise a 400% preview draws over the transport bar and the inspector.
           */
           overflow: 'hidden',
+          /*
+            `grab` before the press and `grabbing` during it, so a user can tell *before*
+            committing that this drag will move the view rather than the clip. A cursor that
+            promised a pan and then moved the clip is worse than no cursor at all.
+          */
+          cursor: handCursor(
+            isHandDrag({ tool, spaceHeld: spaceHeld.current, button: 0 }),
+            panning,
+          ),
         }}
       >
         <div
@@ -1371,13 +1551,26 @@ export function PreviewPane({
                   .filter(([id]) => id !== layer.id)
                   .map(([, bounds]) => bounds.y),
               };
-              const editable = Boolean(timeline) && selectedId === layer.id;
+              /*
+                Two flags, not one, because the **Handles** toggle and the selection are
+                different questions.
+
+                `selected` is the document fact: this is the clip the inspector edits.
+                `editable` is what draws the grips — the outline, the handle pills, the
+                rotate arm — and is what the toggle turns off. The anchor crosshair is
+                driven by `selected` and its own `A` toggle, because a crosshair is a
+                readout of the pivot as much as it is a grip; folding it into `editable`
+                made `H` hide the pivot too, which is not what `H` means.
+              */
+              const selected = Boolean(timeline) && selectedId === layer.id;
+              const editable = handlesVisible(handlesOn, selected);
               return (
               <PreviewLayer
                 key={layer.id}
                 item={item}
                 geometry={geometry}
                 editable={editable}
+                selected={selected}
                 dragging={drag.dragging}
                 fps={fps}
                 onPointerDown={(event) => {
@@ -1740,6 +1933,34 @@ export function PreviewPane({
               onClose={() => setZoomMenuAt(null)}
             />
           )}
+          {/*
+            The **Pan view** tool (SPEC 10 §3.1's right-hand segmented control). A toggle
+            rather than a momentary control: the spec also gives panning to Space+drag, so
+            this exists for the user who wants the hand without holding a key — and it is
+            the only *pointer-only* route, which matters for anyone who cannot hold a key
+            and drag at once.
+          */}
+          <IconButton
+            label={tool === 'pan' ? 'Pan view (on)' : 'Pan view'}
+            shortcut="Space+drag"
+            size={28}
+            active={tool === 'pan'}
+            icon={<Hand size={14} />}
+            onClick={() => setTool((current) => (current === 'pan' ? 'select' : 'pan'))}
+          />
+          {/*
+            The **Handles** toggle (§3.1, `H`). It hides the transform handles and the
+            selection outline without deselecting, so the picture can be judged without
+            chrome and the inspector keeps editing the same clip.
+          */}
+          <IconButton
+            label={handlesOn ? 'Hide transform handles' : 'Show transform handles'}
+            shortcut="H"
+            size={28}
+            active={!handlesOn}
+            icon={<Frame size={14} />}
+            onClick={() => setHandlesOn((value) => !value)}
+          />
           <GridDialog
             open={gridDialogOpen}
             value={grid}
@@ -1900,6 +2121,7 @@ const PreviewLayer = memo(function PreviewLayer({
   audio,
   reffed,
   editable = false,
+  selected = false,
   dragging = false,
   onPointerDown,
   onPointerMove,
@@ -1913,6 +2135,14 @@ const PreviewLayer = memo(function PreviewLayer({
   geometry: ItemGeometry;
   /** Whether this layer is the selected clip and the preview can edit it. */
   editable?: boolean;
+  /**
+   * Whether this layer is the selected clip, whether or not its handles are drawn.
+   *
+   * Separate from `editable` because SPEC 10 §3.1's *Handles* toggle (`H`) hides the grips
+   * without deselecting, and the anchor crosshair belongs to the selection rather than to
+   * the grips: hiding the handles to judge a picture should not also hide the pivot.
+   */
+  selected?: boolean;
   /** Whether a drag is in flight, which keeps the outline solid. */
   dragging?: boolean;
   onPointerDown?: (event: React.PointerEvent) => void;
@@ -2217,24 +2447,14 @@ const PreviewLayer = memo(function PreviewLayer({
             }}
           />
         ) : null}
-        {editable ? (
-          <div
-            data-testid="preview-selection"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              pointerEvents: 'none',
-              outline: `1px solid ${dragging ? 'var(--brand)' : 'var(--text-secondary)'}`,
-              outlineOffset: 0,
-              // A second, dashed ring inside keeps the edge visible over both bright
-              // and dark footage; one colour alone disappears against one or the other.
-              boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.45)',
-            }}
-          >
-            {/*
-              Corner grips, drawn only as a cue — the hit test is along the whole edge
-              (`handleAt`), so a user who grabs slightly off a corner still crops.
-            */}
+        <>
+        {/*
+          The anchor crosshair sits *outside* the selection overlay's `editable` gate, and
+          that is deliberate: `H` hides the grips, but the pivot is a readout as much as a
+          grip, so hiding the handles must leave it visible. It is still gated on `selected`
+          — the pivot of an unselected clip is not something to drag — and on its own `A`
+          toggle.
+        */}
             {/*
               The anchor crosshair (SPEC 10 §8.2's *Show anchor*, `A`). It sits at the
               pivot as a fraction of the picture, and dragging it moves the pivot
@@ -2244,7 +2464,7 @@ const PreviewLayer = memo(function PreviewLayer({
               Unlike the edge grips it must receive the pointer, so it is the one child
               of this overlay that is not `pointerEvents: none`.
             */}
-            {showAnchor ? (
+            {showAnchor && selected ? (
             <div
               data-testid="preview-anchor"
               aria-label="Drag the anchor point"
@@ -2294,6 +2514,24 @@ const PreviewLayer = memo(function PreviewLayer({
               />
             </div>
             ) : null}
+        {editable ? (
+          <div
+            data-testid="preview-selection"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              outline: `1px solid ${dragging ? 'var(--brand)' : 'var(--text-secondary)'}`,
+              outlineOffset: 0,
+              // A second, dashed ring inside keeps the edge visible over both bright
+              // and dark footage; one colour alone disappears against one or the other.
+              boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.45)',
+            }}
+          >
+            {/*
+              Corner grips, drawn only as a cue — the hit test is along the whole edge
+              (`handleAt`), so a user who grabs slightly off a corner still crops.
+            */}
             {/*
               Corner grips (SPEC 10 §8.2). These *scale* uniformly about the opposite
               corner; the edge grips below still crop. The two gestures share the
@@ -2344,6 +2582,7 @@ const PreviewLayer = memo(function PreviewLayer({
             ))}
           </div>
         ) : null}
+        </>
         <video
           ref={reffed}
           src={src}

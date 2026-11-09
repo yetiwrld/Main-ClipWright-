@@ -142,9 +142,12 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — a preview that *reads* the frame cache it now writes instead
-of seeking `<video>` to show every frame, and §4's remaining toolbar tiles (the
-*Handles* toggle, preview quality, a hand tool). Canvas drag editing is otherwise
+**1. Finish Phase 4 ⚠️** — what is left is the **preview-quality** control (SPEC 10
+§5.1) and the frame-accurate transport it belongs to, plus per-axis scale on the edge
+handles. The preview now *reads* the frame cache it writes, so a scrub over ground already
+covered is a file read rather than a seek, and §4's view controls are in: the *Handles*
+toggle (`H`) hides the grips without deselecting, and the Pan tool with Space+drag pans
+without taking Space from the transport. Canvas drag editing is otherwise
 complete, modifiers included, the preview plays proxies, coalesces its seeks, zooms
 about the cursor with `Ctrl`+wheel and back to Fit on `F`, shows its
 compliance overlays, snaps a dragged clip to the canvas, to its neighbours, to the

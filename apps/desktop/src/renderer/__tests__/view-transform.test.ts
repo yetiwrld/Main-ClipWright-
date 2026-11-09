@@ -14,7 +14,6 @@ import {
   MIN_ZOOM,
   PIXEL_GRID_ZOOM,
   ZOOM_PRESETS,
-  canPan,
   clampPan,
   clampZoom,
   devicePixelsPerCanvasPixel,
@@ -260,33 +259,76 @@ describe('zooming about the cursor', () => {
 });
 
 describe('bounding the pan', () => {
-  it('lets the frame move by its own scaled size, no further', () => {
-    // The limit is the on-screen extent: you may bring any part of the frame into view, and
-    // you cannot throw it off the panel and lose it.
-    expect(clampPan({ x: 9999, y: -9999 }, { width: 800, height: 600 })).toEqual({
-      x: 400,
-      y: -300,
+  const PANEL = { width: 400, height: 400 };
+
+  it('lets the frame slide until its edge meets the panel\'s', () => {
+    /*
+      The limit is the *overhang*, not the size. At 800×600 in a 400×400 panel the frame
+      sticks out by 200 each side, so that is how far it may move — which brings every part of
+      it into view and leaves none of it lost.
+    */
+    expect(clampPan({ x: 9999, y: -9999 }, { width: 800, height: 600 }, PANEL)).toEqual({
+      x: 200,
+      y: -100,
     });
-    expect(clampPan({ x: 100, y: -50 }, { width: 800, height: 600 })).toEqual({ x: 100, y: -50 });
+    expect(clampPan({ x: 100, y: -50 }, { width: 800, height: 600 }, PANEL)).toEqual({ x: 100, y: -50 });
+  });
+
+  it('pins the pan to nothing at Fit, where the frame is exactly the panel', () => {
+    /*
+      The bug the hand tool would have exposed. Bounding by half the frame's size let a drag
+      push the frame half off the panel at *any* zoom, so at Fit — where the frame already
+      fills the panel and there is nothing to pan to — a hand-drag would slide it out of
+      view. Nobody saw it while panning was only a side-effect of zooming about the cursor,
+      because that correction is small; the hand tool asks for the pointer's whole travel.
+    */
+    const fitted = { width: 400, height: 400 };
+    expect(clampPan({ x: 9999, y: 9999 }, fitted, PANEL)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('holds a frame smaller than the panel at rest, rather than forcing it off-centre', () => {
+    /*
+      A negative limit is worse than no clamp. Zoomed out to 200×200 inside a 400×400 panel
+      the overhang computes to −100, and `min(−100, max(100, value))` returns **−100** for
+      any value — so the frame would not merely be free to move, it would be *forced* to sit
+      a hundred pixels off-centre with nothing the user did to cause it. The `max(0, …)` is
+      what makes "no overhang" mean "no pan".
+    */
+    expect(clampPan({ x: 0, y: 0 }, { width: 200, height: 200 }, PANEL)).toEqual({ x: 0, y: 0 });
+    expect(clampPan({ x: -50, y: 50 }, { width: 200, height: 200 }, PANEL)).toEqual({ x: 0, y: 0 });
   });
 
   it('pins a degenerate size to zero rather than to Infinity', () => {
     // 0/2 is still 0, but a `NaN` width would make the limit `NaN` and every comparison
     // false, so the pan would escape the clamp entirely.
-    expect(clampPan({ x: 50, y: 50 }, { width: Number.NaN, height: 0 })).toEqual({ x: 0, y: 0 });
+    expect(clampPan({ x: 50, y: 50 }, { width: Number.NaN, height: 0 }, PANEL)).toEqual({ x: 0, y: 0 });
   });
 
-  it('zeroes a non-finite pan', () => {
-    expect(clampPan({ x: Number.NaN, y: 10 }, { width: 100, height: 100 })).toEqual({ x: 0, y: 10 });
+  it('pins to zero when the panel is unknown, rather than freeing the pan', () => {
+    /*
+      jsdom has no layout, so the panel measures zero. A missing viewport must bound to
+      nothing: treating it as "no limit" would let a test pass while the app threw its frame
+      off-screen, and `NaN` would not clamp at all because every comparison against it is
+      false.
+    */
+    expect(clampPan({ x: 500, y: 500 }, { width: 800, height: 600 })).toEqual({ x: 0, y: 0 });
+    expect(clampPan({ x: 500, y: 500 }, { width: 800, height: 600 }, { width: 0, height: 0 })).toEqual({
+      x: 0,
+      y: 0,
+    });
   });
 
-  it('says when panning means anything at all', () => {
-    // At fit or smaller the frame is inside the panel, so a pan has nowhere to go.
-    expect(canPan(1)).toBe(false);
-    expect(canPan(0.5)).toBe(false);
-    expect(canPan(2)).toBe(true);
-    // A hair over 1 is float noise, not a pan.
-    expect(canPan(1.00001)).toBe(false);
+  it('zeroes a non-finite pan, and keeps the other axis', () => {
+    /*
+      500×500 in a 400 panel overhangs by 50 on each axis, so `y: 10` is a value inside the
+      limit and must survive — which is what makes this a test of the `NaN` handling rather
+      than of the clamp. A 100 px-tall fixture would have had *no* vertical overhang, so `y`
+      would clamp to 0 for a reason that has nothing to do with `NaN`.
+    */
+    expect(clampPan({ x: Number.NaN, y: 10 }, { width: 500, height: 500 }, PANEL)).toEqual({
+      x: 0,
+      y: 10,
+    });
   });
 });
 

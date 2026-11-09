@@ -114,3 +114,59 @@ what the preview did before.
 - Mounting and visibility are separate. An `<img>` must be in the tree to load at all, and
   must be hidden until the load naming *its own* URL arrives, so a stale picture cannot be
   mistaken for the frame the user is waiting on.
+
+---
+
+## 10. Space plays *and* pans, without either losing (Spec 10 §3.2 vs §4)
+
+**Decision:** the preview's pan listener observes Space but never claims it. Space **down**
+still toggles playback; a pointer press that happens **while Space is held** pans the view
+instead of moving the clip under it. The listener is passive, clears on `blur`, and the
+gesture is bound in the capture phase on the viewport.
+
+**Reasoning:** the spec puts Play/Pause and view-panning on the same key, in two sections,
+and the naive readings both lose something. Claiming Space for the pan with
+`preventDefault` takes the transport shortcut away. Ignoring Space and panning whenever the
+view is zoomed takes the canvas away instead — a press on a clip would move the view. The
+pairing above is unambiguous per event: playback is a keydown, panning is a pointer-down
+that occurs while the key is down. Neither promise is weakened, and a user who wants a pure
+pan uses the Pan tool, where no key is involved at all.
+
+**Consequences:**
+- Starting a Space+drag also toggles playback once. That is visible and honest, and it is
+  what the spec's own pairing implies; suppressing it would mean the key had two meanings
+  chosen by timing, which is worse than one meaning chosen by event type.
+- The gesture must run in the **capture** phase. The clip's drag starts on the layer's
+  `pointerdown`, which is inside the viewport, so a bubble-phase listener runs *after* the
+  clip has begun moving — the pan would happen and the clip would move with it.
+- `spaceHeld` clears on window `blur`, because a key-up delivered to another window never
+  arrives. A stuck flag turns every later press into a pan, and the symptom is reported as
+  "the canvas stopped responding", which points nowhere near the cause.
+
+---
+
+## 11. The pan is bounded by the frame's overhang, not its size
+
+**Decision:** `clampPan(pan, scaled, viewport)` limits the pan to `max(0, (scaled − viewport) / 2)`
+per axis, rather than to `scaled / 2`.
+
+**Reasoning:** bounding by half the frame's own size was invisible while panning was only a
+side-effect of zooming about the cursor, because the correction that gesture needs is small.
+The hand tool asks for whatever the pointer travels, and the size-derived limit lets a drag
+push the frame half off the panel at **Fit** — where the frame already fills the panel and
+there is nothing to pan to. The overhang is the extent that actually means something: zero
+when the frame fits, growing as it is zoomed past the panel, and exactly enough to bring any
+part of the frame into view without losing it.
+
+**Consequences:**
+- A frame *smaller* than the panel computes a negative overhang, so the `max(0, …)` is
+  load-bearing rather than defensive: without it `min(−100, max(100, v))` returns `−100` for
+  every `v`, forcing the frame a hundred pixels off-centre with nothing the user did.
+- A missing or degenerate viewport bounds to zero rather than to `NaN`. Every comparison
+  against `NaN` is false, so a `NaN` limit would not clamp at all — the frame could be
+  dragged away entirely, and jsdom's zero-measurement would hide it in every test.
+- `-0` is folded to `0`. The two are equal on screen and in JSON but not under `Object.is`,
+  so a symmetric pan out of a zero limit otherwise fails a deep-equality assertion and reads
+  as an asymmetry in the clamp.
+- `canPan` was deleted rather than kept: the zero-overhang rule already says "there is
+  nothing to pan to", and the function had no caller outside its own test.

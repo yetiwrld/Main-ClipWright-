@@ -205,25 +205,46 @@ export function panToKeepPoint(
 /**
  * Bound the pan so the frame cannot be thrown out of sight.
  *
- * The limit is the frame's own on-screen size: at 200% you may look at any part of the
- * frame, and you cannot drag it entirely off the panel and lose it. Expressed against the
- * scaled size rather than a fixed number of pixels because that is the only extent that
- * means anything — at fit the frame is exactly the panel and there is nothing to pan to.
+ * The limit is how far the scaled frame **overhangs the panel**, not how big it is. That
+ * distinction is the whole point: at Fit the frame exactly fills the panel, so the overhang
+ * is zero and there is nowhere to pan to, while at 200% you may slide until the frame's edge
+ * meets the panel's — which is every part of the frame reachable and none of it lost.
+ *
+ * The earlier version bounded by half the *scaled size*, which let a drag push the frame
+ * half off the panel at Fit or at any zoom. Nobody noticed while panning was only a
+ * side-effect of zooming about the cursor, because the correction it asks for is small; the
+ * hand tool asks for whatever the pointer travels, so it would have been a one-gesture bug.
+ *
+ * `viewport` is the panel's own size. When it is missing or degenerate the limit is zero
+ * rather than `NaN` — every comparison against `NaN` is false, so a `NaN` limit would not
+ * clamp at all and the frame could be dragged away entirely.
  */
-export function clampPan(pan: Pan, scaled: { width: number; height: number }): Pan {
-  const limitX = Number.isFinite(scaled.width) && scaled.width > 0 ? scaled.width / 2 : 0;
-  const limitY = Number.isFinite(scaled.height) && scaled.height > 0 ? scaled.height / 2 : 0;
+export function clampPan(
+  pan: Pan,
+  scaled: { width: number; height: number },
+  viewport?: { width: number; height: number },
+): Pan {
+  const overhang = (size: number, panel: number | undefined) => {
+    if (!Number.isFinite(size) || size <= 0) return 0;
+    if (!Number.isFinite(panel) || (panel as number) <= 0) return 0;
+    return Math.max(0, (size - (panel as number)) / 2);
+  };
+  const limitX = overhang(scaled.width, viewport?.width);
+  const limitY = overhang(scaled.height, viewport?.height);
   const bound = (value: number, limit: number) => {
     if (!Number.isFinite(value)) return 0;
-    return Math.min(limit, Math.max(-limit, value));
+    const clamped = Math.min(limit, Math.max(-limit, value));
+    /*
+      `+ 0` folds `-0` into `0`. They are equal as numbers and indistinguishable on screen —
+      CSS renders both as `0px` and `JSON.stringify` writes both as `0` — but they are *not*
+      equal under `Object.is`, so a symmetric pan out of a zero limit leaves a `-0` that
+      fails a deep-equality assertion and looks like a real asymmetry in the clamp.
+    */
+    return clamped + 0;
   };
   return { x: bound(pan.x, limitX), y: bound(pan.y, limitY) };
 }
 
-/** Whether the frame is bigger than the panel, which is the only case panning means anything. */
-export function canPan(scale: number): boolean {
-  return Number.isFinite(scale) && scale > 1.0001;
-}
 
 /**
  * The pixel grid's line spacing in **screen** pixels, or `null` when it must not be drawn.
