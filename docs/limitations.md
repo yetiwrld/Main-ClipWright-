@@ -106,9 +106,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    (`Ctrl`-drag from the viewport edge, saved with the project) and the **custom N×M
    grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
-   clip, so `Ctrl+;` switches the snap targets on along with the rectangle. Snapping to
-   the thirds or to the grid is not wired — the same shape of work, and the grid has no
-   custom N×M form to snap to yet. The **cap of four lines** is met by construction rather
+   clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The thirds
+   work the same way under `Ctrl+'`. The **pixel grid** is the one overlay still not a
+   snap target, because it does not exist yet — it needs a zoom the preview does not
+   have (above). The **cap of four lines** is met by construction rather
    than by a limit: one target is chosen per axis, so a dragged clip can draw two at
    most. The pivot crosshair sits behind §8.2's
    *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles

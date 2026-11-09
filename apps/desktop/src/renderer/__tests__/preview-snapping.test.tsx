@@ -240,3 +240,37 @@ describe('snapping to a visible overlay (SPEC 10 §8.8, §9)', () => {
     expect(screen.getByTestId('snap-guide-x').getAttribute('data-kind')).toBe('safe-area-edge');
   });
 });
+
+describe('snapping to the thirds (SPEC 10 §8.8, §9)', () => {
+  /*
+    The first third is at 1/3 across the frame, which is −1/6 in centre-relative
+    fractions. With the item half a canvas wide, its left edge reaches that line when its
+    centre sits at 1/3 — 133 px across on a 400 px canvas.
+
+    The drag is 130 px, leaving the edge 3 px short: inside the threshold, so whether it
+    snaps is decided by whether `Ctrl+'` has drawn the lines.
+  */
+  const commitX = (thirdsOn: boolean): number | undefined => {
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    if (thirdsOn) {
+      fireEvent.keyDown(document, { key: "'", ctrlKey: true });
+      expect(screen.getByTestId('overlay-third-v-0')).toBeTruthy();
+    }
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 330, 200));
+    fireEvent(layer, pointer('pointerup', 330, 200));
+    const calls = (timeline.setItemProperties as ReturnType<typeof vi.fn>).mock.calls;
+    return calls.at(-1)?.[1]?.transform?.x as number | undefined;
+  };
+
+  it('ignores the composition lines while they are off', () => {
+    expect(commitX(false)).toBeCloseTo(0.325, 6);
+  });
+
+  it('pulls onto the first third when the lines are showing', () => {
+    // 1/3, not 0.325: the clip's left edge lands on the visible line.
+    expect(commitX(true)).toBeCloseTo(1 / 3, 6);
+  });
+});

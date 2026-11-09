@@ -102,6 +102,27 @@ export function targetsForOverlayRect(
   ];
 }
 
+/**
+ * The snap lines a set of composition lines offers, given as top-left fractions.
+ *
+ * The thirds are two positions across the frame — 1/3 and 2/3 — and the same two numbers
+ * apply on both axes, so one function serves both. The conversion is the same one
+ * `targetsForOverlayRect` does, for the same reason: drawn from the top-left, snapped
+ * from the centre.
+ *
+ * Kept separate from that function rather than expressed as zero-width rects, because a
+ * line has no extent and forcing it through a rect type invites a width to be passed
+ * somewhere and silently widen the target.
+ */
+export function targetsForLines(
+  positions: readonly number[],
+  kind: SnapKind = 'grid-line',
+): SnapTarget[] {
+  return positions
+    .filter((position) => Number.isFinite(position))
+    .map((position) => ({ at: position - 0.5, kind }));
+}
+
 /** The edges and centre of an item, in canvas fractions from the canvas centre. */
 export interface ItemBounds {
   left: number;

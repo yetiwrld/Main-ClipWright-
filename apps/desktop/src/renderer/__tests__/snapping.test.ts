@@ -6,6 +6,7 @@ import {
   snapTargetsFor,
   snapThresholdPx,
   snappingApplies,
+  targetsForLines,
   targetsForOverlayRect,
 } from '../features/editor/snapping.js';
 
@@ -256,5 +257,42 @@ describe('snapping to an overlay\'s edges (SPEC 10 §8.8, §9)', () => {
     const tighter = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 };
     expect(targetsForOverlayRect(tighter, 'x')[0]!.at).toBeCloseTo(-0.4, 10);
     expect(targetsForOverlayRect(tighter, 'x')[1]!.at).toBeCloseTo(0.4, 10);
+  });
+});
+
+describe('snapping to composition lines (SPEC 10 §8.8, §9)', () => {
+  // The rule of thirds, the same constant the overlay draws from.
+  const thirds = [1 / 3, 2 / 3];
+
+  it('shifts each line from the top-left to the centre', () => {
+    // 1/3 across the frame is −1/6 from the centre; 2/3 is +1/6. Same trap as the safe
+    // areas, and the reason the conversion is a function rather than a subtraction at
+    // each call site.
+    const targets = targetsForLines(thirds);
+    expect(targets[0]!.at).toBeCloseTo(-1 / 6, 10);
+    expect(targets[1]!.at).toBeCloseTo(1 / 6, 10);
+  });
+
+  it('gives the same two lines on both axes', () => {
+    // The thirds are symmetric: the caller passes the same list for x and y.
+    expect(targetsForLines(thirds).map((target) => target.at)).toEqual(
+      targetsForLines(thirds).map((target) => target.at),
+    );
+  });
+
+  it('labels them as grid lines so a guide does not point at an item', () => {
+    // A clip sticking to the thirds must not send the user looking for a neighbour.
+    expect(targetsForLines(thirds).every((target) => target.kind === 'grid-line')).toBe(true);
+  });
+
+  it('drops a non-finite line instead of placing one at NaN', () => {
+    // A line at `NaN` accepts nothing and looks like a snap that never fires.
+    expect(targetsForLines([1 / 3, Number.NaN, 2 / 3])).toHaveLength(2);
+  });
+
+  it('offers nothing when the lines are off', () => {
+    // The caller passes an empty list rather than a flag, so this is the shape the
+    // overlay-off path takes.
+    expect(targetsForLines([])).toEqual([]);
   });
 });

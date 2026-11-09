@@ -21,7 +21,7 @@ import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
-import { itemBounds, targetsForOverlayRect, type ItemBounds } from './snapping.js';
+import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
   nextAreaOverlay,
@@ -29,6 +29,7 @@ import {
   parseSafeAreas,
   platformKeyFor,
   safeAreaRect,
+  THIRDS,
   type OverlayState,
 } from './safe-areas.js';
 import safeAreasData from '../../../../../../assets/safe-areas.json';
@@ -701,11 +702,16 @@ export function PreviewPane({
           ? SAFE_AREAS.actionSafe
           : null;
     const rects = safeFraction !== null ? [safeAreaRect(safeFraction)] : [];
+    /*
+      The thirds, when they are showing. Same gate and same reason: `Ctrl+'` draws them,
+      and a clip must not stick to a composition line the user has not asked to see.
+    */
+    const lines = overlays.thirds ? targetsForLines(THIRDS, 'grid-line') : [];
     return {
-      x: rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')),
-      y: rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')),
+      x: [...rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')), ...lines],
+      y: [...rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')), ...lines],
     };
-  }, [overlays.areas]);
+  }, [overlays.areas, overlays.thirds]);
 
   /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
