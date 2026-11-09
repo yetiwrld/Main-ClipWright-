@@ -88,7 +88,20 @@ export function assShapeDrawing(subpaths: readonly ShapeSubpath[], box: AssShape
  * absolute within the frame, so an anchor at the centre would shift the whole shape.
  */
 export function assShapeOverride(box: AssShapeBox, colour: string): string {
-  const x = Math.round(box.x);
-  const y = Math.round(box.y);
-  return `{\\an7\\pos(${x},${y})\\p1\\bord0\\shad0\\1c${colour}}`;
+  /*
+    `\pos(0,0)`, never `\pos(box.x, box.y)` — and this is measured, not reasoned.
+
+    A drawing's coordinates are absolute in the script's pixel space, and libass *adds* `\pos`
+    to them rather than placing the drawing at it. Passing the box origin therefore counted
+    the origin twice: a rectangle declared as the centred middle half of a 1920×1080 frame
+    (x 480…1440, y 270…810) burned in at x 960…1919, y 540…1079 — offset by exactly the box
+    origin and pushed off the bottom-right corner of the frame. Measured by rendering the
+    script through ffmpeg and locating the drawn pixels: `\pos(480,270)` put a square drawn
+    at (480,270) at (960,540), while `\pos(0,0)` put it at (480,270).
+
+    The parameters stay for the call sites that already pass them, and because `box` still
+    documents where the drawing lives — it is simply not something `\pos` may repeat.
+  */
+  void box;
+  return `{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c${colour}}`;
 }

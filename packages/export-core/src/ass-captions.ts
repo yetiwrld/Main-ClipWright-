@@ -389,7 +389,20 @@ export function escapeAssText(text: string): string {
  * renderer's time.
  */
 export function buildAssScript(cues: ReadonlyArray<AssCue>, options: AssScriptOptions): string {
-  const ordered = [...cues].filter((cue) => cue.text.trim().length > 0 || (cue.words?.length ?? 0) > 0);
+  /*
+    A cue is kept when it has anything to *draw*, which is three cases and not two. Text and
+    karaoke words were the only two considered, so every shape cue was dropped here — after
+    `assCuesFromPlan` had carefully built its geometry — and a rectangle or an icon was absent
+    from every render. The geometry check is what makes the drawing pass reachable; without it
+    the serialiser was dead code that its own tests could not see, because they asserted the
+    cue list rather than the script.
+  */
+  const ordered = [...cues].filter(
+    (cue) =>
+      cue.text.trim().length > 0 ||
+      (cue.words?.length ?? 0) > 0 ||
+      (cue.shape?.geometry.length ?? 0) > 0,
+  );
   ordered.sort((a, b) => a.startUs - b.startUs);
   return [assHeader(options), ...ordered.map((cue) => assDialogue(cue, options)), ''].join('\n');
 }

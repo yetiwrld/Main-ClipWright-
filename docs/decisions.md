@@ -694,3 +694,29 @@ survivor: one required evaluating a branch the sign rule had already made unreac
 was removed as dead rather than guarded; the other needed a test tightened from 12 decimal
 places to exact equality, because trigonometry drifts by 1e-14 and the guard substitutes the
 destination verbatim.
+
+## 25. A drawing's coordinates are absolute, so `\pos` must be zero
+
+The exporter emitted `\an7\pos(box.x, box.y)` and then wrote the drawing's coordinates in
+absolute script pixels. Those two statements are not additive: libass *adds* `\pos` to a
+drawing's coordinates, so the box origin was counted twice. A rectangle declared as the
+centred middle half of a 1920×1080 frame (x 480…1440, y 270…810) burned in at x 960…1919,
+y 540…1079 — offset by exactly its own origin, and half of it off the frame.
+
+This went unnoticed because the unit test asserted the string `\pos(100,50)`: the bug was
+written down as the expectation. It was found by rendering the script through ffmpeg and
+locating the drawn pixels, which is the only way to see it — the ASS was well-formed and every
+test passed while the picture was in the wrong corner. The fix is `\pos(0,0)`; measured
+before and after, the same rectangle now lands at 480…1439 × 270…809.
+
+The same investigation found a second, independent bug of the same family: `buildAssScript`
+filtered its cues on `text` or `words`, and a shape cue has neither. Every rectangle and every
+icon was dropped between `assCuesFromPlan`, which builds the geometry, and the script the
+renderer consumes. All the existing shape tests asserted the *cue list* and none asserted the
+script, so the drawing pass was dead code with green tests. Both are now pinned at the level
+of observable output — a rendered script containing `\p1`, and a `\pos(0,0)` — and both
+mutations bite.
+
+**Lesson worth keeping:** a test that restates the implementation's string does not verify the
+behaviour, it freezes it. Where an external renderer interprets the output, the check has to
+run that renderer.

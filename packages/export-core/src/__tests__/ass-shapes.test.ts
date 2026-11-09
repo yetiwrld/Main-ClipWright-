@@ -194,14 +194,24 @@ describe('curves and closure', () => {
 });
 
 describe('the override block', () => {
-  it('anchors at the top-left and enters drawing mode', () => {
+  it('anchors at the top-left, at the origin, and enters drawing mode', () => {
     /*
-      `\an7` from the drawing space's own origin. A centred anchor (`\an5`) would shift
-      every shape by half the frame, because the coordinates are already absolute.
+      `\pos(0,0)`, and this test used to demand `\pos(100,50)` — which was the bug written
+      down as an expectation. A drawing's coordinates are absolute in the script's pixel space
+      and libass *adds* `\pos` to them, so passing the box origin counted it twice.
+
+      Measured, by rendering the script through ffmpeg and locating the drawn pixels: a
+      rectangle declared as the centred middle half of a 1920×1080 frame (x 480…1440,
+      y 270…810) burned in at x 960…1919, y 540…1079 — offset by exactly the box origin and
+      shoved off the bottom-right corner. With `\pos(0,0)` it lands at 480…1439 × 270…809.
+
+      A unit test cannot see pixels, so this pins the string that the measurement settled on,
+      and the measurement itself lives in `docs/verification.md`.
     */
     const override = assShapeOverride({ x: 100, y: 50, width: 400, height: 300 }, '&H00FF0000&');
     expect(override).toContain('\\an7');
-    expect(override).toContain('\\pos(100,50)');
+    expect(override).toContain('\\pos(0,0)');
+    expect(override).not.toContain('\\pos(100,50)');
     expect(override).toContain('\\p1');
   });
 

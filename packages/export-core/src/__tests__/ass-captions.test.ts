@@ -625,6 +625,21 @@ describe('a shape becomes a drawing, not text (SPEC 11 §12)', () => {
     expect(line).toContain(assColour(fill));
   });
 
+  it('puts the shape in the script at all', () => {
+    /*
+      The bug this exists for: `buildAssScript` filtered cues on `text` or `words`, and a
+      shape cue has neither — so every rectangle and every icon was dropped *after*
+      `assCuesFromPlan` had carefully built its geometry. Every test above asserted the cue
+      list, which is why none of them noticed that the script the renderer actually consumes
+      contained no shapes at all. The observable output is the script, so that is what this
+      asserts.
+    */
+    const script = buildAssScript(assCuesFromPlan(plan([shape()])), options);
+    expect(script).toContain('Dialogue:');
+    // Drawing mode, not a text line.
+    expect(script).toContain('\\p1');
+  });
+
   it('draws nothing for a shape kind this build cannot render', () => {
     /*
       A newer file. A rectangle would be a claim about content the file does not have.
