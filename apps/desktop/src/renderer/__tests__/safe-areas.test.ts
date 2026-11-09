@@ -147,7 +147,15 @@ describe('overlays never reach an export (SPEC 10 §9, §15 check 6)', () => {
     for (const file of readdirSync(exportDir)) {
       if (!file.endsWith('.ts')) continue;
       const source = readFileSync(join(exportDir, file), 'utf8');
-      if (/safe-areas|safeAreaRect|platformBands|rule-of-thirds|THIRDS/.test(source)) {
+      /*
+        `guides` is in the pattern because a user guide is the one overlay that is
+        *document state*: the others could never reach an export because they are never
+        written down, but a guide is in the project file and an export could read it by
+        accident. Naming it here is what makes that property hold rather than happen to
+        hold. `/guides/` would also catch a comment, which is the intent — an export that
+        mentions guides at all is one someone is about to teach it to draw them.
+      */
+      if (/safe-areas|safeAreaRect|platformBands|rule-of-thirds|THIRDS|\bguides\b/.test(source)) {
         offenders.push(file);
       }
     }
