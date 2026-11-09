@@ -67,8 +67,9 @@ This document tracks architectural scope boundaries and honest limitations per `
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
 6. **The canvas supports moving, cropping, rotating, scaling and the anchor crosshair,
-   with the `Shift`/`Alt` modifiers; snapping, the `Show anchor` toggle and the edge
-   handles' per-axis scale are missing.** Dragging a selected clip's picture moves it
+   with the `Shift`/`Alt` modifiers, plus object snapping and the *Show anchor* toggle;
+   the edge handles' per-axis scale is the gesture still missing.** Dragging a selected
+   clip's picture moves it
    (`Shift` locks to the dominant axis), dragging one of its edges crops it, dragging a
    corner scales it uniformly about the opposite corner (`Shift` toggles to free scale,
    `Alt` scales about the centre), the handle above it rotates about the anchor
@@ -92,12 +93,12 @@ This document tracks architectural scope boundaries and honest limitations per `
    than that; it is not limited yet because only one clip is dragged at a time and two
    axes is the ceiling per gesture), **equal-spacing hints**, **user guides**
    (`Ctrl`-drag from the viewport edge, saved with the project) and the **3×3 grid
-   overlay**, as is snapping to safe-area edges. And the
-   **four edge handles still crop rather than scaling one axis each**: crop is
-   reachable along the whole edge, which keeps the gesture this app has always had,
-   but it means SPEC 10 §8.2's per-axis scale has no pointer affordance. And the
-   crosshair is always visible on the selected clip rather than behind §8's *Show
-   anchor* toggle (`A`), so there is no way to put it away.
+   overlay**, as is snapping to safe-area edges. The pivot crosshair sits behind §8.2's
+   *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles
+   here: there is no **Handles** toggle (`H`), no zoom dropdown and no preview-quality
+   control. And the **four edge handles still crop rather than scaling one axis each**:
+   crop is reachable along the whole edge, which keeps the gesture this app has always
+   had, but it means SPEC 10 §8.2's per-axis scale has no pointer affordance.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
    them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
    snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for

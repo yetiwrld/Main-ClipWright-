@@ -272,6 +272,23 @@ export function PreviewPane({
     `useState` here rather than in the timeline is the whole of that guarantee at this
     layer — nothing below the preview can see them.
   */
+  /*
+    §8.2's *Show anchor*, `A` — on by default.
+
+    The spec says the crosshair appears "only with Show anchor", which reads as off until
+    asked for; it is on instead because the pivot is the answer to "why did it move like
+    that", and a user who never learns the key never sees it. The toggle exists so it can
+    be put away, which is what the spec's word "only" is really protecting: a crosshair
+    on screen when the user wants none. Like the overlays this is view state, not
+    document state.
+
+    Deliberately *not* part of `OverlayState`: that object is the compliance overlay set
+    with one cycling key, and folding a boolean into it would put a transform handle in
+    the same bucket as a safe-area guide. It is also not the same as §8's `H` *Handles*
+    toggle — hiding the handles leaves the pivot visible, because the crosshair is a
+    readout as much as a grip.
+  */
+  const [showAnchor, setShowAnchor] = useState(true);
   const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
   const platformKey = platformKeyFor(canvas.aspect ?? '');
   const platformZone = platformKey ? (SAFE_AREAS.platforms[platformKey] ?? null) : null;
@@ -301,6 +318,28 @@ export function PreviewPane({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [platformZone]);
+  /*
+    `A` toggles the crosshair (SPEC 10 §8.2). Bare, not `Ctrl`-modified, so it needs its
+    own listener — the effect above returns early on anything without a modifier.
+
+    Guarded against text fields for the same reason: `a` is a letter before it is a
+    command, and guarding on the *modifier* alone would not catch this one.
+  */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key.toLowerCase() !== 'a' || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return;
+      }
+      event.preventDefault();
+      setShowAnchor((value) => !value);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // Subscribing to the playhead is what makes a keyframed property redraw as time
   // moves; reading `playheadStore.get()` without subscribing would animate only
   // when something else happened to re-render.
@@ -891,6 +930,7 @@ export function PreviewPane({
                   if (!editable) return;
                   drag.end(event);
                 }}
+                showAnchor={showAnchor}
                 opacity={layer.opacity * (transition?.fromOpacity ?? 1)}
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
@@ -1154,6 +1194,7 @@ const PreviewLayer = memo(function PreviewLayer({
   onRotateStart,
   fps,
   onAnchorStart,
+  showAnchor = true,
 }: {
   item: TimelineState['items'][string];
   geometry: ItemGeometry;
@@ -1166,6 +1207,15 @@ const PreviewLayer = memo(function PreviewLayer({
   onRotateStart?: (event: React.PointerEvent) => void;
   /** Starts an anchor drag from the crosshair. */
   onAnchorStart?: (event: React.PointerEvent) => void;
+  /**
+   * Whether the pivot crosshair is drawn at all (§8.2's *Show anchor*, `A`).
+   *
+   * Separate from `editable` on purpose: `editable` means "this clip is the selection and
+   * a gesture here would edit it", while this means "the user wants to see the pivot".
+   * Hiding the crosshair must not stop the clip being dragged, and a read-only preview
+   * must not resurrect it.
+   */
+  showAnchor?: boolean;
   /**
    * The project's frame rate, for the seek threshold: "close enough" is measured in
    * frames, so half a frame at 60 fps is half the time it is at 30.
@@ -1404,6 +1454,7 @@ const PreviewLayer = memo(function PreviewLayer({
               Unlike the edge grips it must receive the pointer, so it is the one child
               of this overlay that is not `pointerEvents: none`.
             */}
+            {showAnchor ? (
             <div
               data-testid="preview-anchor"
               aria-label="Drag the anchor point"
@@ -1452,6 +1503,7 @@ const PreviewLayer = memo(function PreviewLayer({
                 }}
               />
             </div>
+            ) : null}
             {/*
               Corner grips (SPEC 10 §8.2). These *scale* uniformly about the opposite
               corner; the edge grips below still crop. The two gestures share the
