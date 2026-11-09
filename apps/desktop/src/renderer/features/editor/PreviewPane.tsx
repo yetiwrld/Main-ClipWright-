@@ -41,6 +41,12 @@ import {
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
+import {
+  scrubFrameUrl,
+  scrubRequestUs,
+  showScrubStill,
+  stillIsCurrent,
+} from './scrub-overlay.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
 import { SpacingHints } from './SpacingHints.js';
@@ -1958,6 +1964,72 @@ const PreviewLayer = memo(function PreviewLayer({
   // was doing before crop existed.
   const [sourceAspect, setSourceAspect] = useState(initialAspect);
   const src = item.mediaId ? `${MEDIA_ORIGIN}${encodeURIComponent(item.mediaId)}` : undefined;
+
+  /*
+    Whether this layer's own element has a seek in flight (SPEC 10 §5).
+
+    Taken from the element's `seeking`/`seeked` events rather than from the coalescer,
+    because the element's answer is the one that matters: the coalescer may believe a seek
+    is running while the element has already painted the frame, and the whole point of this
+    flag is "is the picture on screen currently behind the playhead". Feeding it from the
+    element keeps that true even if the two ever disagree.
+  */
+  const [seeking, setSeeking] = useState(false);
+
+  /*
+    The playhead, as a value rather than a subscription, so the still's URL is recomputed
+    when it moves. `usePlayheadUs` is already the store's React binding; using it here means
+    a layer re-renders per playhead step, which it already did — it is what drives the seek
+    effect above.
+  */
+  const playheadUs = usePlayheadUs();
+
+  /*
+    The cached frame that stands in for the picture while a seek is in flight (SPEC 10 §5).
+
+    `null` whenever the cache should not be consulted at all — outside the clip, or before
+    any frame has been extracted. The protocol answers 404 for a frame that is not on disk
+    yet, so a missing file is one that does not paint and needs no error state here.
+  */
+  const stillSourceUs = scrubRequestUs(playheadUs, {
+    startUs: item.startUs,
+    durationUs: item.durationUs,
+    sourceInUs: item.sourceInUs,
+    speed: item.speed,
+  });
+  const stillUrl =
+    stillSourceUs === null ? null : scrubFrameUrl(item.mediaId, stillSourceUs);
+
+  /*
+    The URL whose picture actually finished decoding.
+
+    Held separately from `stillUrl` because an `<img>` keeps painting its old frame after
+    `src` changes until the new one loads: without this, a seek into the next cell would
+    leave the previous cell's picture over the video, which is the one thing a stand-in must
+    never do. No effect clears it on change — the comparison in `stillIsCurrent` already
+    fails for an old URL, so a reset would be a second mechanism doing nothing the first
+    does not already do, and nothing would test it.
+  */
+  const [loadedStillUrl, setLoadedStillUrl] = useState<string | null>(null);
+
+  /*
+    Mounted and visible are two different questions, and conflating them deadlocks.
+
+    An `<img>` can only reach `loadedStillUrl` by loading, and it only loads if it is in the
+    tree. So the element mounts whenever the policy permits a still at all, and is made
+    *invisible* until its own picture has decoded. Gating the mount on the load — which is
+    the obvious way to write it — means the image never renders, never loads, and the
+    stand-in never appears at any playhead position.
+  */
+  const stillPermitted = showScrubStill({
+    playing,
+    playheadUs,
+    startUs: item.startUs,
+    durationUs: item.durationUs,
+    seeking,
+  });
+  const stillReady = stillIsCurrent(loadedStillUrl, stillUrl);
+  const showStill = stillPermitted && stillUrl !== null;
   const fitRef = useRef<HTMLDivElement>(null);
 
   // Each layer's <video> has to follow the playhead on its own: they carry
@@ -1982,8 +2054,18 @@ const PreviewLayer = memo(function PreviewLayer({
     });
     // The element's own answer that a seek is over. Without this the coalescer would
     // believe a seek was forever in flight and never issue another.
-    const onSeeked = () => coalescer.settled();
+    const onSeeked = () => {
+      coalescer.settled();
+      setSeeking(false);
+    };
     video.addEventListener('seeked', onSeeked);
+    /*
+      `seeking` fires when the element starts a seek — including one it started itself, such
+      as a source change. Listening for both keeps the still's visibility tied to whether the
+      element is actually behind, which is the only thing it is standing in for.
+    */
+    const onSeeking = () => setSeeking(true);
+    video.addEventListener('seeking', onSeeking);
 
     const sync = () => {
       const us = playheadStore.get();
@@ -2004,6 +2086,7 @@ const PreviewLayer = memo(function PreviewLayer({
     return () => {
       unsubscribe();
       video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('seeking', onSeeking);
     };
   }, [item.sourceInUs, item.startUs, item.speed, fps]);
 
@@ -2284,6 +2367,53 @@ const PreviewLayer = memo(function PreviewLayer({
             objectFit: 'fill',
           }}
         />
+        {/*
+          The cached frame, drawn over the element while its seek is still in flight
+          (SPEC 10 §5). Geometry is deliberately identical to the <video> above — same crop
+          rectangle, same object-fit — so the stand-in lands exactly where the picture will,
+          and the swap when the seek settles is invisible apart from the sharpness.
+
+          `pointerEvents: none` because this is a picture, not a handle: the crop, move and
+          rotate gestures belong to the element underneath, and an <img> that swallowed
+          pointer-down would make a scrub look like it had stopped responding.
+        */}
+        {showStill ? (
+          <img
+            data-testid="preview-scrub-still"
+            data-ready={stillReady ? 'true' : 'false'}
+            /*
+              Keyed by URL, and this is what makes the load record trustworthy rather than a
+              guess. A reused `<img>` whose `src` changed while the previous picture was
+              still decoding reports *that* load against the new URL, so a frame the user
+              already scrubbed past would be marked as the frame they are waiting for. With
+              one element per URL, an element that reports a load can only be reporting the
+              URL it was created with — so the closure below is the element's own source, not
+              whatever the latest render happens to want.
+            */
+            key={stillUrl ?? 'none'}
+            src={stillUrl ?? undefined}
+            alt=""
+            aria-hidden
+            draggable={false}
+            onLoad={() => setLoadedStillUrl(stillUrl)}
+            style={{
+              position: 'absolute',
+              filter: effectFilter || undefined,
+              left: `${-(geometry.source.x / geometry.source.width) * 100}%`,
+              top: `${-(geometry.source.y / geometry.source.height) * 100}%`,
+              width: `${100 / geometry.source.width}%`,
+              height: `${100 / geometry.source.height}%`,
+              objectFit: 'fill',
+              pointerEvents: 'none',
+              /*
+                Hidden until the picture is *this* frame's, not the last one's. An `<img>`
+                keeps painting its previous frame after `src` changes, so a seek into a new
+                cell would otherwise show the old cell over the video.
+              */
+              opacity: stillReady ? 1 : 0,
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

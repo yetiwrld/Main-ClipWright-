@@ -58,18 +58,65 @@ export function scrubFramePath(dir: string, sourceUs: number, extension = 'jpg')
 }
 
 /**
- * The source time to extract for a request, clamped into the clip.
+ * The source time to extract for a playhead over an item, clamped into the item.
  *
- * A playhead can land on or just past the last frame of an item — half-open ranges mean
- * `start + duration` is one frame beyond what exists — and asking ffmpeg for that instant
- * yields an empty file rather than an error. Pulling back by one grid step keeps the
- * last frame reachable and, importantly, keeps it *cacheable* under the same name every
- * time it is asked for.
+ * Three spaces meet here and the first version of this function conflated two of them:
+ * the **timeline** position of the playhead, the **timeline** position of the item's
+ * start, and the **source** time it maps to. Subtracting the source in-point from the
+ * playhead mixes the last with the first two, and it is right only in the one case where
+ * every one of those numbers happens to be equal — a single clip at 0 whose in-point is 0,
+ * which is most projects and none of the interesting ones. A clip moved to 10 s with a 2 s
+ * in-point asked for the frame at 10 s instead of 4 s, and a clip moved to 1 s with no trim
+ * asked for 3 s instead of 2 s.
+ *
+ * The conversion is the same one the preview's own seek uses:
+ *
+ *     sourceUs = sourceInUs + (playheadUs − startUs) × speed
+ *
+ * A playhead can also land on or just past the last frame — half-open ranges mean
+ * `start + duration` is beyond what exists — and asking ffmpeg for that instant yields an
+ * empty file rather than an error, so the result is pulled back to the last grid step.
+ * That keeps the final frame reachable *and* cacheable under one name.
  */
-export function scrubTimeFor(playheadUs: number, sourceInUs: number, durationUs: number): number {
-  const local = playheadUs - sourceInUs;
-  const lastIndex = Math.max(0, Math.ceil(Math.max(0, durationUs) / SCRUB_GRID_US) - 1);
-  const index = Math.min(Math.max(0, Math.floor(local / SCRUB_GRID_US)), lastIndex);
+export function scrubTimeFor(
+  playheadUs: number,
+  item: { startUs: number; sourceInUs: number; durationUs: number; speed?: number },
+): number {
+  const speed = Number.isFinite(item.speed) && (item.speed as number) > 0 ? (item.speed as number) : 1;
+  const elapsed = (playheadUs - item.startUs) * speed;
+  const rawSourceUs = item.sourceInUs + (Number.isFinite(elapsed) ? elapsed : 0);
+  /*
+    **Clamp in item space, grid in source space.** The two quantisations are different and
+    doing either in the other's units breaks a real case.
+
+    Clamping is about the item: a playhead on or past `start + duration` is beyond what the
+    item can show, so the answer is pulled back into the item's own span. That span is
+    `[sourceInUs, sourceInUs + duration]` — *not* `[0, duration]`. Applying the limit to the
+    absolute source time clamps a clip trimmed to a 10 s in-point back to 4.9 s, which is
+    before the first frame that clip is allowed to show.
+
+    Gridding is about the file: `scrubFramePath` floors the absolute source time, so the
+    grid step here must be the same absolute one or the answer and the name it is stored
+    under disagree. Gridding the item-local offset instead looks like "one source frame is
+    one file", and it is wrong whenever an in-point is not itself on the grid — which is
+    most real trims, since 91 frames at 30 fps is 3.0333 s. Two clips trimmed to 3.0333 s
+    and 3.05 s then return two different extraction times whose file names collide, so the
+    second extraction overwrites the first and one clip shows the other's frame.
+  */
+  const lastLocalUs = Math.max(0, Number.isFinite(item.durationUs) ? item.durationUs : 0);
+  const localUs = Math.min(Math.max(0, rawSourceUs - item.sourceInUs), lastLocalUs);
+  const clampedSourceUs = item.sourceInUs + localUs;
+  /*
+    …and the upper bound is the last grid step *strictly before* the item's end.
+
+    Clamping the local offset to `duration` is not quite enough on its own: it lands exactly
+    on `sourceIn + duration`, which is the half-open boundary the range excludes. Asking
+    ffmpeg for that instant writes an empty file rather than failing, so the request is
+    pulled back one cell — the last frame that actually exists.
+  */
+  const endUs = item.sourceInUs + lastLocalUs;
+  const lastIndex = Math.max(0, Math.ceil(endUs / SCRUB_GRID_US) - 1);
+  const index = Math.min(Math.max(0, Math.floor(clampedSourceUs / SCRUB_GRID_US)), lastIndex);
   return index * SCRUB_GRID_US;
 }
 

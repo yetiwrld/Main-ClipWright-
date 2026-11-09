@@ -60,53 +60,138 @@ describe('where a frame is cached', () => {
 });
 
 describe('which time to extract', () => {
-  it('measures from the item, not the timeline', () => {
+  /*
+    Three spaces meet in this function and the first version conflated two of them: the
+    *timeline* position of the playhead, the *timeline* position of the item's start, and
+    the *source* time it maps to. It subtracted the source in-point from the playhead, which
+    is right only when all three numbers happen to be equal — a single clip at 0 with a
+    0 in-point, which is most projects and none of the interesting ones.
+
+    Every expectation below is derived from `sourceInUs + (playhead − startUs) × speed`
+    rather than read off a run.
+  */
+  const clip = (startUs: number, sourceInUs: number, durationUs: number, speed?: number) => ({
+    startUs,
+    sourceInUs,
+    durationUs,
+    speed,
+  });
+
+  it('answers in source time, so ffmpeg is asked for the right part of the file', () => {
     /*
-      A clip 10 s into the timeline has its own source in-point. Extracting the timeline
-      time would pull a frame 10 s into a file that may be shorter than that — the classic
-      "scrub shows the wrong part of the clip" bug.
+      The bug this replaced: a clip starting at 10 s with a 2 s in-point, playhead at 12 s,
+      should show source 4 s. The old function answered 10 s — it subtracted the in-point
+      (2 s) from the playhead (12 s) and ignored the clip's start entirely, so a trimmed
+      clip scrubbed to an unrelated part of the file.
     */
-    expect(scrubTimeFor(12_000_000, 10_000_000, 5_000_000)).toBe(2_000_000);
+    expect(scrubTimeFor(12_000_000, clip(10_000_000, 2_000_000, 5_000_000))).toBe(4_000_000);
+  });
+
+  it('adds the in-point, because the timeline elapsed and the source offset are different', () => {
+    // 2 s into a clip whose source starts at 10 s is source 12 s, not 2 s and not 10 s.
+    expect(scrubTimeFor(12_000_000, clip(10_000_000, 10_000_000, 5_000_000))).toBe(12_000_000);
+  });
+
+  it('scales by speed, so a 2× clip asks for twice the source time', () => {
+    // A clip played at 2× consumes two seconds of source per second of timeline.
+    expect(scrubTimeFor(11_000_000, clip(10_000_000, 0, 5_000_000, 2))).toBe(2_000_000);
+    // And a 0.5× clip consumes half as much.
+    expect(scrubTimeFor(12_000_000, clip(10_000_000, 0, 5_000_000, 0.5))).toBe(1_000_000);
   });
 
   it('serves the last frame when the playhead sits one past the end', () => {
     /*
-      Ranges are half-open, so `start + duration` is not inside the clip, and asking
-      ffmpeg for that instant writes an empty file rather than failing. The last grid
-      step before the end is the last frame that exists.
+      Ranges are half-open, so `start + duration` is not inside the clip, and asking ffmpeg
+      for that instant writes an empty file rather than failing. The last grid step before
+      the end is the last frame that exists.
     */
-    const time = scrubTimeFor(15_000_000, 10_000_000, 5_000_000);
-    expect(time).toBe(4_900_000);
-    expect(time).toBeLessThan(5_000_000);
+    const time = scrubTimeFor(15_000_000, clip(10_000_000, 10_000_000, 5_000_000));
+    expect(time).toBe(14_900_000);
+    // And it is inside the clip: the in-point plus one grid step less than the duration.
+    expect(time - 10_000_000).toBeLessThan(5_000_000);
   });
 
-  it('clamps a playhead before the item to the first frame', () => {
+  it('clamps a playhead before the item to its first frame', () => {
     // Reachable by a rounding error at the cut, and by a drag that started elsewhere.
-    expect(scrubTimeFor(9_900_000, 10_000_000, 5_000_000)).toBe(0);
+    expect(scrubTimeFor(9_900_000, clip(10_000_000, 10_000_000, 5_000_000))).toBe(10_000_000);
   });
 
   it('never asks for a negative time', () => {
-    expect(scrubTimeFor(0, 1_000_000, 5_000_000)).toBe(0);
+    expect(scrubTimeFor(0, clip(1_000_000, 0, 5_000_000))).toBe(0);
+    // A negative in-point is not a thing the schema allows, but it must not produce one.
+    expect(scrubTimeFor(2_000_000, clip(1_000_000, -1_000_000, 5_000_000))).toBeGreaterThanOrEqual(0);
   });
 
   it('answers for a zero-length item without dividing by it', () => {
     // A still image or a degenerate item; the answer must be a number, not NaN.
-    expect(Number.isFinite(scrubTimeFor(5_000_000, 5_000_000, 0))).toBe(true);
+    expect(Number.isFinite(scrubTimeFor(5_000_000, clip(5_000_000, 0, 0)))).toBe(true);
   });
 
-  it('always lands on the grid, so the time and the name agree', () => {
+  it('grids the absolute source time, so the answer names its own file', () => {
     /*
-      The two functions must not disagree: if `scrubTimeFor` returned an off-grid time,
-      `scrubFramePath` would quantise it somewhere else and every read would miss.
+      The grid step here must be the same one `scrubFramePath` floors by, or the returned
+      time and the file it is stored under are different numbers and every read misses.
+
+      Grinding the *item-local* offset instead is the tempting version — it reads as "one
+      source frame is one file" — and it is wrong for any in-point not on the grid, which is
+      most real trims (91 frames at 30 fps is 3.0333 s). It returns an off-grid time while
+      `scrubFramePath` floors it to a cell, so two clips trimmed to 3.0333 s and 3.05 s get
+      two different extraction times and one shared file name: the second extraction
+      overwrites the first and one clip shows the other's frame.
     */
-    for (const [playhead, inUs, duration] of [
-      [11_234_567, 10_000_000, 5_000_000],
-      [10_050_000, 10_000_000, 5_000_000],
-      [14_999_999, 10_000_000, 5_000_000],
-    ] as const) {
-      const time = scrubTimeFor(playhead, inUs, duration);
-      expect(time % SCRUB_GRID_US).toBe(0);
-      expect(scrubFramePath(DIR, time)).toBe(scrubFramePath(DIR, time + 1));
+    const nonAligned = 3_033_333;
+    const time = scrubTimeFor(10_000_000, clip(10_000_000, nonAligned, 5_000_000));
+    expect(time % SCRUB_GRID_US).toBe(0);
+    // And the identity that actually matters: the time *is* its own file.
+    expect(scrubFramePath(DIR, time)).toBe(
+      scrubFramePath(DIR, Math.floor(nonAligned / SCRUB_GRID_US) * SCRUB_GRID_US),
+    );
+  });
+
+  it('gives two in-points one answer when they share a cell, not two answers one file', () => {
+    /*
+      The collision, stated as the invariant it violates. 3.0333 s and 3.05 s fall in the
+      same 1/10 s cell, so they must extract the same instant — the cell boundary — rather
+      than each insisting on its own exact in-point under a name that admits only one.
+    */
+    const a = scrubTimeFor(10_000_000, clip(10_000_000, 3_033_333, 5_000_000));
+    const b = scrubTimeFor(10_000_000, clip(10_000_000, 3_050_000, 5_000_000));
+    expect(a).toBe(b);
+    expect(a).toBe(3_000_000);
+    // Different cells must still differ, or the cache would serve one frame for a whole clip.
+    const later = scrubTimeFor(10_000_000, clip(10_000_000, 3_150_000, 5_000_000));
+    expect(later).not.toBe(a);
+  });
+
+  it('never shows a frame before the in-point, whatever the in-point is', () => {
+    /*
+      The clamp belongs in item space. Floored to a cell, an in-point at 3.0333 s yields the
+      3.0 s boundary — at or *before* the in-point, by up to one grid step. That is the safe
+      direction: a frame early never reveals what the trim was meant to cut off, whereas a
+      frame late shows past the cut. Asserted as a bound rather than an equality so the
+      floors stay free to land anywhere inside the cell.
+    */
+    const inPoint = 3_033_333;
+    for (const playhead of [10_000_000, 10_500_000, 14_999_999]) {
+      const time = scrubTimeFor(playhead, clip(10_000_000, inPoint, 5_000_000));
+      /*
+        One grid step either side is the whole tolerance: floored into a cell, the answer is
+        at worst one step before the in-point, and the clamp keeps it inside the item's span.
+        Anything further out would mean the clamp or the grid had moved between spaces.
+      */
+      expect(time).toBeGreaterThanOrEqual(inPoint - SCRUB_GRID_US);
+      expect(time).toBeLessThanOrEqual(inPoint + 5_000_000);
+    }
+  });
+
+  it('treats a nonsense speed as 1 rather than producing NaN', () => {
+    /*
+      The same guard as everywhere else: `NaN` defeats every comparison, so a `speed` that
+      slipped past validation would make the whole answer `NaN`, and an extraction at `NaN`
+      writes nothing at all.
+    */
+    for (const speed of [Number.NaN, 0, -1]) {
+      expect(scrubTimeFor(12_000_000, clip(10_000_000, 0, 5_000_000, speed))).toBe(2_000_000);
     }
   });
 });

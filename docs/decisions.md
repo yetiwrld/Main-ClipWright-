@@ -84,3 +84,33 @@ On first run of Phase 1, `ClipWright Icon.png` (1254×1254 RGBA PNG) was sampled
 - The limiter must stay O(n). The first implementation scanned a lookahead window per sample and was quadratic; a 10-minute clip made that obvious, and it is now a monotonic deque with a test that times it.
 - Large mixes are held in memory at 48 kHz stereo float (about 23 MB per minute). Acceptable for the target clip lengths, and stated in `docs/export.md`.
 - Audio-rack effects are not applied yet; when they are, they belong in this same pure module so they can be tested the same way.
+
+---
+
+## 9. The preview reads the scrub cache but never fills it (Spec 10 §5)
+
+**Decision:** the preview draws a cached scrub frame over a layer's `<video>` while that
+element reports a seek in flight, reading it through `clipwright-media://scrub/<id>/<µs>`
+— a protocol URL that answers 404 for a frame that has not been extracted yet. It never
+calls `media:getThumbnail`, which extracts on demand.
+
+**Reasoning:** the two paths look interchangeable and are not. `media:getThumbnail`
+guarantees an answer by running ffmpeg when the file is missing, which is exactly right
+for the filmstrip — one request per tile, once — and exactly wrong for a scrub, where the
+pointer crosses tens of cells a second. Calling it per move would replace a seek (a codec
+operation) with a subprocess spawn plus a decode, so the "optimisation" would make
+scrubbing slower than before it existed. A 404 is the honest answer to "is this frame
+available": it costs nothing, and it lets the layer fall through to the element, which is
+what the preview did before.
+
+**Consequences:**
+- The preview's stills only appear where the timeline has already been, since the
+  filmstrip is what fills the cache. The remaining gap — extracting on arrival, after the
+  playhead settles — is recorded in `docs/limitations.md` rather than half-built here.
+- A cell boundary can be up to one grid step *before* a trim's in-point, because the file
+  name is derived from the floored absolute source time. That direction is deliberate: a
+  frame early can only reveal what lies inside the clip, whereas a frame late would show
+  past a cut.
+- Mounting and visibility are separate. An `<img>` must be in the tree to load at all, and
+  must be hidden until the load naming *its own* URL arrives, so a stale picture cannot be
+  mistaken for the frame the user is waiting on.

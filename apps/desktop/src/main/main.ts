@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, net, protocol, shell, ipcMain, session } from 'electron';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { existsSync, statSync, writeFileSync } from 'node:fs';
 import {
@@ -14,7 +14,7 @@ import { StorageService } from './storage/storage-service.js';
 import { Logger } from './storage/logger.js';
 import { SecretStore } from './storage/secret-store.js';
 import { ingestMedia, type IngestRequest } from './media-pipeline.js';
-import { previewSourceFor } from './preview-source.js';
+import { parseScrubFrameUrl, previewSourceFor } from './preview-source.js';
 import { SCRUB_MAX_EDGE_PX, pruneScrubDir, scrubFramePath } from './scrub-frames.js';
 import { runTranscription, type TranscribeJobRequest } from './transcribe-job.js';
 import { ProviderService } from './ai/provider-service.js';
@@ -1234,9 +1234,44 @@ app.whenReady().then(async () => {
     startAutomaticUpdateChecks(storage, log);
   }
 
-  // Serves `clipwright-media://media/<mediaId>` from the media registry only.
+  /*
+    Serves `clipwright-media://media/<mediaId>` from the media registry only, and
+    `clipwright-media://scrub/<mediaId>/<sourceUs>` from the scrub-frame cache.
+
+    The scrub branch exists so the preview can show the frame under the playhead as an
+    `<img>` instead of waiting for a `<video>` seek — the cache was written for that and had
+    no reader. It resolves through the same registry, so a URL can name a *media item* but
+    never a path.
+  */
   protocol.handle(MEDIA_SCHEME, async (request) => {
     try {
+      const scrub = parseScrubFrameUrl(request.url);
+      if (scrub) {
+        const record = requireStorage().getMedia(scrub.mediaId);
+        if (!record?.thumbPath) return new Response('Not found', { status: 404 });
+        /*
+          The file name is derived here from the *registry's* path and a numeric time, never
+          from the URL, so the only thing a crafted request could name is a different frame
+          of a media item it already knows about. `scrubFramePath` also floors the time, so a
+          negative or fractional value cannot escape the directory.
+        */
+        const dir = join(dirname(record.thumbPath), 'scrub', scrub.mediaId);
+        const file = scrubFramePath(dir, scrub.timeUs);
+        const { readFile } = await import('node:fs/promises');
+        try {
+          const data = await readFile(file);
+          return new Response(new Uint8Array(data), {
+            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-cache' },
+          });
+        } catch {
+          /*
+            A miss is a normal answer, not an error: the renderer falls back to the video
+            element and asks again once the frame has been extracted by the scrub path.
+            `404` rather than `500` so the renderer can tell "not yet" from "broken".
+          */
+          return new Response('Not cached yet', { status: 404 });
+        }
+      }
       const url = new URL(request.url);
       const mediaId = decodeURIComponent(url.pathname.replace(/\/+$/, '').split('/').pop() ?? '');
       const record = mediaId ? requireStorage().getMedia(mediaId) : undefined;

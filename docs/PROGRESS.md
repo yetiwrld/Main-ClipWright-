@@ -76,9 +76,12 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-the playback clock is not audio-mastered,
-and the preview still shows a scrubbed frame by seeking a `<video>` — coalesced and
-served from a proxy, but seek-bound rather than decode-bound. Canvas drag editing *is*
+the playback clock is not audio-mastered, and the preview still *seeks* rather than
+compositing decoded frames. Its scrubs are coalesced, served from a proxy, and — new in
+this slice — covered by a cached still while a seek is in flight, read from the same
+`derived/scrub/<mediaId>/` cache the filmstrip fills. So a scrub over ground already
+covered is a file read; a scrub into fresh ground still waits on the element, because
+the preview reads the cache without ever asking for an extract. Canvas drag editing *is*
 built — move, crop, scale, rotate and the anchor crosshair, modifiers included — dragging a selected clip moves it, dragging an edge crops it — and so are
 the keyframe inspector and the curve editor. Numeric editing of opacity, level,
 pan, speed, crop, scale, rotation and flip works, is undoable, and — since the

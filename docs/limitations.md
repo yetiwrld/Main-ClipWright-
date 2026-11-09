@@ -60,7 +60,8 @@ This document tracks architectural scope boundaries and honest limitations per `
 
    What remains is the transport itself. The preview still *seeks* to show a frame
    rather than compositing decoded frames, so scrub responsiveness is bounded by how
-   fast the element can seek, not by how fast frames can be decoded.
+   fast the element can seek, not by how fast frames can be decoded — except where a
+   cached frame stands in, which the next paragraphs cover.
 
    Part of that cache now exists, for the timeline rather than the preview. Frames are
    extracted on demand to `derived/scrub/<mediaId>/`, content-addressed on a 1/10 s
@@ -69,13 +70,36 @@ This document tracks architectural scope boundaries and honest limitations per `
    frame on every tile before this**, which made it decorative), and a scrub that passes
    back over the same frames costs reads rather than ffmpeg runs.
 
-   The preview does not yet *read* those frames: it still seeks its `<video>` elements
-   and draws what the element shows. Wiring the cache into the layer means drawing a
-   frame image while a seek is in flight and swapping to the element when it settles,
-   which changes what the layer element is (an `<img>` layer rather than a `<video>` one)
-   and is a design change rather than a tuning pass. So the remaining gap is narrower
-   than it was and not closed: a paused scrub still waits on a seek, and what the cache
-   bought is the timeline, not the canvas.
+   The preview now reads them too. While a layer's `<video>` reports a seek in flight,
+   the cached frame for the playhead's grid cell is drawn over it, and it is removed the
+   moment the element's `seeked` event arrives — so the picture the user sees during a
+   drag is a file read rather than a keyframe hunt, and the swap back to the element is
+   invisible apart from the sharpness (the still is 480 px, the element is the source's
+   own resolution, which is exactly why it must not linger once the seek settles).
+
+   Two properties are deliberate. The still is *mounted but hidden* until its own
+   picture has decoded, and both halves of that matter: an `<img>` has to be in the tree
+   to load at all, so gating the mount on the load means it never loads, and one that is
+   already loaded keeps painting its previous frame after `src` changes, so without the
+   hiding a seek into the next cell would leave the old cell's picture over the video.
+   Each element is keyed to its URL, so a load can only ever be credited to the frame it
+   belongs to. And nothing is drawn while playing, because a still cannot show motion.
+
+   What this does **not** change is the transport. The preview still *seeks* rather than
+   compositing decoded frames, so the stand-in only helps where a frame has already been
+   extracted: the cache is filled by the timeline's filmstrip and by whatever scrubs the
+   timeline has needed, and the preview **reads it without ever asking for an extract**.
+   That restraint is the design, not an omission — `media:getThumbnail` extracts on
+   demand, so calling it per pointer move would start an ffmpeg run every cell the
+   pointer crossed and make a scrub slower than the seeks it was meant to replace. A
+   protocol URL that answers 404 for an uncached cell gives the cheap read-only path the
+   preview needs. The honest summary is that a scrub over ground already covered is now a
+   read, and a scrub into fresh ground still waits on the element — which is the
+   remaining gap, and it is narrower than it was.
+
+   Extraction on arrival is the next step and deliberately not in this slice: it needs
+   the renderer to ask for a frame *after* the playhead has settled, which is an IPC
+   round trip this change does not add.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
