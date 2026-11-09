@@ -217,6 +217,73 @@ describe('creating a guide with Ctrl and a drag from an edge', () => {
     expect(result.state.guides[0]!.at).toBeCloseTo(0.75, 6);
   });
 
+  it('removes a guide with Shift and a Ctrl-drag', () => {
+    /*
+      The inverse gesture, and the reason it reads `shiftKey` at pointer-*down*: a
+      `pointerup` carries no modifier state, so reading it at release would always be
+      false and the removal would silently never fire.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'gone', axis: 'x', at: 0.25 }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    const canvas = screen.getByTestId('preview-canvas');
+    const down = new MouseEvent('pointerdown', {
+      clientX: 4, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true,
+    });
+    fireEvent(canvas, down);
+    fireEvent(canvas, new MouseEvent('pointermove', { clientX: 100, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true }));
+    fireEvent(canvas, new MouseEvent('pointerup', { clientX: 100, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true }));
+    const calls = (timeline.run as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[0]).toBe('Remove guide');
+  });
+
+  it('adds rather than removes when Shift is not held', () => {
+    // The two gestures differ by one modifier and one of them destroys work, so the
+    // distinction is checked in both directions.
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'keep', axis: 'x', at: 0.25 }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    const canvas = screen.getByTestId('preview-canvas');
+    fireEvent(canvas, new MouseEvent('pointerdown', { clientX: 4, clientY: 200, ctrlKey: true, bubbles: true }));
+    fireEvent(canvas, new MouseEvent('pointermove', { clientX: 300, clientY: 200, ctrlKey: true, bubbles: true }));
+    fireEvent(canvas, new MouseEvent('pointerup', { clientX: 300, clientY: 200, ctrlKey: true, bubbles: true }));
+    const calls = (timeline.run as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[0]).toBe('Add guide');
+  });
+
+  it('removes nothing when the Shift-drag is nowhere near a guide', () => {
+    /*
+      A removal gesture on a sparse canvas must not delete whatever happens to be nearest:
+      the user would have no idea what they just lost.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'far', axis: 'x', at: 0.9 }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    const canvas = screen.getByTestId('preview-canvas');
+    fireEvent(canvas, new MouseEvent('pointerdown', { clientX: 4, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true }));
+    fireEvent(canvas, new MouseEvent('pointermove', { clientX: 80, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true }));
+    fireEvent(canvas, new MouseEvent('pointerup', { clientX: 80, clientY: 200, ctrlKey: true, shiftKey: true, bubbles: true }));
+    expect(timeline.run).not.toHaveBeenCalled();
+  });
+
   it('replaces a guide placed practically on top of an existing one', () => {
     // Two targets a hair apart would make the snap a coin toss and the canvas impossible
     // to tidy without deleting twice.

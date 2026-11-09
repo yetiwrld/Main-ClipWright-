@@ -107,9 +107,10 @@ This document tracks architectural scope boundaries and honest limitations per `
    the vertical form reads well stacked. User guides are in: `Ctrl`-drag in from a viewport
    edge places one where you release, it is saved with the project, and it is a snap
    target. There is no **Guides menu** though — SPEC 10 §8.8 asks for a toolbar menu with
-   *Add horizontal/vertical*, *Clear* and *Lock* — so a guide can only be made with the
-   mouse, cannot be removed without undo, and cannot be locked against accidental drags,
-   which is the only one of the three that is a real loss rather than a shortcut. Still
+   *Add horizontal/vertical*, *Clear* and *Lock*. `Shift`+`Ctrl`-drag takes a guide away,
+   so the menu's *Clear* is reachable one at a time and *Add* is reachable with the mouse;
+   what is genuinely missing is **Lock**, which has no equivalent at all, and any way to
+   see the list of guides rather than the lines themselves. Still
    missing from §8.8: the **custom N×M grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
    clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The thirds

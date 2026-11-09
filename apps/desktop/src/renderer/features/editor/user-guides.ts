@@ -114,3 +114,32 @@ export function guideSnapTargets(
     .filter((guide) => guide.axis === axis && Number.isFinite(guide.at))
     .map((guide) => ({ at: guide.at - 0.5, kind: 'user-guide' as const }));
 }
+
+/**
+ * The guide a `Shift`+`Ctrl`-drag is aimed at removing, or `null`.
+ *
+ * The inverse gesture: `Ctrl`-drag makes a guide, `Shift`+`Ctrl`-drag takes one away. No
+ * menu, no click target on a hairline that would otherwise sit across the picture and
+ * swallow drags.
+ *
+ * A guide is removable from anywhere along it, so the drag is matched on the *axis* it
+ * runs on and the distance along the other axis is ignored — a horizontal guide is
+ * reachable by grabbing it anywhere across the canvas width. `reach` is a fraction of the
+ * canvas, defaulting to the same 8 px the snapping uses at a typical preview size.
+ */
+export function guideToRemove(
+  guides: readonly UserGuideRecord[],
+  axis: 'x' | 'y',
+  at: number,
+  reach = 0.025,
+): UserGuideRecord | null {
+  if (!Number.isFinite(at) || !Number.isFinite(reach) || reach <= 0) return null;
+  let best: { guide: UserGuideRecord; distance: number } | null = null;
+  for (const guide of guides) {
+    if (guide.axis !== axis || !Number.isFinite(guide.at)) continue;
+    const distance = Math.abs(guide.at - at);
+    if (distance > reach) continue;
+    if (!best || distance < best.distance) best = { guide, distance };
+  }
+  return best ? best.guide : null;
+}

@@ -5,6 +5,7 @@ import {
   formatTimecode,
   projectDurationUs,
   quantizeUs,
+  removeGuide as removeGuideCommand,
   setGuides as setGuidesCommand,
   type TimelineState,
 } from '@clipwright/timeline-engine';
@@ -29,7 +30,7 @@ import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
 import { SpacingHints } from './SpacingHints.js';
 import { UserGuides } from './UserGuides.js';
-import { addGuide, edgeAt, guideSnapTargets, axisForEdge, removeGuide } from './user-guides.js';
+import { addGuide, edgeAt, guideSnapTargets, guideToRemove, axisForEdge } from './user-guides.js';
 import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -310,7 +311,7 @@ export function PreviewPane({
     anywhere is a mis-click and should not leave a line behind — the same rule a
     click-not-a-drag follows everywhere else in this preview.
   */
-  const guideDrag = useRef<{ axis: 'x' | 'y'; at: number } | null>(null);
+  const guideDrag = useRef<{ axis: 'x' | 'y'; at: number; removing: boolean } | null>(null);
   const [showAnchor, setShowAnchor] = useState(true);
   const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
   const platformKey = platformKeyFor(canvas.aspect ?? '');
@@ -824,7 +825,16 @@ export function PreviewPane({
             if (!edge) return;
             event.preventDefault();
             const axis = axisForEdge(edge);
-            guideDrag.current = { axis, at: axis === 'x' ? fractionX : fractionY };
+            /*
+              `Shift` is read here rather than at release, because a `pointerup` carries
+              no modifier state — reading `event.shiftKey` there would always be false and
+              the removal gesture would silently never fire.
+            */
+            guideDrag.current = {
+              axis,
+              at: axis === 'x' ? fractionX : fractionY,
+              removing: event.shiftKey,
+            };
           }}
           onPointerMove={(event) => {
             const active = guideDrag.current;
@@ -834,7 +844,7 @@ export function PreviewPane({
             // Follows the pointer: the guide is placed where it is released, so the user
             // can pull it in from the edge and let go where the subject actually is.
             guideDrag.current = {
-              axis: active.axis,
+              ...active,
               at: active.axis === 'x'
                 ? (event.clientX - box.left) / box.width
                 : (event.clientY - box.top) / box.height,
@@ -844,6 +854,18 @@ export function PreviewPane({
             const active = guideDrag.current;
             guideDrag.current = null;
             if (!active || !timeline) return;
+            if (active.removing) {
+              /*
+                `Shift`+`Ctrl`-drag takes a guide away. Without it the only way to remove
+                one is undo, which also throws away every edit since it was placed — too
+                blunt for a mark the user made and changed their mind about.
+              */
+              const doomed = guideToRemove(userGuides, active.axis, active.at);
+              if (doomed) {
+                timeline.run('Remove guide', (stateNow) => removeGuideCommand(stateNow, { id: doomed.id }));
+              }
+              return;
+            }
             const id = `guide~${Date.now().toString(36)}~${Math.round(active.at * 1e6)}`;
             const next = addGuide(userGuides, { id, axis: active.axis, at: active.at });
             /*

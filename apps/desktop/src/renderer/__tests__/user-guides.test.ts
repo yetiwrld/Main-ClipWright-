@@ -5,6 +5,7 @@ import {
   axisForEdge,
   edgeAt,
   guideSnapTargets,
+  guideToRemove,
   removeGuide,
   type UserGuideRecord,
 } from '../features/editor/user-guides.js';
@@ -136,5 +137,44 @@ describe('guides as snap targets', () => {
 
   it('offers nothing when the user has made none', () => {
     expect(guideSnapTargets([], 'x')).toEqual([]);
+  });
+});
+
+describe('finding the guide a removal gesture is aimed at', () => {
+  const guides = [guide('v1', 'x', 0.25), guide('v2', 'x', 0.8), guide('h1', 'y', 0.25)];
+
+  it('finds the guide nearest the pointer on its axis', () => {
+    expect(guideToRemove(guides, 'x', 0.26)?.id).toBe('v1');
+  });
+
+  it('ignores the axis the gesture runs on — a guide is grabbable anywhere along it', () => {
+    /*
+      A vertical guide crosses the whole picture, so a gesture on the `x` axis is matched
+      on `x` alone; the distance along `y` is irrelevant and is not even passed in. A
+      removal that required hitting the line itself would be a target a pixel wide.
+    */
+    expect(guideToRemove(guides, 'y', 0.25)?.id).toBe('h1');
+  });
+
+  it('returns nothing when the nearest guide is out of reach', () => {
+    // Otherwise a removal gesture anywhere on a sparse canvas would delete something.
+    expect(guideToRemove(guides, 'x', 0.5)).toBeNull();
+  });
+
+  it('picks the nearer of two guides in reach', () => {
+    const close = [guide('a', 'x', 0.300), guide('b', 'x', 0.305)];
+    expect(guideToRemove(close, 'x', 0.304)?.id).toBe('b');
+  });
+
+  it('declines a degenerate reach rather than matching everything', () => {
+    // The same NaN guard the snapping uses, for the same reason: every comparison against
+    // NaN is false, so a naive `distance > reach` would skip nothing and delete a guide
+    // the pointer was nowhere near.
+    expect(guideToRemove(guides, 'x', 0.25, Number.NaN)).toBeNull();
+    expect(guideToRemove(guides, 'x', 0.25, 0)).toBeNull();
+  });
+
+  it('returns nothing from an empty project', () => {
+    expect(guideToRemove([], 'x', 0.25)).toBeNull();
   });
 });
