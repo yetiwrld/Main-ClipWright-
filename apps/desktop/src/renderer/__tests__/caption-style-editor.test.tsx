@@ -235,3 +235,142 @@ describe('CaptionStyleEditor', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+describe('the anchor grid and the horizontal position (SPEC 11 §6)', () => {
+  /*
+    These exist because the horizontal half of the anchor was dead code in the layout
+    and unreachable in the UI at the same time: every preset is centre-anchored at
+    `xPct: 50`, and the editor offered no control for either field. A preset edited to
+    `bottom-left` would have been drawn in the middle of the frame.
+
+    The control has to write a real style, so most of this is about the draft round
+    trip rather than about the buttons.
+  */
+  it('carries the anchor and xPct through the draft round trip', () => {
+    const draft = draftFromStyle(bold);
+    expect(draft.anchor).toBe(bold.position.anchor);
+    expect(draft.xPct).toBe(bold.position.xPct);
+    // An untouched style must come back byte-identical, anchor included.
+    expect(applyDraft(bold, draft)).toEqual(bold);
+  });
+
+  it('writes a changed anchor into the style', () => {
+    const edited = applyDraft(bold, { ...draftFromStyle(bold), anchor: 'bottom-left', xPct: 8 });
+    expect(edited.position.anchor).toBe('bottom-left');
+    expect(edited.position.xPct).toBe(8);
+    // The vertical field is a separate control and must not move with the horizontal one.
+    expect(edited.position.yPct).toBe(bold.position.yPct);
+  });
+
+  it('offers all nine anchors, in one group', () => {
+    // Nine cells is the spec's grid; a missing one would be a value the layout can
+    // render but the editor cannot choose.
+    const anchors = [
+      'top-left',
+      'top-center',
+      'top-right',
+      'center-left',
+      'center',
+      'center-right',
+      'bottom-left',
+      'bottom-center',
+      'bottom-right',
+    ];
+    render(
+      <CaptionStyleEditor
+        open
+        styleId="bold-creator"
+        projectStyles={{}}
+        onSave={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    for (const anchor of anchors) {
+      expect(screen.getByTestId(`anchor-cell-${anchor}`)).toBeTruthy();
+    }
+    expect(screen.getByRole('group', { name: 'Anchor point' })).toBeTruthy();
+  });
+
+  it('marks the style\'s own anchor as the selected cell and the others as not', () => {
+    /*
+      `aria-pressed` rather than a class name: the state has to be legible to a screen
+      reader, and a test that reads the visual style would pass on a grid that looks
+      right and reports nothing.
+    */
+    render(
+      <CaptionStyleEditor
+        open
+        styleId="bold-creator"
+        projectStyles={{}}
+        onSave={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    const current = screen.getByTestId(`anchor-cell-${bold.position.anchor}`);
+    expect(current.getAttribute('aria-pressed')).toBe('true');
+    const other = screen.getByTestId(`anchor-cell-${bold.position.anchor === 'top-left' ? 'bottom-right' : 'top-left'}`);
+    expect(other.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('moves the selected cell when another is clicked', () => {
+    // The selection is draft state, so it has to survive a re-render as a real toggle
+    // rather than only styling the cell that was pressed.
+    render(
+      <CaptionStyleEditor
+        open
+        styleId="bold-creator"
+        projectStyles={{}}
+        onSave={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('anchor-cell-top-left'));
+    expect(screen.getByTestId('anchor-cell-top-left').getAttribute('aria-pressed')).toBe('true');
+    if (bold.position.anchor !== 'top-left') {
+      expect(
+        screen.getByTestId(`anchor-cell-${bold.position.anchor}`).getAttribute('aria-pressed'),
+      ).toBe('false');
+    }
+  });
+
+  it('gives the horizontal field its own label, separate from the vertical one', () => {
+    // Two sliders labelled "position" would be ambiguous to both a user and a query.
+    render(
+      <CaptionStyleEditor
+        open
+        styleId="bold-creator"
+        projectStyles={{}}
+        onSave={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    expect(screen.getByLabelText('Horizontal position')).toBeTruthy();
+    expect(screen.getByLabelText('Vertical position')).toBeTruthy();
+  });
+
+  it('saves the clicked anchor, not only the draft', () => {
+    /*
+      The end-to-end check. `applyDraft` is tested directly above, so this one verifies
+      the button is actually wired to the same draft — a cell that toggled its own
+      selected state without touching the draft would pass the test before it.
+    */
+    const onSave = vi.fn();
+    render(
+      <CaptionStyleEditor
+        open
+        styleId="bold-creator"
+        projectStyles={{}}
+        onSave={onSave}
+        onClose={() => undefined}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('anchor-cell-bottom-left'));
+    fireEvent.change(screen.getByLabelText('Horizontal position'), { target: { value: '12' } });
+    // A built-in preset is copied rather than overwritten (SPEC 11 §4).
+    fireEvent.click(screen.getByRole('button', { name: /save as a copy/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0]![0] as CaptionStyle;
+    expect(saved.position.anchor).toBe('bottom-left');
+    expect(saved.position.xPct).toBe(12);
+  });
+});

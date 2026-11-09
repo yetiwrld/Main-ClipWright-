@@ -349,3 +349,33 @@ image, and the spec's rule that it say so is fully satisfiable.
   empty). A chip that cannot be computed is not drawn, rather than being drawn from a guess:
   "Preparing…" invented for a file that is not transcoding would send a user looking for a
   progress bar that does not exist.
+
+## 16. A caption's anchor decides which edge `xPct` measures from
+
+SPEC 11 §5 says `xPct`/`yPct` place the block's *anchor*: a `bottom-left` caption puts its
+bottom-left corner on those percentages, a `center` one puts its middle there. The vertical half
+of that was implemented. The horizontal half was not — all three branches of the expression
+computing the block's left edge returned `xPct − width / 2`, so changing the anchor's horizontal
+part changed nothing and every caption was centred.
+
+- **Why nothing caught it.** The ten built-in presets are all centre-anchored at `xPct: 50`, the
+  one place where the three branches agree with each other and with the bug. The layout tests
+  only exercised centre anchors; the screenshots only showed presets. Meanwhile the ASS export
+  writes `\an<code>\pos(x, y)`, which is correct by construction — so the preview and the burn-in
+  disagreed about every left- and right-anchored style, and neither one had a test that could
+  see the other.
+- **The fix** is three branches that differ: a left anchor puts the block's left edge on `xPct`,
+  a right anchor puts its right edge there, and only a centre anchor centres it.
+- **The check is against the exporter, not against numbers.** `export-core`'s
+  `caption-anchor.test.ts` walks all nine anchors at an off-centre `xPct` and asserts the block
+  edge the layout produced is the edge `assAlignment` says the export pins, using the export's own
+  `assPosition`. Hard-coding nine expected pixel values would have tested the layout against a
+  second opinion; this tests it against the thing that has to agree with it. The test lives in
+  `export-core` because that package already depends on `compositor` and the reverse is not true —
+  the preview must not import the exporter to be verifiable.
+- **The bug was also unreachable.** The style editor exposed a vertical slider and no horizontal
+  one, so `xPct` could not be changed and the anchor could not be changed at all: no user could
+  have hit the divergence, which is part of why it survived. The editor now has the spec's
+  nine-cell anchor grid and a horizontal slider. Adding the control and fixing the arithmetic are
+  the same job — either alone leaves a feature that is either wrong on screen or impossible to
+  reach.

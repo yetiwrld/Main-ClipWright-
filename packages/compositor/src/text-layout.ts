@@ -193,9 +193,8 @@ export function layoutText(input: LayoutInput): LayoutResult {
 
   const boxWidth = Math.min(maxWidthPx, canvasWidth);
 
-  // Horizontal origin: the block is centred on `xPct` and lines are aligned
-  // within it per `text.align`.
-  const centreX = (style.position.xPct / 100) * canvasWidth;
+  // Horizontal origin. Lines are aligned within the block per `text.align`.
+  const anchorX = (style.position.xPct / 100) * canvasWidth;
 
   const lineWidths = keptLines.map((lineWords) => {
     const letters = lineWords.reduce((total, word) => total + measure(word, fontPx), 0);
@@ -219,12 +218,23 @@ export function layoutText(input: LayoutInput): LayoutResult {
     blockTop = (style.position.yPct / 100) * canvasHeight - blockHeight / 2;
   }
 
-  const left =
-    anchor.endsWith('left')
-      ? centreX - blockWidth / 2
-      : anchor.endsWith('right')
-        ? centreX - blockWidth / 2
-        : centreX - blockWidth / 2;
+  /*
+    SPEC 11 §5: `xPct` is where the *anchor* sits, so a left anchor puts the block's
+    left edge on it and a right anchor puts its right edge there. Only a centre anchor
+    centres the block.
+
+    All three branches used to return `anchorX - blockWidth / 2`, which made the
+    horizontal half of the anchor dead code: a `bottom-left` caption sat in the
+    middle of the frame wherever its `xPct` was, while the ASS export wrote
+    `\an1\pos(xPct, yPct)` and put it in the corner. Preview and export disagreed by
+    half a block on every style that was not centre-anchored, and no built-in preset
+    was, which is why nothing caught it.
+  */
+  const left = anchor.endsWith('left')
+    ? anchorX
+    : anchor.endsWith('right')
+      ? anchorX - blockWidth
+      : anchorX - blockWidth / 2;
 
   const padX = (style.background.paddingX * shortSide) / 1080;
   const padY = (style.background.paddingY * shortSide) / 1080;

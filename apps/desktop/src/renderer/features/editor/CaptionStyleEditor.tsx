@@ -42,6 +42,8 @@ export interface StyleDraft {
   highlightColor: string;
   highlightScale: number;
   yPct: number;
+  xPct: number;
+  anchor: CaptionStyle['position']['anchor'];
   maxWidthPct: number;
 }
 
@@ -66,6 +68,8 @@ export function draftFromStyle(style: CaptionStyle): StyleDraft {
     highlightColor: style.highlight.color,
     highlightScale: style.highlight.scale,
     yPct: style.position.yPct,
+    xPct: style.position.xPct,
+    anchor: style.position.anchor,
     maxWidthPct: style.position.maxWidthPct,
   };
 }
@@ -107,7 +111,13 @@ export function applyDraft(style: CaptionStyle, draft: StyleDraft): CaptionStyle
       color: draft.highlightColor,
       scale: draft.highlightScale,
     },
-    position: { ...style.position, yPct: draft.yPct, maxWidthPct: draft.maxWidthPct },
+    position: {
+      ...style.position,
+      anchor: draft.anchor,
+      xPct: draft.xPct,
+      yPct: draft.yPct,
+      maxWidthPct: draft.maxWidthPct,
+    },
   };
 }
 
@@ -118,6 +128,24 @@ export function applyDraft(style: CaptionStyle, draft: StyleDraft): CaptionStyle
  * project, because two copies of the same preset would be indistinguishable in the
  * list and the second would silently win.
  */
+/**
+ * The nine anchors in reading order, so the grid's cells follow the frame.
+ *
+ * Typed as the schema's own union rather than as strings, so a value the schema would
+ * reject cannot be rendered here.
+ */
+const ANCHOR_CELLS: ReadonlyArray<CaptionStyle['position']['anchor']> = [
+  'top-left',
+  'top-center',
+  'top-right',
+  'center-left',
+  'center',
+  'center-right',
+  'bottom-left',
+  'bottom-center',
+  'bottom-right',
+];
+
 export function localStyleId(baseId: string, taken: ReadonlyArray<string>): string {
   let index = 1;
   let candidate = `${baseId}-edited`;
@@ -419,7 +447,64 @@ export function CaptionStyleEditor({
         </Section>
 
         <Section title="Position">
-          <Labelled label={`Vertical — ${Math.round(draft.yPct)}% from the top`}>
+          {/*
+            The anchor grid (SPEC 11 §6): nine cells, and the one that is lit decides
+            which corner of the block the percentage fields measure from. It has to be a
+            control rather than a fixed value, because `xPct`/`yPct` mean different
+            points depending on it — the same 10% is 10% from the left for a left anchor
+            and 10% from the right for a right one.
+          */}
+          <div
+            role="group"
+            aria-label="Anchor point"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, width: 96 }}
+          >
+            {ANCHOR_CELLS.map((cell) => {
+              const selected = draft.anchor === cell;
+              return (
+                <button
+                  key={cell}
+                  type="button"
+                  aria-label={`Anchor ${cell}`}
+                  aria-pressed={selected}
+                  data-testid={`anchor-cell-${cell}`}
+                  title={`Anchor ${cell}`}
+                  onClick={() => patch({ anchor: cell })}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    display: 'grid',
+                    placeItems: 'center',
+                    cursor: 'pointer',
+                    border: `1px solid ${selected ? 'var(--brand)' : 'var(--line-default)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    background: selected ? 'var(--brand-tint)' : 'transparent',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 1,
+                      background: selected ? 'var(--brand)' : 'var(--text-muted)',
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          <Labelled label={`Horizontal — ${Math.round(draft.xPct)}%`}>
+            <Slider
+              value={draft.xPct}
+              min={0}
+              max={100}
+              step={1}
+              ariaLabel="Horizontal position"
+              formatValue={(value) => `${value}%`}
+              onChange={(value) => patch({ xPct: value })}
+            />
+          </Labelled>
+          <Labelled label={`Vertical — ${Math.round(draft.yPct)}%`}>
             <Slider
               value={draft.yPct}
               min={0}

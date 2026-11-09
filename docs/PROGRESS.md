@@ -204,10 +204,15 @@ properties the renderer reads now have a row with a diamond — scale, both posi
 axes, rotation and the four crop edges included — and the visible scale is the one
 the compositor applies rather than `scaleX` alone.
 
-**2. Finish Phase 5 ⚠️** — the style editor's colour pickers and anchor grid,
-text and shape items, brand kits, and the audio tools beyond the envelope.
-Captions themselves are done:
-engine, frame builder, preview, list, word editor, burn-in.
+**2. Finish Phase 5 ⚠️** — text and shape items, brand kits, and the audio tools
+beyond the envelope. The style editor's **colour pickers and anchor grid are in**:
+colours are hex-only (no eyedropper, recorded as a limitation), and the nine-cell
+anchor grid is a real control rather than a display — it had to be added alongside a
+fix, because the horizontal half of a caption's anchor was dead code in the layout
+(the preview centred every block while the export honoured the anchored edge) and no
+control could reach the field that would have exposed it. Captions themselves are
+done: engine, frame builder, preview, list, word editor, burn-in, and the preview and
+burn-in now agree on all nine anchors by a test that compares them to each other.
 
 **3. Unify preview and export on a WebGL2 `renderFrame`.** Every compositor feature
 the spec requires now renders and exports — captions, keyframed geometry, layer

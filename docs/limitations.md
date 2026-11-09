@@ -260,6 +260,12 @@ This document tracks architectural scope boundaries and honest limitations per `
    the preview. Everything the ten presets ask for is expressible. The per-caption
    `rotationJitterDeg` tilt is not applied — ASS has no per-event rotation, so the
    tilt exists in the preview and the editable style but not in the burned-in file.
+   The **anchor** is now one thing the two agree on rather than one they did not:
+   `xPct`/`yPct` place the block's anchored edge, and a `caption-anchor` test walks
+   all nine cells against the export's own `\an`/`\pos` output. Until it existed,
+   the horizontal half of the anchor was dead code in the preview and the export was
+   right, so a left-anchored style was burned in where the style asked and previewed
+   in the middle of the frame.
 5. **Project-local style copies live in the project's settings blob.** The style
    editor saves a copy into `settings.captionStyles`, and the overlay, the caption
    list and the burn-in all resolve through it, so an edited style now survives to
