@@ -1186,6 +1186,59 @@ export function addMarker(
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }
 
+/**
+ * Places a user composition guide (SPEC 10 §8.8).
+ *
+ * A command rather than a direct write, because a guide is document state: it travels
+ * with the project, so placing one must be undoable like any other edit. The near-
+ * duplicate rule lives in the renderer's `addGuide`, which the caller applies to the
+ * current list before asking for this — the command does not need to know about it.
+ */
+export function addGuide(
+  state: TimelineState,
+  params: { id: string; axis: 'x' | 'y'; at: number },
+): CommandResult {
+  if (!Number.isFinite(params.at)) return fail('invalid', 'That position is not a number.');
+  const at = Math.min(1, Math.max(0, params.at));
+  return setGuides(state, { guides: [...state.guides, { id: params.id, axis: params.axis, at }] });
+}
+
+/**
+ * Replaces the whole guide list (SPEC 10 §8.8).
+ *
+ * The renderer needs this rather than `addGuide` alone: its near-duplicate rule replaces
+ * a guide that is practically on top of the new one, which is a *filter of the existing
+ * list* and not an append. Passing the finished list keeps that rule in one place — the
+ * pure `addGuide` in `user-guides.ts` — instead of splitting it between the command and
+ * its caller.
+ */
+export function setGuides(
+  state: TimelineState,
+  params: { guides: TimelineState['guides'] },
+): CommandResult {
+  const guides = params.guides
+    .filter((guide) => Number.isFinite(guide.at))
+    .map((guide) => ({
+      ...guide,
+      at: Math.min(1, Math.max(0, guide.at)),
+    }));
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.guides = guides;
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/** Removes a user composition guide (SPEC 10 §8.8). */
+export function removeGuide(state: TimelineState, params: { id: string }): CommandResult {
+  if (!state.guides.some((guide) => guide.id === params.id)) {
+    return fail('not_found', 'That guide is already gone.');
+  }
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.guides = draft.guides.filter((guide) => guide.id !== params.id);
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
 export function setTrackMuted(
   state: TimelineState,
   params: { trackId: string; muted: boolean },

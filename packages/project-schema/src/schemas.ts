@@ -360,6 +360,28 @@ export const CompositionTogglesSchema = z
   })
   .passthrough();
 
+/**
+ * A user-placed composition guide (SPEC 10 §8.8).
+ *
+ * Saved with the project — unlike the safe-area and thirds overlays, which are view
+ * state and never written — because a guide is something the user *made*: it marks where
+ * this video's subject sits, and it should still be there tomorrow.
+ *
+ * `at` is a fraction of the canvas on the named axis, measured from the top-left, the
+ * same space the guides are drawn in. Storing it that way rather than as a pixel keeps it
+ * correct when the canvas resolution changes, and keeps the snapping conversion a single
+ * subtraction rather than a two-step with an aspect ratio in it.
+ */
+export const UserGuideSchema = z
+  .object({
+    id: z.string().min(1),
+    axis: z.enum(['x', 'y']),
+    at: z.number().min(0).max(1),
+  })
+  .passthrough();
+
+export type UserGuide = z.infer<typeof UserGuideSchema>;
+
 export const CompositionPayloadSchema = z
   .object({
     id: z.string().min(1),
@@ -391,6 +413,12 @@ export const CompositionPayloadSchema = z
       })
       .default({}),
     editByTranscriptDeletedWordIds: z.array(z.string()).default([]),
+    /*
+      Defaulted to an empty array so a project saved before guides existed opens with
+      none rather than failing validation — the same rule every other field added since
+      v1 follows.
+    */
+    guides: z.array(UserGuideSchema).default([]),
   })
   .passthrough();
 

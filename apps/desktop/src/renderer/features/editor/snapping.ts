@@ -21,7 +21,8 @@ export type SnapKind =
   | 'item-edge'
   | 'item-centre'
   | 'safe-area-edge'
-  | 'grid-line';
+  | 'grid-line'
+  | 'user-guide';
 
 /** One alignment candidate: a line the dragged item's edge or centre can land on. */
 export interface SnapTarget {

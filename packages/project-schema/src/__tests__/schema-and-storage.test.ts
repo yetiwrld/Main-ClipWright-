@@ -163,6 +163,7 @@ describe('Spec 03 — Storage, Migrations, Recovery, Redaction & Portability', (
         tracks: [],
         items: {},
         markers: [],
+        guides: [],
         links: [],
         groups: [],
         playheadUs: 0,

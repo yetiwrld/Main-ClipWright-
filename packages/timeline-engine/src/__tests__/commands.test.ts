@@ -4,6 +4,8 @@ import { createDefaultTimeline, createMediaItem } from '../factory';
 import {
   addAdjustmentLayer,
   addItem,
+  addGuide,
+  removeGuide,
   addMarker,
   groupItems,
   pasteItems,
@@ -1895,3 +1897,63 @@ function fixture() {
     audioTrackId,
   };
 }
+
+describe('user composition guides (SPEC 10 §8.8)', () => {
+  const base = () => createDefaultTimeline({ id: 'comp', name: 'Clip', fps: 30 });
+
+  it('places a guide on the composition', () => {
+    const result = addGuide(base(), { id: 'g1', axis: 'x', at: 0.25 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.guides).toEqual([{ id: 'g1', axis: 'x', at: 0.25 }]);
+  });
+
+  it('is undoable, like any other edit to the document', () => {
+    /*
+      A guide is not view state — it travels with the project — so placing one must be
+      undoable. Replaying the inverse patch is how the history stack undoes every other
+      command, and this checks the guides array is actually covered by the patches rather
+      than mutated outside them.
+    */
+    const result = addGuide(base(), { id: 'g1', axis: 'y', at: 0.4 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.guides).toEqual([]);
+  });
+
+  it('clamps a position outside the canvas onto it', () => {
+    // A pointer dragged past the edge still names a guide; the line belongs on the edge.
+    const result = addGuide(base(), { id: 'g1', axis: 'x', at: 1.5 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.guides[0]!.at).toBe(1);
+  });
+
+  it('refuses a non-finite position rather than storing a guide that draws nowhere', () => {
+    // A guide at NaN is invisible and snaps nothing, forever, with no way to find it.
+    expect(addGuide(base(), { id: 'g1', axis: 'x', at: Number.NaN }).ok).toBe(false);
+  });
+
+  it('removes a guide', () => {
+    const withGuide = addGuide(base(), { id: 'g1', axis: 'x', at: 0.5 });
+    if (!withGuide.ok) throw new Error('setup');
+    const result = removeGuide(withGuide.state, { id: 'g1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.guides).toEqual([]);
+  });
+
+  it('refuses to remove a guide that is already gone', () => {
+    // Silently succeeding would push an empty undo step onto the stack.
+    expect(removeGuide(base(), { id: 'nope' }).ok).toBe(false);
+  });
+
+  it('makes removing undoable too', () => {
+    const withGuide = addGuide(base(), { id: 'g1', axis: 'x', at: 0.5 });
+    if (!withGuide.ok) throw new Error('setup');
+    const removed = removeGuide(withGuide.state, { id: 'g1' });
+    if (!removed.ok) throw new Error('remove');
+    expect(applyPatches(removed.state, removed.inverse).guides).toHaveLength(1);
+  });
+});

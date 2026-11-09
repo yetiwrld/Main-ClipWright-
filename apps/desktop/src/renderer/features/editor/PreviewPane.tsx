@@ -1,7 +1,13 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { IconButton } from '@clipwright/design-system';
-import { formatTimecode, projectDurationUs, quantizeUs, type TimelineState } from '@clipwright/timeline-engine';
+import {
+  formatTimecode,
+  projectDurationUs,
+  quantizeUs,
+  setGuides as setGuidesCommand,
+  type TimelineState,
+} from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import { gainAt } from '@clipwright/audio-core';
 import {
@@ -22,6 +28,8 @@ import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
 import { SpacingHints } from './SpacingHints.js';
+import { UserGuides } from './UserGuides.js';
+import { addGuide, edgeAt, guideSnapTargets, axisForEdge, removeGuide } from './user-guides.js';
 import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -291,6 +299,18 @@ export function PreviewPane({
     toggle — hiding the handles leaves the pivot visible, because the crosshair is a
     readout as much as a grip.
   */
+  /*
+    A `Ctrl`-drag from the viewport edge creates a user guide (SPEC 10 §8.8).
+
+    Held as a ref rather than state: this is a gesture in progress, and re-rendering on
+    every pointer move to update a value nothing draws yet would be re-rendering the whole
+    preview sixty times a second for a line that appears on release.
+
+    The guide is created on *release*, not on pointer-down, because a drag that never went
+    anywhere is a mis-click and should not leave a line behind — the same rule a
+    click-not-a-drag follows everywhere else in this preview.
+  */
+  const guideDrag = useRef<{ axis: 'x' | 'y'; at: number } | null>(null);
   const [showAnchor, setShowAnchor] = useState(true);
   const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
   const platformKey = platformKeyFor(canvas.aspect ?? '');
@@ -695,6 +715,7 @@ export function PreviewPane({
     retuned `assets/safe-areas.json` moves the line and the snap together and the two
     cannot drift apart.
   */
+  const userGuides = useMemo(() => state.guides ?? [], [state.guides]);
   const overlayLines = useMemo(() => {
     const safeFraction =
       overlays.areas === 'title-safe'
@@ -708,11 +729,24 @@ export function PreviewPane({
       and a clip must not stick to a composition line the user has not asked to see.
     */
     const lines = overlays.thirds ? targetsForLines(THIRDS, 'grid-line') : [];
+    /*
+      The user's guides are always snap targets, unlike the compliance overlays: they are
+      on screen whenever the project is open, because the user put them there, so there is
+      nothing invisible about snapping to one.
+    */
     return {
-      x: [...rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')), ...lines],
-      y: [...rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')), ...lines],
+      x: [
+        ...rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')),
+        ...guideSnapTargets(userGuides, 'x'),
+        ...lines,
+      ],
+      y: [
+        ...rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')),
+        ...guideSnapTargets(userGuides, 'y'),
+        ...lines,
+      ],
     };
-  }, [overlays.areas, overlays.thirds]);
+  }, [overlays.areas, overlays.thirds, userGuides]);
 
   /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
@@ -763,6 +797,52 @@ export function PreviewPane({
         <div
           ref={canvasRef}
           data-testid="preview-canvas"
+          /*
+            `Ctrl` + drag from an edge (SPEC 10 §8.8). Bound on the canvas rather than the
+            window so a drag that leaves the preview stops meaning anything, and guarded
+            to the edges so an ordinary `Ctrl`-drag over the picture — which is not a
+            gesture this surface otherwise gives a meaning — is ignored rather than
+            silently making guides.
+          */
+          onPointerDown={(event) => {
+            if (!(event.ctrlKey || event.metaKey) || !timeline) return;
+            const box = event.currentTarget.getBoundingClientRect();
+            if (box.width <= 0 || box.height <= 0) return;
+            const fractionX = (event.clientX - box.left) / box.width;
+            const fractionY = (event.clientY - box.top) / box.height;
+            const edge = edgeAt(fractionX, fractionY);
+            if (!edge) return;
+            event.preventDefault();
+            const axis = axisForEdge(edge);
+            guideDrag.current = { axis, at: axis === 'x' ? fractionX : fractionY };
+          }}
+          onPointerMove={(event) => {
+            const active = guideDrag.current;
+            if (!active) return;
+            const box = event.currentTarget.getBoundingClientRect();
+            if (box.width <= 0 || box.height <= 0) return;
+            // Follows the pointer: the guide is placed where it is released, so the user
+            // can pull it in from the edge and let go where the subject actually is.
+            guideDrag.current = {
+              axis: active.axis,
+              at: active.axis === 'x'
+                ? (event.clientX - box.left) / box.width
+                : (event.clientY - box.top) / box.height,
+            };
+          }}
+          onPointerUp={() => {
+            const active = guideDrag.current;
+            guideDrag.current = null;
+            if (!active || !timeline) return;
+            const id = `guide~${Date.now().toString(36)}~${Math.round(active.at * 1e6)}`;
+            const next = addGuide(userGuides, { id, axis: active.axis, at: active.at });
+            /*
+              `run` with the engine command, so the guide is one undo step and lands in the
+              project file. The near-duplicate rule was applied above, to the list the
+              command would otherwise append a second copy to.
+            */
+            timeline.run('Add guide', (stateNow) => setGuidesCommand(stateNow, { guides: next }));
+          }}
           style={{
             position: 'relative',
             aspectRatio: state.canvas?.aspect ?? '9:16',
@@ -788,6 +868,12 @@ export function PreviewPane({
             progress, so it sits with the selection rather than with the compliance
             overlays the user switched on deliberately.
           */}
+          {/*
+            The user's own guides draw first, below the gesture overlays: they are
+            permanent marks on this project, not feedback about the drag in progress, so
+            a snap line belongs on top of them.
+          */}
+          <UserGuides guides={state.guides ?? []} />
           <SnapGuides guides={drag.guides} />
           {/*
             The equal-spacing hint sits with the guides rather than below them: both

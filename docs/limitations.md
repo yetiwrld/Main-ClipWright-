@@ -104,9 +104,13 @@ This document tracks architectural scope boundaries and honest limitations per `
    it, labelled with how far the snap pulled the clip in preview pixels. When the gaps
    either side of a dragged clip come within the threshold of equal, the two gaps are
    equalised and drawn as two equal bars — horizontal only, since nothing has confirmed
-   the vertical form reads well stacked. Still missing from §8.8: **user guides**
-   (`Ctrl`-drag from the viewport edge, saved with the project) and the **custom N×M
-   grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
+   the vertical form reads well stacked. User guides are in: `Ctrl`-drag in from a viewport
+   edge places one where you release, it is saved with the project, and it is a snap
+   target. There is no **Guides menu** though — SPEC 10 §8.8 asks for a toolbar menu with
+   *Add horizontal/vertical*, *Clear* and *Lock* — so a guide can only be made with the
+   mouse, cannot be removed without undo, and cannot be locked against accidental drags,
+   which is the only one of the three that is a real loss rather than a shortcut. Still
+   missing from §8.8: the **custom N×M grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
    clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The thirds
    work the same way under `Ctrl+'`. The **pixel grid** is the one overlay still not a
