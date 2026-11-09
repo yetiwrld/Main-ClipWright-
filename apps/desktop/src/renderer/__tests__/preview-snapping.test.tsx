@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewPane } from '../features/editor/PreviewPane.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
@@ -181,5 +181,62 @@ describe('snapping a dragged clip (SPEC 10 §8.8)', () => {
       .calls[0]![1] as { transform: Record<string, number> };
     expect(patch.transform.x).toBeCloseTo(0.1, 6);
     expect(patch.transform.y).toBeCloseTo(0, 6);
+  });
+});
+
+describe('snapping to a visible overlay (SPEC 10 §8.8, §9)', () => {
+  /*
+    Title safe at 90% is inset 5% on each side, so its left edge sits at −0.45 in the
+    centre-relative fractions `transform.x` uses. With the item half a canvas wide, its
+    own left edge lands on that line when its centre is at +0.05 — 20 px across on a
+    400 px canvas.
+
+    Every case drags the same 18 px from x=0, which leaves the item's left edge 2 px
+    short of the line: inside the 8 px threshold, so whether it snaps is decided purely
+    by whether the overlay is on.
+  */
+  const commitX = (overlayOn: boolean): number | undefined => {
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    if (overlayOn) {
+      // `Ctrl+;` walks none → title safe, which is the state that must enable the snap.
+      fireEvent.keyDown(document, { key: ';', ctrlKey: true });
+      expect(screen.getByTestId('overlay-safe-area')).toBeTruthy();
+    }
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 218, 200));
+    fireEvent(layer, pointer('pointerup', 218, 200));
+    const calls = (timeline.setItemProperties as ReturnType<typeof vi.fn>).mock.calls;
+    return calls.at(-1)?.[1]?.transform?.x as number | undefined;
+  };
+
+  it('ignores the safe-area edges while the overlay is off', () => {
+    // 18 px of drag is 0.045 of the canvas, and nothing pulls it anywhere else.
+    expect(commitX(false)).toBeCloseTo(0.045, 6);
+  });
+
+  it('pulls onto the safe-area edge when the overlay is showing', () => {
+    /*
+      The line is at 0.05, and the pointer asked for 0.045. Snapping the item's left edge
+      onto the visible edge is what makes the guide worth showing; without it a user lines
+      a clip up against the title-safe box and is 2 px out with no way to tell.
+    */
+    expect(commitX(true)).toBeCloseTo(0.05, 6);
+  });
+
+  it('draws a guide for the overlay line it caught', () => {
+    /*
+      A snap with no line is back to the invisible jump. The kind is checked too, because
+      a guide that says "item-edge" when the clip stuck to the title-safe box would send
+      the user looking for a neighbour that is not there.
+    */
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    fireEvent.keyDown(document, { key: ';', ctrlKey: true });
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 218, 200));
+    expect(screen.getByTestId('snap-guide-x').getAttribute('data-kind')).toBe('safe-area-edge');
   });
 });

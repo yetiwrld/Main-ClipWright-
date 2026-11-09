@@ -6,6 +6,7 @@ import {
   snapTargetsFor,
   snapThresholdPx,
   snappingApplies,
+  targetsForOverlayRect,
 } from '../features/editor/snapping.js';
 
 describe('snap targets (SPEC 10 §8.8)', () => {
@@ -202,5 +203,58 @@ describe('an item’s bounds on one axis', () => {
     const bounds = itemBounds(0, 0.4, Number.NaN, 0.2, 1);
     expect(Number.isFinite(bounds.left)).toBe(true);
     expect(Number.isFinite(bounds.right)).toBe(true);
+  });
+});
+
+describe('snapping to an overlay\'s edges (SPEC 10 §8.8, §9)', () => {
+  // Title safe at 90%: a centred square inset by 5% on every side.
+  const titleSafe = { x: 0.05, y: 0.05, width: 0.9, height: 0.9 };
+
+  it('moves the overlay\'s own left edge to centre-relative space', () => {
+    /*
+      Overlay rectangles are measured from the top-left, snap targets from the centre.
+      Getting the shift wrong puts every safe-area snap half a canvas off — the same trap
+      `guidePercent` guards from the other side, and the kind of error that looks
+      plausible until someone drags a clip onto the line.
+    */
+    const targets = targetsForOverlayRect(titleSafe, 'x');
+    // `toBeCloseTo`: 0.05 + 0.9 − 0.5 is 0.45000000000000007 in binary floating point.
+    expect(targets).toHaveLength(2);
+    expect(targets[0]!.at).toBeCloseTo(-0.45, 10);
+    expect(targets[1]!.at).toBeCloseTo(0.45, 10);
+  });
+
+  it('offers the top and bottom on the vertical axis', () => {
+    const targets = targetsForOverlayRect(titleSafe, 'y');
+    expect(targets[0]!.at).toBeCloseTo(-0.45, 10);
+    expect(targets[1]!.at).toBeCloseTo(0.45, 10);
+  });
+
+  it('reads the height for a vertical axis and the width for a horizontal one', () => {
+    // A non-square inset — a platform band, say — must not use one extent for both.
+    const band = { x: 0, y: 0, width: 1, height: 0.14 };
+    expect(targetsForOverlayRect(band, 'x').map((target) => target.at)).toEqual([-0.5, 0.5]);
+    expect(targetsForOverlayRect(band, 'y')[0]!.at).toBeCloseTo(-0.5, 10);
+    expect(targetsForOverlayRect(band, 'y')[1]!.at).toBeCloseTo(-0.36, 10);
+  });
+
+  it('labels them as safe-area edges rather than as item edges', () => {
+    // The kind decides what the guide means and lets a test tell the two apart.
+    expect(targetsForOverlayRect(titleSafe, 'x').every((target) => target.kind === 'safe-area-edge')).toBe(true);
+  });
+
+  it('offers nothing for a rect that has no usable numbers', () => {
+    // A malformed data file must not put a snap line at `NaN`, where every comparison is
+    // false and the target silently accepts nothing or everything depending on the guard.
+    expect(targetsForOverlayRect({ x: Number.NaN, y: 0, width: 0.9, height: 0.9 }, 'x')).toEqual([]);
+    expect(targetsForOverlayRect({ x: 0, y: 0, width: Number.NaN, height: 0.9 }, 'y')).toEqual([]);
+  });
+
+  it('follows the data file, so a retuned safe area moves its snap line', () => {
+    // The numbers live in `assets/safe-areas.json`; a snap that hard-coded 0.45 would
+    // drift away from the line the overlay draws the moment that file was tuned.
+    const tighter = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 };
+    expect(targetsForOverlayRect(tighter, 'x')[0]!.at).toBeCloseTo(-0.4, 10);
+    expect(targetsForOverlayRect(tighter, 'x')[1]!.at).toBeCloseTo(0.4, 10);
   });
 });

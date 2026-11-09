@@ -104,9 +104,13 @@ This document tracks architectural scope boundaries and honest limitations per `
    it, labelled with how far the snap pulled the clip in preview pixels. Still missing
    from §8.8: **equal-spacing hints**, **user guides**
    (`Ctrl`-drag from the viewport edge, saved with the project) and the **custom N×M
-   grid** (the 3×3 thirds toggle exists), as is snapping to safe-area edges and to the
-   grid. The **cap of four lines** is met by construction rather than by a limit: one
-   target is chosen per axis, so a dragged clip can draw two at most. The pivot crosshair sits behind §8.2's
+   grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
+   **only while that overlay is showing**: a line a user cannot see must not pull their
+   clip, so `Ctrl+;` switches the snap targets on along with the rectangle. Snapping to
+   the thirds or to the grid is not wired — the same shape of work, and the grid has no
+   custom N×M form to snap to yet. The **cap of four lines** is met by construction rather
+   than by a limit: one target is chosen per axis, so a dragged clip can draw two at
+   most. The pivot crosshair sits behind §8.2's
    *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles
    here: there is no **Handles** toggle (`H`), no zoom dropdown and no preview-quality
    control. And the **four edge handles still crop rather than scaling one axis each**:

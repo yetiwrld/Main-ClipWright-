@@ -46,6 +46,7 @@ import {
   snappingApplies,
   type ItemBounds,
   type SnapGuide,
+  type SnapTarget,
 } from './snapping.js';
 
 export interface CanvasDragTarget {
@@ -81,6 +82,16 @@ export interface CanvasDragTarget {
    * the lines this drag can snap to (SPEC 10 §8.8).
    */
   others: { x: readonly ItemBounds[]; y: readonly ItemBounds[] };
+  /**
+   * Extra lines from a *visible* overlay — safe-area edges, and later the grid
+   * (SPEC 10 §8.8, §9).
+   *
+   * Supplied by the caller rather than derived here, because whether a line may be
+   * snapped to depends on whether it is on screen: a snap to a guide the user cannot see
+   * is the invisible-jump problem the guide lines exist to solve. The panel decides,
+   * because the panel owns the overlay state.
+   */
+  overlayLines?: { x: readonly SnapTarget[]; y: readonly SnapTarget[] };
 }
 
 /** The values a gesture can change, as they stand at any moment during it. */
@@ -388,13 +399,19 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
             x: snapAxis(
               moved.x,
               current.target.extent.x / 2,
-              snapTargetsFor('x', { others: current.target.others.x }),
+              snapTargetsFor('x', {
+                others: current.target.others.x,
+                overlay: current.target.overlayLines?.x ?? [],
+              }),
               snapThresholdPx(current.canvas.width),
             ),
             y: snapAxis(
               moved.y,
               current.target.extent.y / 2,
-              snapTargetsFor('y', { others: current.target.others.y }),
+              snapTargetsFor('y', {
+                others: current.target.others.y,
+                overlay: current.target.overlayLines?.y ?? [],
+              }),
               snapThresholdPx(current.canvas.height),
             ),
           }

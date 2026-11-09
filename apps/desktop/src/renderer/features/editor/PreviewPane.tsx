@@ -21,13 +21,14 @@ import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
-import { itemBounds, type ItemBounds } from './snapping.js';
+import { itemBounds, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
   nextAreaOverlay,
   overlaysVisible,
   parseSafeAreas,
   platformKeyFor,
+  safeAreaRect,
   type OverlayState,
 } from './safe-areas.js';
 import safeAreasData from '../../../../../../assets/safe-areas.json';
@@ -682,6 +683,31 @@ export function PreviewPane({
   }, [layers, state.items, playheadUs, canvas.width, canvas.height]);
 
   /*
+    The lines a *visible* overlay contributes to snapping (SPEC 10 §8.8, §9).
+
+    Gated on the overlay being on screen. Snapping to a line the user cannot see is the
+    invisible-jump problem the guide lines exist to solve, reintroduced through the back
+    door: a clip would stick to something with nothing to explain it.
+
+    The rectangles come from the same `safeAreaRect` the overlay itself draws from, so a
+    retuned `assets/safe-areas.json` moves the line and the snap together and the two
+    cannot drift apart.
+  */
+  const overlayLines = useMemo(() => {
+    const safeFraction =
+      overlays.areas === 'title-safe'
+        ? SAFE_AREAS.titleSafe
+        : overlays.areas === 'action-safe'
+          ? SAFE_AREAS.actionSafe
+          : null;
+    const rects = safeFraction !== null ? [safeAreaRect(safeFraction)] : [];
+    return {
+      x: rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')),
+      y: rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')),
+    };
+  }, [overlays.areas]);
+
+  /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
     clip to where it already is would pin it in place — so the map is of *every* item and
     the drag filters; doing it the other way round would need one map per dragged item.
@@ -845,6 +871,12 @@ export function PreviewPane({
                       scaleY: geometry.scaleY,
                       extent: snapExtent,
                       others: snapOthers,
+                      /*
+                        Only the move gesture gets these: a scale or a rotate has its own
+                        arithmetic that a snap would fight, and `snapped` is computed for
+                        a move alone.
+                      */
+                      overlayLines,
                       rect: { x: 0, y: 0, width: box.width, height: box.height },
                     },
                     canvasRef.current,

@@ -12,12 +12,23 @@
  * before it could be stored, and the conversion is where rounding drifts in.
  */
 
+/** What a line is, which decides nothing about where it is drawn but everything about
+ *  what the guide means. Overlay-derived lines are the ones that only exist while the
+ *  overlay is on screen. */
+export type SnapKind =
+  | 'canvas-centre'
+  | 'canvas-edge'
+  | 'item-edge'
+  | 'item-centre'
+  | 'safe-area-edge'
+  | 'grid-line';
+
 /** One alignment candidate: a line the dragged item's edge or centre can land on. */
 export interface SnapTarget {
   /** Position in canvas fractions, measured from the canvas centre. */
   at: number;
   /** What this line is, for choosing which guide to draw and for tests. */
-  kind: 'canvas-centre' | 'canvas-edge' | 'item-edge' | 'item-centre';
+  kind: SnapKind;
 }
 
 /**
@@ -36,6 +47,59 @@ export interface SnapGuide {
   target: SnapTarget;
   /** How far the item moved to land on it, in preview pixels. */
   deltaPx: number;
+}
+
+/**
+ * One rectangle of an overlay, in the space the overlay itself is drawn in.
+ *
+ * Re-declared here rather than imported so the snapping module keeps no dependency on the
+ * overlay module: the conversion below is the only thing that has to agree, and a shared
+ * *number* is a weaker coupling than a shared type. `safeAreaRect`/`platformBands` return
+ * this shape.
+ */
+export interface OverlayRect {
+  /** Left edge as a fraction of the canvas width, from the left. */
+  x: number;
+  /** Top edge as a fraction of the canvas height, from the top. */
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The snap lines an overlay's edges offer.
+ *
+ * Overlay rectangles are measured from the canvas's **top-left**; snap targets are
+ * measured from its **centre**. Getting this wrong offsets every safe-area snap by half a
+ * canvas — the same trap `guidePercent` exists to avoid, in the opposite direction — so
+ * the shift lives here, once, next to the comment that explains it.
+ *
+ * A rectangle's left and right edges become lines on `x`, its top and bottom on `y`. Its
+ * centre is *not* offered: a safe area's centre is always the canvas centre, which is
+ * already a target, and a duplicate would only make the tie-break decide between two
+ * identical lines.
+ *
+ * `axis` selects which pair comes back, so a caller building horizontal targets does not
+ * get vertical ones it cannot use.
+ */
+export function targetsForOverlayRect(
+  rect: OverlayRect,
+  axis: 'x' | 'y',
+  kind: SnapKind = 'safe-area-edge',
+): SnapTarget[] {
+  const start = axis === 'x' ? rect.x : rect.y;
+  const extent = axis === 'x' ? rect.width : rect.height;
+  /*
+    Every field, not just the two this axis reads. A `NaN` *width* on the vertical axis
+    would otherwise sail through and put a line at `NaN` — where every comparison is
+    false, so the target silently accepts nothing and looks like a snap that never fires.
+    A malformed rect is one thing, not two.
+  */
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return [];
+  return [
+    { at: start - 0.5, kind },
+    { at: start + extent - 0.5, kind },
+  ];
 }
 
 /** The edges and centre of an item, in canvas fractions from the canvas centre. */
@@ -75,6 +139,14 @@ export function snapTargetsFor(
   options: {
     /** Every other visible item's bounds on this axis. */
     others: readonly ItemBounds[];
+    /**
+     * Lines from a visible overlay (safe areas, the grid).
+     *
+     * Last in the list so they lose a tie to the canvas and to another item: a clip
+     * sitting flush against its neighbour is a more meaningful alignment than one sitting
+     * on a safe-area line that happens to be a pixel away.
+     */
+    overlay?: readonly SnapTarget[];
   },
 ): SnapTarget[] {
   const targets: SnapTarget[] = [
@@ -89,6 +161,7 @@ export function snapTargetsFor(
     targets.push({ at: other.centre, kind: 'item-centre' });
     targets.push({ at: other.right, kind: 'item-edge' });
   }
+  if (options.overlay) targets.push(...options.overlay);
   return targets;
 }
 
