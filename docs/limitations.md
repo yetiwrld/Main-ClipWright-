@@ -67,11 +67,14 @@ This document tracks architectural scope boundaries and honest limitations per `
    * **Pan is not previewed.** `pan` is stored, drawn in the inspector and applied by the
      mixer, but a `<video>` element has no pan control; without a graph the preview is
      always centred. The export is not.
-   * **There is no master meter** (SPEC 12 §6.3: stereo peak with −60…0 dB, 1.5 s peak
-     hold, a latching clip indicator, momentary LUFS). It needs the same graph, since an
-     `AnalyserNode` is what it would read.
-   The graph is the fix for all three at once, and it is the next piece of audio work
-   rather than three separate ones.
+   * **The master meter reads the bottom picture layer only**, and there is no momentary
+     LUFS readout yet. The stereo peak meter itself — −60…0 dB, 1.5 s hold, a latching clip
+     light — is built, on a small graph that taps the preview's `<video>` through two
+     `AnalyserNode`s at 30 Hz. Because the tap is on that one element it inherits the first
+     limitation: it meters what the preview actually plays, which is the bottom layer.
+   The full graph is the fix for all three at once, and it is the next piece of audio work
+   rather than three separate ones. The meter came first because it makes the rest
+   checkable: once the graph grows per-item nodes, the meter shows whether it is working.
 2. **The preview plays proxies, but seeking a `<video>` element is still the scrub
    mechanism.** Import generates a proxy for 4K, Chromium-unsafe-codec, variable
    frame-rate and HDR sources (SPEC 04 §7), the media record stores its path, and the

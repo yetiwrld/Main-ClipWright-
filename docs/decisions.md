@@ -812,3 +812,33 @@ running the mutation rather than by reading the test.
 **Do not forward what cannot arrive.** A `muted` branch in `planAudioItems` was written,
 found unreachable (the plan already drops muted items from `hasAudio`), and deleted. An
 untestable branch is not additional safety; it is a claim that something is handled.
+
+## 29. The meter's arithmetic is a pure module, and the graph is a tap
+
+Raised by SPEC 12 §6.3 (a stereo peak meter with peak hold and a latching clip light) and
+`10 §3.2` (its place at the right of the transport).
+
+**Split three ways because jsdom has no `AudioContext`.** Had the meter been one component
+that created the graph and drew the bars, none of its real decisions could be tested — and
+almost everything that goes wrong in a meter is a decision, not a pixel: whether the hold
+decays to the floor or to the current level, whether the clip light clears itself, whether
+the bar and its labels use the same scale. Those live in `audio-meter.ts` as pure functions
+over a number, and eleven tests plus ten mutations pin them. The component only draws.
+
+**The graph taps the element rather than modelling it.** One `MediaElementSource` on the
+preview's `<video>`, split into two analysers, and the source connected straight to the
+destination so the sound is unchanged. Measuring what the user hears is the only reading
+that cannot drift from the file: a meter fed from the envelope would keep reporting a level
+the speakers were not producing.
+
+**The tap is created once, forever.** `createMediaElementSource` may be called only once per
+element and *disconnects it from the default output* when it is created — so a graph that
+forgot `source.connect(context.destination)` would make the preview silent, which is a
+splendid way to break sound while adding an instrument that watches it. It is also why the
+hook creates the graph lazily from a gesture rather than on mount: an `AudioContext` starts
+suspended and `resume()` needs one.
+
+**Not the whole spec, and said so.** Per-item gain automation, previewed pan and an
+audio-mastered clock all want per-item nodes; this is one tap on one layer. Building the
+meter first is not a compromise, it is the order that makes the rest checkable — once the
+graph grows, the meter shows whether it works, instead of the change being judged by ear.

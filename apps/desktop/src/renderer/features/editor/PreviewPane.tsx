@@ -45,6 +45,8 @@ import {
   type DissolveShape,
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import { LevelMeter } from './LevelMeter.js';
+import { useAudioMeter } from './use-audio-meter.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import {
   scrubFrameUrl,
@@ -410,6 +412,12 @@ export function PreviewPane({
   const canvasRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  /*
+    The master meter (SPEC 12 §6.3). Its graph is a tap on the preview's own `<video>`, so
+    it measures what the user hears rather than a model of it, and it is created lazily by
+    the hook because `createMediaElementSource` may only ever be called once per element.
+  */
+  const audioMeter = useAudioMeter(videoRef, true);
   /**
    * The Guides menu's anchor, in viewport coordinates, or `null` while closed.
    *
@@ -2687,6 +2695,8 @@ export function PreviewPane({
             icon={muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
             onClick={() => setMuted((value) => !value)}
           />
+          {/* Right end of the transport, where `10 §3.2` puts it. */}
+          <LevelMeter meter={audioMeter.meter} onClearClip={audioMeter.clearClip} />
         </div>
       </div>
     </div>

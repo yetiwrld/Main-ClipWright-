@@ -212,10 +212,13 @@ both fades and the fade curve were inert in the export** until this slice — th
 wrote them, the project stored them, and `planAudioItems` carried none of them, so the
 mixer's fallbacks supplied 0 dB, centre and no fade for every clip. The tests read the
 rendered WAV rather than the request, which is how the volume keyframe line had been fixed
-earlier; this was the same bug shape a third time. What is still missing from the audio
-system is the **Web Audio graph** in the preview, and that one absence explains three
-symptoms at once: only the bottom picture layer is audible, pan is not previewed, and
-there is no master meter (§6.3). **Text and shape items are in**, which closes the biggest
+earlier; this was the same bug shape a third time. The **master peak meter is in** (§6.3): stereo, −60…0 dB, a 1.5 s hold and a clip light
+that latches until clicked, reading two analysers on the preview's own `<video>`. Its
+arithmetic is a pure module with eleven tests and ten mutations, because jsdom has no
+`AudioContext` and the decisions are all in the arithmetic. What is still missing from the
+audio system is the **full Web Audio graph** in the preview, and that one absence explains
+two remaining symptoms: only the bottom picture layer is audible (so the meter reads that
+layer only) and pan is not previewed. **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without
