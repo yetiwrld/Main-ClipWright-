@@ -5,6 +5,9 @@ import {
   addAdjustmentLayer,
   addItem,
   addGuide,
+  clearGuides,
+  setGuides,
+  setGuidesLocked,
   removeGuide,
   addMarker,
   groupItems,
@@ -1905,7 +1908,7 @@ describe('user composition guides (SPEC 10 §8.8)', () => {
     const result = addGuide(base(), { id: 'g1', axis: 'x', at: 0.25 });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.guides).toEqual([{ id: 'g1', axis: 'x', at: 0.25 }]);
+    expect(result.state.guides).toEqual([{ id: 'g1', axis: 'x', at: 0.25, locked: false }]);
   });
 
   it('is undoable, like any other edit to the document', () => {
@@ -1947,6 +1950,83 @@ describe('user composition guides (SPEC 10 §8.8)', () => {
   it('refuses to remove a guide that is already gone', () => {
     // Silently succeeding would push an empty undo step onto the stack.
     expect(removeGuide(base(), { id: 'nope' }).ok).toBe(false);
+  });
+
+  it('creates a guide unlocked', () => {
+    // A guide you just placed is not protected from the gesture that removes it.
+    const result = addGuide(base(), { id: 'g1', axis: 'x', at: 0.25 });
+    if (!result.ok) throw new Error('setup');
+    expect(result.state.guides[0]!.locked).toBe(false);
+  });
+
+  it('locks and unlocks every guide', () => {
+    const two = setGuides(base(), {
+      guides: [
+        { id: 'g1', axis: 'x', at: 0.25, locked: false },
+        { id: 'g2', axis: 'y', at: 0.75, locked: false },
+      ],
+    });
+    if (!two.ok) throw new Error('setup');
+    const locked = setGuidesLocked(two.state, { locked: true });
+    if (!locked.ok) throw new Error('lock');
+    expect(locked.state.guides.map((guide) => guide.locked)).toEqual([true, true]);
+
+    const unlocked = setGuidesLocked(locked.state, { locked: false });
+    if (!unlocked.ok) throw new Error('unlock');
+    expect(unlocked.state.guides.map((guide) => guide.locked)).toEqual([false, false]);
+  });
+
+  it('makes locking undoable', () => {
+    const withGuide = addGuide(base(), { id: 'g1', axis: 'x', at: 0.5 });
+    if (!withGuide.ok) throw new Error('setup');
+    const locked = setGuidesLocked(withGuide.state, { locked: true });
+    if (!locked.ok) throw new Error('lock');
+    const undone = applyPatches(locked.state, locked.inverse);
+    expect(undone.guides[0]!.locked).toBe(false);
+  });
+
+  it('clears unlocked guides and leaves locked ones standing', () => {
+    /*
+      *Lock* is only a safety net if the bulk removal respects it. This is the pairing
+      that makes the menu's two destructive-looking items safe to sit next to each other.
+    */
+    const mixed = setGuides(base(), {
+      guides: [
+        { id: 'keep', axis: 'x', at: 0.25, locked: true },
+        { id: 'drop', axis: 'y', at: 0.75, locked: false },
+      ],
+    });
+    if (!mixed.ok) throw new Error('setup');
+    const cleared = clearGuides(mixed.state);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.state.guides).toEqual([{ id: 'keep', axis: 'x', at: 0.25, locked: true }]);
+  });
+
+  it('refuses to clear when every guide is locked, and says so', () => {
+    // Better than a menu item that appears to work and does nothing.
+    const locked = addGuide(base(), { id: 'g1', axis: 'x', at: 0.5 });
+    if (!locked.ok) throw new Error('setup');
+    const allLocked = setGuidesLocked(locked.state, { locked: true });
+    if (!allLocked.ok) throw new Error('lock');
+    const result = clearGuides(allLocked.state);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('locked');
+  });
+
+  it('refuses to clear when there are no guides at all', () => {
+    expect(clearGuides(base()).ok).toBe(false);
+  });
+
+  it('makes clearing undoable', () => {
+    const mixed = setGuides(base(), {
+      guides: [{ id: 'g1', axis: 'x', at: 0.25, locked: false }],
+    });
+    if (!mixed.ok) throw new Error('setup');
+    const cleared = clearGuides(mixed.state);
+    if (!cleared.ok) throw new Error('clear');
+    expect(applyPatches(cleared.state, cleared.inverse).guides).toHaveLength(1);
   });
 
   it('makes removing undoable too', () => {

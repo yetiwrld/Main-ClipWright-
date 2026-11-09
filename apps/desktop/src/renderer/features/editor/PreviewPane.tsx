@@ -1,12 +1,26 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
-import { IconButton } from '@clipwright/design-system';
+import {
+  Grid3x3,
+  Lock,
+  LockOpen,
+  Minus,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
+import { IconButton, Menu, type MenuItem } from '@clipwright/design-system';
 import {
   formatTimecode,
   projectDurationUs,
   quantizeUs,
+  clearGuides as clearGuidesCommand,
   removeGuide as removeGuideCommand,
   setGuides as setGuidesCommand,
+  setGuidesLocked as setGuidesLockedCommand,
   type TimelineState,
 } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
@@ -273,6 +287,13 @@ export function PreviewPane({
   const canvasRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  /**
+   * The Guides menu's anchor, in viewport coordinates, or `null` while closed.
+   *
+   * `Menu` is fixed-positioned when given `x`/`y`, so anchoring it to the button's own
+   * rectangle is what makes it open *under* the button at whatever width the strip is.
+   */
+  const [guideMenuAt, setGuideMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [missing, setMissing] = useState(false);
   const durationUs = projectDurationUs(state);
 
@@ -750,6 +771,79 @@ export function PreviewPane({
   }, [overlays.areas, overlays.thirds, userGuides]);
 
   /*
+    The Guides menu (SPEC 10 §8.8): *Add horizontal*, *Add vertical*, *Lock*, *Clear*.
+
+    Every item is a command, so every item is undoable — Ctrl+Z puts back a guide that
+    *Clear* removed, which is the difference between a menu that is a shortcut for the
+    gestures and a menu that quietly bypasses the undo stack. *Add* drops the guide in the
+    middle of the composition and leaves the user to drag it; there is no other sensible
+    default position, and picking an edge would put it under the edge handle.
+  */
+  const guideMenuItems = useMemo((): MenuItem[] => {
+    const count = userGuides.length;
+    const allLocked = count > 0 && userGuides.every((guide) => guide.locked);
+    const anyLocked = userGuides.some((guide) => guide.locked);
+    /*
+      Built inside the command, from the state the command is handed, rather than here from
+      the list the menu was rendered with. `setGuides` replaces the whole array, so a list
+      captured when the menu opened would drop any guide placed while it was open — the
+      gesture and the menu look independent, and the menu would quietly undo the gesture.
+    */
+    const add = (axis: 'x' | 'y') => (stateNow: TimelineState) => {
+      const id = `guide-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      // The pure filter, so a guide already sitting at the middle is replaced rather than
+      // doubled — the same near-duplicate rule the drag gesture obeys.
+      const next = addGuide(stateNow.guides ?? [], { id, axis, at: 0.5, locked: false });
+      return setGuidesCommand(stateNow, { guides: next });
+    };
+    return [
+      {
+        id: 'guide-add-horizontal',
+        label: 'Add horizontal guide',
+        icon: <Minus size={13} />,
+        onSelect: () => {
+          timeline?.run('Add guide', add('y'));
+        },
+      },
+      {
+        id: 'guide-add-vertical',
+        label: 'Add vertical guide',
+        icon: <Grid3x3 size={13} />,
+        onSelect: () => {
+          timeline?.run('Add guide', add('x'));
+        },
+      },
+      {
+        id: 'guide-lock',
+        label: allLocked ? 'Unlock guides' : 'Lock guides',
+        icon: allLocked ? <LockOpen size={13} /> : <Lock size={13} />,
+        // No shortcut shown: Lock has no key of its own, and the one gesture it is next to
+        // (`Shift`+`Ctrl`-drag) is the one it *blocks* — advertising it here would read as
+        // the way to lock rather than the way to remove.
+        separatorBefore: true,
+        disabled: count === 0,
+        disabledReason: 'There are no guides yet.',
+        onSelect: () => {
+          timeline?.run(allLocked ? 'Unlock guides' : 'Lock guides', (stateNow) =>
+            setGuidesLockedCommand(stateNow, { locked: !allLocked }),
+          );
+        },
+      },
+      {
+        id: 'guide-clear',
+        label: anyLocked ? 'Clear unlocked guides' : 'Clear guides',
+        icon: <X size={13} />,
+        danger: true,
+        disabled: count === 0,
+        disabledReason: 'There are no guides yet.',
+        onSelect: () => {
+          timeline?.run('Clear guides', (stateNow) => clearGuidesCommand(stateNow));
+        },
+      },
+    ];
+  }, [userGuides, timeline]);
+
+  /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
     clip to where it already is would pin it in place — so the map is of *every* item and
     the drag filters; doing it the other way round would need one map per dragged item.
@@ -860,20 +954,39 @@ export function PreviewPane({
                 one is undo, which also throws away every edit since it was placed — too
                 blunt for a mark the user made and changed their mind about.
               */
-              const doomed = guideToRemove(userGuides, active.axis, active.at);
-              if (doomed) {
-                timeline.run('Remove guide', (stateNow) => removeGuideCommand(stateNow, { id: doomed.id }));
-              }
+              /*
+                Resolved against the state the command is handed, like the *Add* path and
+                for the same reason: this render's list could predate a guide being placed,
+                moved or locked, and here a stale read would remove something the user had
+                already protected.
+              */
+              timeline.run('Remove guide', (stateNow) => {
+                const doomed = guideToRemove(stateNow.guides ?? [], active.axis, active.at);
+                // Nothing in reach is not an error worth an undo step — the gesture was a
+                // no-op, and a failure would light up the status bar for it.
+                return doomed ? removeGuideCommand(stateNow, { id: doomed.id }) : null;
+              });
               return;
             }
             const id = `guide~${Date.now().toString(36)}~${Math.round(active.at * 1e6)}`;
-            const next = addGuide(userGuides, { id, axis: active.axis, at: active.at });
             /*
               `run` with the engine command, so the guide is one undo step and lands in the
-              project file. The near-duplicate rule was applied above, to the list the
-              command would otherwise append a second copy to.
+              project file. The list is built from the state the command is *handed*, not
+              from this render's: `setGuides` replaces the whole array, so a snapshot taken a
+              frame earlier would drop a guide placed in between — the same trap the menu's
+              *Add* had, and the reason both build their list in here.
             */
-            timeline.run('Add guide', (stateNow) => setGuidesCommand(stateNow, { guides: next }));
+            timeline.run('Add guide', (stateNow) =>
+              setGuidesCommand(stateNow, {
+                guides: addGuide(stateNow.guides ?? [], {
+                  id,
+                  axis: active.axis,
+                  at: active.at,
+                  // A guide the user just dragged in is never born locked.
+                  locked: false,
+                }),
+              }),
+            );
           }}
           style={{
             position: 'relative',
@@ -1204,7 +1317,58 @@ export function PreviewPane({
           onClick={() => playheadStore.set(durationUs)}
         />
         <TransportTimecode fps={fps} durationUs={durationUs} />
-        <div style={{ marginLeft: 'auto' }}>
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-1)',
+            // Anchors the Guides menu's absolute fallback; `Menu` is fixed-positioned
+            // when it has coordinates, so this only matters if that ever changes.
+            position: 'relative',
+          }}
+        >
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <IconButton
+              label="Guides"
+              shortcut="Ctrl+drag from an edge"
+              size={28}
+              active={guideMenuAt !== null}
+              icon={
+                userGuides.some((guide) => guide.locked) ? (
+                  <Lock size={14} />
+                ) : (
+                  <Grid3x3 size={14} />
+                )
+              }
+              /*
+                A plain toggle, with the button's own press kept away from `Menu`.
+
+                `Menu` closes itself on any `mousedown` outside itself, and this button is
+                outside it — so without the `onMouseDown` guard, pressing the button while
+                the menu is open ran that listener *first*, the click then toggled an
+                already-closed menu back open, and the button could never close what it
+                opened. Stopping the press from reaching the window listener leaves the
+                toggle to the click, which is also what keeps keyboard activation (Enter
+                and Space fire a click and no `mousedown`) working.
+              */
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setGuideMenuAt((open) =>
+                  open ? null : { x: rect.left, y: rect.bottom + 4 },
+                );
+              }}
+            />
+          </span>
+          {guideMenuAt && (
+            <Menu
+              items={guideMenuItems}
+              x={guideMenuAt.x}
+              y={guideMenuAt.y}
+              onClose={() => setGuideMenuAt(null)}
+            />
+          )}
           <IconButton
             label={muted ? 'Unmute preview' : 'Mute preview'}
             size={28}

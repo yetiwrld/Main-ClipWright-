@@ -377,6 +377,13 @@ export const UserGuideSchema = z
     id: z.string().min(1),
     axis: z.enum(['x', 'y']),
     at: z.number().min(0).max(1),
+    /**
+     * Whether this guide is protected from the removal gesture (SPEC 10 §8.8's *Lock*).
+     *
+     * Defaulted rather than required, so a guide saved before Lock existed opens unlocked
+     * — which is the state it was actually in.
+     */
+    locked: z.boolean().default(false),
   })
   .passthrough();
 

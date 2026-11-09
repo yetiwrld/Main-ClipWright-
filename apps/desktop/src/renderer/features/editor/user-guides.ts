@@ -66,6 +66,14 @@ export interface UserGuideRecord {
   id: string;
   axis: 'x' | 'y';
   at: number;
+  /**
+   * Protected from the removal gesture (§8.8's *Lock*).
+   *
+   * Required rather than optional, matching the schema's *output* type: the parser fills
+   * the default in on the way out, so anything the app has loaded has it. Making it
+   * optional here would only move the `undefined` case to every call site.
+   */
+  locked: boolean;
   [key: string]: unknown;
 }
 
@@ -85,9 +93,12 @@ export function addGuide(
   if (!Number.isFinite(guide.at)) return [...guides];
   const at = Math.min(1, Math.max(0, guide.at));
   const kept = guides.filter(
-    (existing) => existing.axis !== guide.axis || Math.abs(existing.at - at) >= minGap,
+    (existing) =>
+      existing.axis !== guide.axis ||
+      existing.locked ||
+      Math.abs(existing.at - at) >= minGap,
   );
-  return [...kept, { ...guide, at }];
+  return [...kept, { ...guide, at, locked: guide.locked ?? false }];
 }
 
 /** Removes a guide by id. Removing something absent is not an error. */
@@ -137,6 +148,13 @@ export function guideToRemove(
   let best: { guide: UserGuideRecord; distance: number } | null = null;
   for (const guide of guides) {
     if (guide.axis !== axis || !Number.isFinite(guide.at)) continue;
+    /*
+      A locked guide is not merely harder to remove, it is completely protected. §8.8
+      describes Lock as protection against accidental drags; a "still removes the locked
+      one if you get close enough" reading would make the lock pointless, because the
+      gesture that removes a guide is the same one that arrives at it.
+    */
+    if (guide.locked) continue;
     const distance = Math.abs(guide.at - at);
     if (distance > reach) continue;
     if (!best || distance < best.distance) best = { guide, distance };

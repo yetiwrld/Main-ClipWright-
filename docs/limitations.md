@@ -106,12 +106,18 @@ This document tracks architectural scope boundaries and honest limitations per `
    equalised and drawn as two equal bars — horizontal only, since nothing has confirmed
    the vertical form reads well stacked. User guides are in: `Ctrl`-drag in from a viewport
    edge places one where you release, it is saved with the project, and it is a snap
-   target. There is no **Guides menu** though — SPEC 10 §8.8 asks for a toolbar menu with
-   *Add horizontal/vertical*, *Clear* and *Lock*. `Shift`+`Ctrl`-drag takes a guide away,
-   so the menu's *Clear* is reachable one at a time and *Add* is reachable with the mouse;
-   what is genuinely missing is **Lock**, which has no equivalent at all, and any way to
-   see the list of guides rather than the lines themselves. Still
-   missing from §8.8: the **custom N×M grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
+   target; `Shift`+`Ctrl`-drag takes one away. The **Guides menu** (§8.8) is in the
+   transport strip and carries *Add horizontal*, *Add vertical*, *Lock* and *Clear*. A new
+   guide lands in the middle of the composition, because the edges are already occupied by
+   the handles, and every item is a command, so `Ctrl+Z` puts back one *Clear* removed.
+   *Lock* protects guides from both gestures: a locked guide cannot be removed and cannot
+   be overwritten by a duplicate landing on top of it, and *Clear* spares it and says so
+   (*Clear unlocked guides*). A locked guide is not marked on the canvas — a hairline has
+   no room for a badge, so the state is read off the button's icon. Still missing
+   is any way to see **the list of guides** rather than the lines themselves, and
+   **per-guide locking**: *Lock* acts on every guide at once, which is what the menu item
+   is. Still missing from §8.8: the **custom N×M grid** (the 3×3 thirds toggle exists).
+   Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
    clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The thirds
    work the same way under `Ctrl+'`. The **pixel grid** is the one overlay still not a

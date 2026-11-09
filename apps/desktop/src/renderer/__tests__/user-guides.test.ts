@@ -18,7 +18,8 @@ import {
  * three times in this codebase — top-left fractions to centre-relative targets.
  */
 
-const guide = (id: string, axis: 'x' | 'y', at: number): UserGuideRecord => ({ id, axis, at });
+const guide = (id: string, axis: 'x' | 'y', at: number, locked = false): UserGuideRecord =>
+  ({ id, axis, at, locked });
 
 describe('which edge a Ctrl-drag began on', () => {
   it('recognises all four edges', () => {
@@ -176,5 +177,74 @@ describe('finding the guide a removal gesture is aimed at', () => {
 
   it('returns nothing from an empty project', () => {
     expect(guideToRemove([], 'x', 0.25)).toBeNull();
+  });
+
+  it('never removes a locked guide', () => {
+    /*
+      Lock has to mean *never*, not *only when you miss*: the gesture that removes a guide
+      is a drag that has to travel to it, so a lock that yields to a good enough aim would
+      protect nothing.
+    */
+    const locked = [guide('protected', 'x', 0.25, true)];
+    expect(guideToRemove(locked, 'x', 0.25)).toBeNull();
+  });
+
+  it('skips a locked guide in favour of an unlocked one further away', () => {
+    // The reach is a radius, not a first-match: a locked guide must not shadow a neighbour
+    // the user actually can remove.
+    const mixed = [guide('locked', 'x', 0.250, true), guide('free', 'x', 0.264)];
+    expect(guideToRemove(mixed, 'x', 0.251)?.id).toBe('free');
+  });
+});
+
+describe('locking guides (SPEC 10 §8.8)', () => {
+  it('will not place a guide on top of a locked one', () => {
+    /*
+      The near-duplicate rule replaces an incumbent. Doing that to a locked guide would be
+      a way to lose it with the *creating* gesture, which is exactly what Lock is for.
+    */
+    const locked = [guide('protected', 'x', 0.25, true)];
+    const next = addGuide(locked, guide('new', 'x', 0.251));
+    expect(next.map((candidate) => candidate.id)).toEqual(['protected', 'new']);
+  });
+
+  it('still replaces an unlocked neighbour', () => {
+    // The counterpart, so the test above is proven to be about `locked` and not about the
+    // filter having stopped working altogether.
+    const unlocked = [guide('old', 'x', 0.25)];
+    const next = addGuide(unlocked, guide('new', 'x', 0.251));
+    expect(next.map((candidate) => candidate.id)).toEqual(['new']);
+  });
+
+  it('keeps a locked guide even when the replacement is far away', () => {
+    // A plain distance test: locked is skipped, unlocked is not, whatever the gap.
+    const mixed = [guide('locked', 'x', 0.25, true), guide('free', 'x', 0.25)];
+    const next = addGuide(mixed, guide('new', 'x', 0.25));
+    expect(next.map((candidate) => candidate.id)).toEqual(['locked', 'new']);
+  });
+
+  it('does not let a duplicate rule cross axes', () => {
+    // A horizontal guide at 0.25 and a vertical one at 0.25 cross; neither replaces the
+    // other. Checked with the locked one present, since that is the new branch.
+    const guides = [guide('locked-v', 'x', 0.25, true)];
+    const next = addGuide(guides, guide('h', 'y', 0.25));
+    expect(next).toHaveLength(2);
+  });
+
+  it('defaults a new guide to unlocked', () => {
+    // Nothing in `addGuide` may invent a lock: protection is always something the user
+    // asked for, or a guide would be unremovable for no visible reason.
+    const next = addGuide([], guide('fresh', 'x', 0.4));
+    expect(next[0]!.locked).toBe(false);
+  });
+
+  it('reads a guide saved before Lock existed as unlocked', () => {
+    /*
+      Projects written before this field existed have guides without it. They have to keep
+      loading, and they have to behave as they always did — which is what the schema's
+      default does, and why the type can be required in the app.
+    */
+    const legacy = [{ id: 'old', axis: 'x' as const, at: 0.5 }] as unknown as UserGuideRecord[];
+    expect(guideToRemove(legacy, 'x', 0.5)?.id).toBe('old');
   });
 });

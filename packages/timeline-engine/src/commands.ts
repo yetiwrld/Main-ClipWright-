@@ -1200,7 +1200,9 @@ export function addGuide(
 ): CommandResult {
   if (!Number.isFinite(params.at)) return fail('invalid', 'That position is not a number.');
   const at = Math.min(1, Math.max(0, params.at));
-  return setGuides(state, { guides: [...state.guides, { id: params.id, axis: params.axis, at }] });
+  return setGuides(state, {
+    guides: [...state.guides, { id: params.id, axis: params.axis, at, locked: false }],
+  });
 }
 
 /**
@@ -1235,6 +1237,42 @@ export function removeGuide(state: TimelineState, params: { id: string }): Comma
   }
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
     draft.guides = draft.guides.filter((guide) => guide.id !== params.id);
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/**
+ * Locks or unlocks every guide (SPEC 10 §8.8's Guides menu: *Lock*).
+ *
+ * Whole-set rather than per-guide because that is what the menu item is: one control that
+ * makes the guides stop being removable, and stops them being removed. A per-guide lock
+ * would need a click target on a hairline, which is the thing the removal gesture's
+ * generous reach exists to avoid.
+ */
+export function setGuidesLocked(
+  state: TimelineState,
+  params: { locked: boolean },
+): CommandResult {
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.guides = draft.guides.map((guide) => ({ ...guide, locked: params.locked }));
+  });
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
+/**
+ * Removes every *unlocked* guide (SPEC 10 §8.8's Guides menu: *Clear*).
+ *
+ * Locked guides survive, so *Lock* is a real safety net rather than a label. If every guide
+ * is locked the command fails rather than silently doing nothing, so the menu can say why.
+ */
+export function clearGuides(state: TimelineState): CommandResult {
+  const unlocked = state.guides.filter((guide) => !guide.locked);
+  if (state.guides.length > 0 && unlocked.length === 0) {
+    return fail('locked', 'Every guide is locked. Unlock them first.');
+  }
+  if (state.guides.length === 0) return fail('not_found', 'There are no guides to clear.');
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.guides = draft.guides.filter((guide) => guide.locked);
   });
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }

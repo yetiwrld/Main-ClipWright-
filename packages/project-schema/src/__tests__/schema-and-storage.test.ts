@@ -418,8 +418,8 @@ describe('Spec 03 — Storage, Migrations, Recovery, Redaction & Portability', (
         items: {},
         markers: [],
         guides: [
-          { id: 'g1', axis: 'x', at: 0.25 },
-          { id: 'g2', axis: 'y', at: 0.75 },
+          { id: 'g1', axis: 'x', at: 0.25, locked: true },
+          { id: 'g2', axis: 'y', at: 0.75, locked: false },
         ],
         links: [],
         groups: [],
@@ -431,10 +431,34 @@ describe('Spec 03 — Storage, Migrations, Recovery, Redaction & Portability', (
     } as never);
 
     const loaded = storage.getComposition(proj.id, compId);
+    // `locked` has to survive the file, not just the schema: a lock the user set and then
+    // lost by reopening the project would remove itself at the worst moment, and it is the
+    // only field on a guide that cannot be reconstructed from geometry.
     expect(loaded?.payload.guides).toEqual([
-      { id: 'g1', axis: 'x', at: 0.25 },
-      { id: 'g2', axis: 'y', at: 0.75 },
+      { id: 'g1', axis: 'x', at: 0.25, locked: true },
+      { id: 'g2', axis: 'y', at: 0.75, locked: false },
     ]);
+  });
+
+  it('reads a guide saved before Lock existed as unlocked', () => {
+    /*
+      The other half of the compatibility promise, at the level where it can be broken: the
+      default lives on the schema, and a guide without the field has to come out unlocked
+      rather than `undefined`, because `undefined` is falsy in the app but absent from a
+      strict comparison — and would make a legacy guide's removal behaviour depend on which
+      code path read it.
+    */
+    const parsed = CompositionPayloadSchema.parse({
+      id: 'comp',
+      name: 'Clip',
+      canvas: { width: 1080, height: 1920, aspect: '9:16', backgroundColor: '#000000', backgroundBlur: false },
+      tracks: [],
+      items: {},
+      guides: [{ id: 'old', axis: 'x', at: 0.5 }],
+    });
+    // `toStrictEqual`, not `toEqual`: the latter treats `{locked: undefined}` as equal to
+    // `{locked: false}`, which is exactly the difference this test exists to catch.
+    expect(parsed.guides).toStrictEqual([{ id: 'old', axis: 'x', at: 0.5, locked: false }]);
   });
 
   it('opens a project saved before guides existed', () => {

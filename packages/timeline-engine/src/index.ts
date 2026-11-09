@@ -49,6 +49,8 @@ export {
   addGuide,
   removeGuide,
   setGuides,
+  setGuidesLocked,
+  clearGuides,
   addMarker,
   setTrackMuted,
   setTrackMagnetic,

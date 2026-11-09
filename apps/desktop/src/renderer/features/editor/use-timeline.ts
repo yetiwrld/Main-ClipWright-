@@ -111,7 +111,14 @@ export interface TimelineApi {
   canRedo: boolean;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
-  run: (label: string, command: (state: TimelineState) => CommandResult) => boolean;
+  /**
+   * Runs a command as one undo step.
+   *
+   * A command may return `null` to say it decided there was nothing to do — that is not a
+   * failure and must not push an undo step or light up the notes, which is why it is a
+   * separate answer from a `CommandResult` whose `ok` is false.
+   */
+  run: (label: string, command: (state: TimelineState) => CommandResult | null) => boolean;
   undo: () => void;
   redo: () => void;
   move: (moves: Array<{ itemId: string; startUs: number; trackId?: string }>, mode?: EditMode) => boolean;
@@ -381,10 +388,12 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
   );
 
   const run = useCallback(
-    (label: string, command: (current: TimelineState) => CommandResult) => {
+    (label: string, command: (current: TimelineState) => CommandResult | null) => {
       const history = historyRef.current;
       if (!history) return false;
       const result = command(history.state);
+      // `null` is the command's own no-op: nothing changed, so nothing to undo.
+      if (!result) return false;
       if (!result.ok) {
         setNotes([result.message]);
         return false;
