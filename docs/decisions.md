@@ -544,3 +544,40 @@ transcript changed nothing, and the spec's "Regenerate" had no button.
 The general lesson, now three slices running: **count the callers, not the tests.** These two
 functions had tests that proved they worked and no code that proved anything used them. A grep
 for the import found nothing; a grep for the *call* found the gap.
+
+## 22. Half of auto-reframe is geometry, and that half is worth building
+
+SPEC 13 §6.3's auto-reframe has two halves. Detection — sample the proxy at 5 fps, run a face or
+saliency model — needs `onnxruntime-node` and a permissively licensed model in the installer.
+The camera path that turns detections into keyframes needs neither, and §6.4 explicitly allows a
+build without detection ("fall back to §6.4 and state it"). So detection stays unimplemented and
+*stated in `limitations.md`*, and the camera is real.
+
+- **The camera takes sample points, not frames.** Given "the subject was here at this instant",
+  it produces keyframes. A future ONNX pass supplies the same sample points and gets the same
+  camera, and §6.4's fallback — a static centre with the user's framing — is the same code with
+  one sample. Building the detection side first would have made the camera a function of
+  whatever that pass happened to emit.
+- **The camera starts on the subject, and every later move is filtered.** The first tracked
+  sample of a shot *places* the camera with no easing, because a cut is a new location and
+  easing in from the canvas centre is a transition nobody asked for and the user cannot remove.
+  Everything after it has a previous position to travel from and gets the dead-zone, the filter
+  and the pan limit.
+- **Smoothing is expressed against elapsed time, not per sample.** A per-sample constant makes
+  the same slider position feel different at 5 fps and at 10 fps — a class of bug that never
+  reproduces on the machine it was written on.
+- **A gap in detection holds the aim, and says so.** Jumping to the centre and back is the most
+  obvious way auto-reframe looks broken. The `tracked` flag survives into the output because the
+  panel has to distinguish a held frame from a genuinely still subject, and equal numbers cannot
+  make that distinction.
+- **Both axes are simplified together.** Running RDP per axis doubles the keyframe count and
+  puts the two out of step, so the path leans during a pan.
+- **A surviving mutation is either a test gap or a dead branch — say which.** The dedupe guard
+  in `capKeyframes` looked like a test gap; a proof over the index arithmetic showed the
+  collision cannot occur while `allowed <= keys.length`. The guard was deleted and the argument
+  written into the code. Confusing the two cases wastes the test you would have written.
+
+The honest limit, recorded in `limitations.md`: with no detector, this is the camera the tools
+will use rather than a working auto-reframe button. What it replaces is nothing — the module had
+no counterpart at all — and what it makes possible is the review panel and the manual framing
+fallback, both of which need only keyframes.

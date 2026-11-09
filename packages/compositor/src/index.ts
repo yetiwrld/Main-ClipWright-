@@ -7,6 +7,8 @@
  * verify wrapping and word rectangles without a browser, and what stops the
  * preview and the export from drifting apart.
  */
+export * from './auto-reframe.js';
+
 export {
   applyCase,
   blockBackground,

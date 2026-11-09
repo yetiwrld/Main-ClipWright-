@@ -115,7 +115,16 @@ This document tracks architectural scope boundaries and honest limitations per `
    the renderer to ask for a frame *after* the playhead has settled, which is an IPC
    round trip this change does not add.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
-4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Fill lock scope.** SPEC 10 §8.5's cover lock is implemented for the **preview's** move and
+4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Auto-reframe has no detector.** SPEC 13 §6.3's face/saliency detection needs
+`onnxruntime-node` and a permissively licensed model shipped in the installer, neither of which
+this build carries. §6.4 permits exactly this fallback, so what exists is the camera path
+(`packages/compositor/src/auto-reframe.ts`): given subject positions it produces the smoothed,
+dead-zoned, pan-limited, reduced keyframes the spec describes, and §6.4's "static centre with the
+user's framing" is the same code with one sample. What does **not** exist is the analysis pass
+that produces those subject positions, and therefore the "Auto-reframe" button itself. The
+geometry is tested; the detector is not built, and saying so is the spec's own instruction.
+
+**Fill lock scope.** SPEC 10 §8.5's cover lock is implemented for the **preview's** move and
 scale gestures, which is where the spec asks for it. The export does not re-apply it: it
 draws whatever the document says, so a project made entirely by editing fractions by hand
 could still be exported with an exposed edge. That is deliberate — the export should render
