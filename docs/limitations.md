@@ -60,9 +60,22 @@ This document tracks architectural scope boundaries and honest limitations per `
 
    What remains is the transport itself. The preview still *seeks* to show a frame
    rather than compositing decoded frames, so scrub responsiveness is bounded by how
-   fast the element can seek, not by how fast frames can be decoded. A true scrubbing
-   cache — decoded frames held in memory and drawn to a canvas — is the remaining
-   idea, and it is a different design rather than a tuning pass.
+   fast the element can seek, not by how fast frames can be decoded.
+
+   Part of that cache now exists, for the timeline rather than the preview. Frames are
+   extracted on demand to `derived/scrub/<mediaId>/`, content-addressed on a 1/10 s
+   grid, scaled to 480 px and pruned to the 240 nearest the playhead — so the filmstrip's
+   tiles each show their own moment instead of one poster repeated (**it drew the same
+   frame on every tile before this**, which made it decorative), and a scrub that passes
+   back over the same frames costs reads rather than ffmpeg runs.
+
+   The preview does not yet *read* those frames: it still seeks its `<video>` elements
+   and draws what the element shows. Wiring the cache into the layer means drawing a
+   frame image while a seek is in flight and swapping to the element when it settles,
+   which changes what the layer element is (an `<img>` layer rather than a `<video>` one)
+   and is a design change rather than a tuning pass. So the remaining gap is narrower
+   than it was and not closed: a paused scrub still waits on a seek, and what the cache
+   bought is the timeline, not the canvas.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.

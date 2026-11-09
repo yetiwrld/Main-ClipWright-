@@ -57,7 +57,15 @@ import {
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { usePlayback } from './use-playback.js';
-import { useMediaPeaks, useMediaThumbnail, drawWaveform, drawThumbnailFilmstrip, selectPeakResolution } from './use-media-assets.js';
+import {
+  useMediaPeaks,
+  useMediaThumbnail,
+  useFilmstripFrames,
+  drawWaveform,
+  drawFilmstripTiles,
+  filmstripTileCount,
+  selectPeakResolution,
+} from './use-media-assets.js';
 
 const HEADER_WIDTH = 184;
 const MIN_PX_PER_SECOND = 0.25;
@@ -1715,23 +1723,41 @@ function ThumbnailFilmstrip({
   sourceDurationUs: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  const thumbUrl = useMediaThumbnail(mediaId, sourceInUs);
+  /*
+    One frame per tile, at the tile's own centre time (SPEC 09 §19). The poster is only
+    the fallback for a tile whose frame has not arrived — a strip that waits for its
+    slowest tile would stay blank for the whole of a scrub, which is exactly when the
+    timeline is being read.
+  */
+  const tileCount = filmstripTileCount(width, height);
+  const frames = useFilmstripFrames(mediaId, sourceInUs, sourceDurationUs, width, height, tileCount);
+  const posterUrl = useMediaThumbnail(mediaId, sourceInUs);
+  const posterRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    if (!posterUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      posterRef.current = img;
+    };
+    img.src = posterUrl;
+  }, [posterUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !thumbUrl) return;
-    const img = new Image();
-    img.onload = () => {
-      imgRef.current = img;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      canvas.width = Math.max(1, Math.floor(width));
-      canvas.height = Math.max(1, Math.floor(height));
-      drawThumbnailFilmstrip(ctx, img, width, height);
-    };
-    img.src = thumbUrl;
-  }, [thumbUrl, width, height]);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    canvas.width = Math.max(1, Math.floor(width));
+    canvas.height = Math.max(1, Math.floor(height));
+    const poster = posterRef.current;
+    drawFilmstripTiles(
+      ctx,
+      (tile) => frames[tile] ?? poster,
+      width,
+      height,
+    );
+  }, [frames, width, height]);
 
   return (
     <canvas

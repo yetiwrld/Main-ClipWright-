@@ -15,6 +15,7 @@ import { Logger } from './storage/logger.js';
 import { SecretStore } from './storage/secret-store.js';
 import { ingestMedia, type IngestRequest } from './media-pipeline.js';
 import { previewSourceFor } from './preview-source.js';
+import { SCRUB_MAX_EDGE_PX, pruneScrubDir, scrubFramePath } from './scrub-frames.js';
 import { runTranscription, type TranscribeJobRequest } from './transcribe-job.js';
 import { ProviderService } from './ai/provider-service.js';
 import { ConsentService } from './ai/consent-service.js';
@@ -590,16 +591,76 @@ function registerIPC(): void {
     }
   });
 
+  /*
+    A frame for the timeline's filmstrip (SPEC 09 §19) *and* the preview's scrub cache
+    (SPEC 10 §5).
+
+    `timeUs` used to be accepted and ignored, so every filmstrip tile drew the poster and
+    a scrub had nothing to read. Now a request past the poster's own instant is extracted
+    on demand and kept on disk, content-addressed on a 1/10 s grid — a scrub asks for the
+    same frames repeatedly as the pointer passes over them, so the second pass is a file
+    read rather than an ffmpeg run.
+
+    Frames go under `derived/scrub/<mediaId>/`, alongside the proxy and the poster, for
+    the same reason those do: derived artefacts can be cleared and regenerated, and are
+    never what an export reads.
+  */
   ipcMain.handle('media:getThumbnail', async (_event, mediaId: string, timeUs: number) => {
     const storage = requireStorage();
     const media = storage.getMedia(mediaId);
     if (!media) throw new Error('Media not found');
-    const { readFile } = await import('node:fs/promises');
-    if (!media.thumbPath) return null;
-    try {
-      const data = await readFile(media.thumbPath);
+    const { readFile, mkdir, readdir, stat, unlink } = await import('node:fs/promises');
+    const { dirname, join } = await import('node:path');
+    const { existsSync } = await import('node:fs');
+
+    const read = async (path: string) => {
+      const data = await readFile(path);
       return { data: data.toString('base64'), mime: 'image/jpeg' };
+    };
+
+    /*
+      The poster first. It is what the library shows, and the first filmstrip tile is
+      almost always the item's in-point, so this is the common request and it costs no
+      extraction at all.
+    */
+    if (!timeUs && media.thumbPath) {
+      try {
+        return await read(media.thumbPath);
+      } catch {
+        // Fall through: a deleted poster is a re-extract, not a failure.
+      }
+    }
+    if (!media.thumbPath) return null;
+    const scrubDir = join(dirname(media.thumbPath), 'scrub', mediaId);
+
+    try {
+      const cached = scrubFramePath(scrubDir, timeUs);
+      if (existsSync(cached)) return await read(cached);
+
+      /* Extracted against the *proxy* when there is one: a scrub frame is 480 px, so
+         decoding 4K to produce it is wasted work the proxy has already done. */
+      const source = media.proxyPath && existsSync(media.proxyPath) ? media.proxyPath : media.path;
+      const target = scrubFramePath(scrubDir, timeUs);
+      await mkdir(scrubDir, { recursive: true });
+      const { extractFrame } = await import('@clipwright/media-core');
+      /*
+        `timeUs` is item-local in the caller's terms, so it is clamped by the *item's*
+        duration there; here it is floored at zero and trusted otherwise. Asking ffmpeg
+        past the end throws rather than writing an empty file.
+      */
+      await extractFrame(source, target, Math.max(0, timeUs) / 1_000_000, SCRUB_MAX_EDGE_PX);
+
+      /*
+        Prune after writing, best-effort. An unbounded cache on a long clip is a
+        disk-fill waiting for a user who scrubs a lot; a failure to prune costs disk,
+        which is better than failing the request that just succeeded.
+      */
+      void pruneScrubDir(scrubDir, timeUs, { readdir, stat }, unlink);
+
+      return await read(target);
     } catch {
+      /* A frame that cannot be extracted is cosmetic, like a missing poster: the
+         filmstrip falls back to the clip colour rather than the preview going blank. */
       return null;
     }
   });

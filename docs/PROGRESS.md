@@ -139,8 +139,9 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — the rest of the snap guides, and a
-decoded-frame scrub cache to replace seeking `<video>`. Canvas drag editing is otherwise
+**1. Finish Phase 4 ⚠️** — the rest of the snap guides, and a preview that *reads* the
+frame cache it now writes instead of seeking `<video>` to show every frame. Canvas drag
+editing is otherwise
 complete, modifiers included, the preview plays proxies, coalesces its seeks, shows its
 compliance overlays, snaps a dragged clip to the canvas and to its neighbours and draws
 a line on what it caught: a

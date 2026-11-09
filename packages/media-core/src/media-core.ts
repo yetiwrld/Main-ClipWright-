@@ -6,7 +6,7 @@ import { spawn, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, statSync, existsSync, readFileSync } from 'node:fs';
 import { mkdir, rename, copyFile, unlink, readFile, writeFile, readdir } from 'node:fs/promises';
-import { basename, join, extname, resolve } from 'node:path';
+import { basename, dirname, join, extname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 export interface MediaInfo {
@@ -574,6 +574,46 @@ export async function generateThumbnail(sourcePath: string, outputDir: string, t
   const result = await runProcess(getFFmpegPath(), args, 60000);
   if (result.exitCode !== 0) {
     throw new Error(`Thumbnail generation failed: ${result.stderr}`);
+  }
+  return outputPath;
+}
+
+/**
+ * Extracts one frame at `timeSec` at a bounded size, for the preview's scrub cache
+ * (SPEC 10 §5).
+ *
+ * `-ss` sits before `-i` so ffmpeg seeks the input rather than decoding up to the
+ * instant from zero: on a ten-minute file that is the difference between one keyframe
+ * and six hundred. The output is scaled down to fit `maxEdgePx`, because a scrub frame
+ * is only ever drawn in a preview panel and a 4K JPEG read off disk would cost more
+ * than the seek it replaced.
+ *
+ * `-update 1` is what lets a single-image output be written to a path that already
+ * exists; without it ffmpeg refuses the second write to the same name. `-y` covers the
+ * case where a previous attempt left a partial file.
+ */
+export async function extractFrame(
+  sourcePath: string,
+  outputPath: string,
+  timeSec: number,
+  maxEdgePx = 480,
+): Promise<string> {
+  await mkdir(dirname(outputPath), { recursive: true });
+  const args = [
+    '-ss', String(Math.max(0, timeSec)),
+    '-i', sourcePath,
+    '-frames:v', '1',
+    '-vf', `scale='min(${maxEdgePx},iw)':'min(${maxEdgePx},ih)':force_original_aspect_ratio=decrease`,
+    '-q:v', '4',
+    '-update', '1',
+    '-hide_banner',
+    '-nostdin',
+    '-y',
+    outputPath,
+  ];
+  const result = await runProcess(getFFmpegPath(), args, 30000);
+  if (result.exitCode !== 0) {
+    throw new Error(`Frame extraction failed: ${result.stderr}`);
   }
   return outputPath;
 }

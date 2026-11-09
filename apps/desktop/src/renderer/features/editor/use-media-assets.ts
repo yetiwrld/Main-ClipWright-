@@ -116,6 +116,99 @@ export function useMediaThumbnail(
 }
 
 /**
+ * Loads one frame per filmstrip tile (SPEC 09 §19), from the scrub cache.
+ *
+ * The strip used to tile a single poster, so every tile showed the same frame and the
+ * strip could not tell a user where a cut lands — the one thing it is for. Each tile now
+ * asks for the frame at its own centre time.
+ *
+ * Requests are made only for tiles that are actually drawn: a ten-minute clip at a
+ * narrow zoom is thousands of tiles, and asking for all of them would be thousands of
+ * extractions for frames off screen. Tiles already loaded are never re-requested, and a
+ * failed one is left to be retried only if the strip is re-measured, because a retry loop
+ * on a file that cannot produce frames would spin forever.
+ */
+export function useFilmstripFrames(
+  mediaId: string | undefined,
+  sourceInUs: number,
+  sourceDurationUs: number,
+  width: number,
+  height: number,
+  tileCount: number,
+): (HTMLImageElement | null)[] {
+  const cacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  /** Keys that returned nothing: not retried, or a broken file spins forever. */
+  const failedRef = useRef<Set<string>>(new Set());
+  /**
+   * Keys with a request in flight.
+   *
+   * Separate from `failedRef` on purpose: marking a key failed before its request
+   * returns would make a frame that is merely slow look permanently unavailable, and the
+   * strip would keep that hole until the component remounted.
+   */
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const [, bump] = useState(0);
+
+  useEffect(() => {
+    if (!mediaId || tileCount <= 0 || width <= 0) return;
+    const bridge = getBridge();
+    if (!bridge) return;
+    let cancelled = false;
+
+    const tileWidth = height * (16 / 9);
+    for (let tile = 0; tile < tileCount; tile += 1) {
+      /*
+        The tile's *centre* time, which is the time the frame represents: at the left edge
+        the tile would show the frame before the cut and at the right the one after.
+      */
+      const centreFraction = Math.min(1, ((tile + 0.5) * tileWidth) / width);
+      const timeUs = Math.round(sourceInUs + centreFraction * sourceDurationUs);
+      const key = `${mediaId}:${timeUs}`;
+      if (cacheRef.current.has(key) || failedRef.current.has(key) || inFlightRef.current.has(key)) {
+        continue;
+      }
+      // Claimed before the await, so a re-render mid-flight does not request it twice.
+      inFlightRef.current.add(key);
+      bridge
+        .getThumbnail(mediaId, timeUs)
+        .then((result) => {
+          if (cancelled) return;
+          if (!result) {
+            failedRef.current.add(key);
+            return;
+          }
+          const img = new Image();
+          img.onload = () => {
+            inFlightRef.current.delete(key);
+            if (cancelled) return;
+            cacheRef.current.set(key, img);
+            bump((value) => value + 1);
+          };
+          img.src = `data:${result.mime};base64,${result.data}`;
+        })
+        .catch(() => {
+          failedRef.current.add(key);
+        })
+        .finally(() => {
+          inFlightRef.current.delete(key);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId, sourceInUs, sourceDurationUs, width, height, tileCount]);
+
+  const tileWidth = height * (16 / 9);
+  const frames: (HTMLImageElement | null)[] = [];
+  for (let tile = 0; tile < Math.max(0, tileCount); tile += 1) {
+    const centreFraction = Math.min(1, ((tile + 0.5) * tileWidth) / Math.max(1, width));
+    const timeUs = Math.round(sourceInUs + centreFraction * sourceDurationUs);
+    frames.push(cacheRef.current.get(`${mediaId}:${timeUs}`) ?? null);
+  }
+  return frames;
+}
+
+/**
  * Draws waveform peaks onto a canvas context. The peaks are drawn as
  * vertical bars (min/max pairs) clipped to the canvas width. Uses the
  * 256-resolution peaks when zoomed out and 4096 when zoomed in.
@@ -160,19 +253,38 @@ export function selectPeakResolution(pxPerSecond: number): '256' | '4096' {
  * filmstrip; when per-time thumbnails are generated, the hook can be
  * extended to fetch them on demand.
  */
-export function drawThumbnailFilmstrip(
+/** How many tiles a strip of this width holds at this height. */
+export function filmstripTileCount(width: number, height: number): number {
+  const tileWidth = height * (16 / 9);
+  return Math.max(1, Math.ceil(width / tileWidth));
+}
+
+/**
+ * Draws a filmstrip, one image per tile (SPEC 09 §19's "one per filmstrip tile, at the
+ * source time of the tile's centre").
+ *
+ * `imageAt` is asked per tile rather than a single poster being repeated, because a strip
+ * of the same frame tiled across a ten-second clip tells the user nothing about where a
+ * cut lands — which is the only reason a filmstrip exists. Tiles whose image is missing
+ * or not loaded are skipped, leaving the clip colour underneath: a strip that fills in
+ * progressively is better than one that waits for its slowest frame.
+ */
+export function drawFilmstripTiles(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  imageAt: (tile: number) => HTMLImageElement | null,
   width: number,
   height: number,
 ): void {
-  if (!img.complete || img.naturalWidth === 0) return;
   const tileWidth = height * (16 / 9);
-  const tileHeight = height;
   let x = 0;
+  let tile = 0;
   while (x < width) {
     const drawWidth = Math.min(tileWidth, width - x);
-    ctx.drawImage(img, x, 0, drawWidth, tileHeight);
+    const img = imageAt(tile);
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, x, 0, drawWidth, height);
+    }
     x += tileWidth;
+    tile += 1;
   }
 }
