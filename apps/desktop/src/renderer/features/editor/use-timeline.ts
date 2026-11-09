@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ICON_LIBRARY, resolveIconItem } from '@clipwright/compositor';
 import {
   CompositionPayloadSchema,
   type CompositionRecord,
@@ -246,6 +247,15 @@ export interface TimelineApi {
   addText: (text: string) => boolean;
   /** Add a shape at the playhead (SPEC 11 §12). */
   addShape: (kind: NonNullable<TimelineItem['shapeKind']>) => boolean;
+  /**
+   * Add a Lucide icon at the playhead (SPEC 11 §12).
+   *
+   * A separate method rather than an overload of `addShape`, because they are different
+   * questions: one names a kind this build draws, the other a name the icon library may or
+   * may not have. Returns false when the icon does not resolve, so a caller can say so
+   * instead of appearing to succeed and drawing nothing.
+   */
+  addIcon: (iconName: string) => boolean;
   /** Toggle one editing flag on the composition (SPEC 09 §9.6). */
   setToggle: (patch: Partial<NonNullable<TimelineState['toggles']>>) => boolean;
   /**
@@ -765,6 +775,18 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         const id = nextId('shp');
         return run('Add shape', (s) =>
           addShapeItem(s, { id, shapeKind: kind, startUs: playheadStore.get(), fps })
+        );
+      },
+      addIcon: (iconName) => {
+        /*
+          Checked before the command runs, so an icon this build cannot draw is a refusal the
+          caller can report rather than an item that exists, is selectable, and paints nothing.
+          The same `resolveIconItem` the two renderers use — one answer to "does this draw".
+        */
+        if (resolveIconItem({ iconName }, ICON_LIBRARY).status !== 'drawn') return false;
+        const id = nextId('ico');
+        return run('Add icon', (s) =>
+          addShapeItem(s, { id, iconName, startUs: playheadStore.get(), fps })
         );
       },
       /*

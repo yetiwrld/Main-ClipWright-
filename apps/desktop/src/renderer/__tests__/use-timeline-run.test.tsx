@@ -205,3 +205,54 @@ describe('caption regeneration is gated by the document (SPEC 11 §9)', () => {
     expect(result.current.linkedToTranscript).toBe(false);
   });
 });
+
+describe('adding an icon (SPEC 11 §12)', () => {
+  it('adds a drawable icon as an undoable item', async () => {
+    const { result } = await loaded();
+    const before = Object.keys(result.current.state?.items ?? {}).length;
+    let answer: boolean | undefined;
+    act(() => {
+      answer = result.current.addIcon('star');
+    });
+    expect(answer).toBe(true);
+    expect(Object.keys(result.current.state?.items ?? {}).length).toBe(before + 1);
+    const item = Object.values(result.current.state?.items ?? {}).find(
+      (candidate) => candidate.iconName === 'star',
+    );
+    expect(item).toBeDefined();
+    // No `shapeKind`: the renderers branch on that to ask the icon library.
+    expect(item?.shapeKind).toBeUndefined();
+    expect(result.current.canUndo).toBe(true);
+    // The journal, or a crash between the edit and the autosave loses it.
+    expect(appendJournal).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an icon this build cannot draw, rather than adding one that paints nothing', async () => {
+    /*
+      The failure this guards: an item is created, the timeline draws its chip, the user
+      selects and moves it, and no renderer ever produces a pixel — in the editor *and* in
+      the export. `gift` is a real Lucide icon whose ribbon is an elliptical arc, which this
+      build refuses by name; it must be refused *here*, before the item exists.
+    */
+    const { result } = await loaded();
+    const before = Object.keys(result.current.state?.items ?? {}).length;
+    let answer: boolean | undefined;
+    act(() => {
+      answer = result.current.addIcon('gift');
+    });
+    expect(answer).toBe(false);
+    expect(Object.keys(result.current.state?.items ?? {}).length).toBe(before);
+    expect(result.current.canUndo).toBe(false);
+    expect(appendJournal).not.toHaveBeenCalled();
+  });
+
+  it('refuses a name that is not in the library', async () => {
+    const { result } = await loaded();
+    let answer: boolean | undefined;
+    act(() => {
+      answer = result.current.addIcon('no-such-icon');
+    });
+    expect(answer).toBe(false);
+    expect(result.current.canUndo).toBe(false);
+  });
+});

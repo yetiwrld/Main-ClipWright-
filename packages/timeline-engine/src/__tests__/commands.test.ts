@@ -2395,6 +2395,37 @@ describe('addShapeItem (SPEC 11 §12)', () => {
     expect(undone.items['s']).toBeUndefined();
     expect(undone.tracks.some((track) => track.name === 'Graphics')).toBe(false);
   });
+
+  it('creates an icon item from a name', () => {
+    /*
+      An icon is a shape item with `iconName` instead of `shapeKind`: same track, same draw
+      order, same export path. The item must carry the name and *not* a kind, because the
+      renderers branch on exactly that to decide whether to ask the icon library.
+    */
+    const result = addShapeItem(base(), { id: 'ico', iconName: 'star', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const item = result.state.items['ico'];
+    expect(item?.iconName).toBe('star');
+    expect(item?.shapeKind).toBeUndefined();
+    // The chip has to name the icon, or a row of icons is unreadable.
+    expect(item?.label).toBe('Star');
+  });
+
+  it('refuses an icon item that is given both a kind and a name, or neither', () => {
+    /*
+      Refused rather than resolved by precedence: an item with both leaves two renderers free
+      to disagree about which wins, and an item with neither is an item that draws nothing.
+    */
+    expect(addShapeItem(base(), { id: 'a', shapeKind: 'rect', iconName: 'star', startUs: 0, fps: 30 })).toMatchObject({ ok: false });
+    expect(addShapeItem(base(), { id: 'b', startUs: 0, fps: 30 })).toMatchObject({ ok: false });
+  });
+
+  it('accepts stored icon shapes, so the file can carry its own geometry', () => {
+    const shapes = [{ t: 'path' as const, d: 'M0 0 L24 0 L12 24 Z' }];
+    const result = addShapeItem(base(), { id: 'ico', iconName: 'custom', iconShapes: shapes, startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.items['ico']?.iconShapes).toEqual(shapes);
+  });
 });
 
 describe('linked selection (SPEC 09 §9.6)', () => {

@@ -107,6 +107,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     addAdjustmentLayer: vi.fn(() => true),
     addText: vi.fn(() => true),
     addShape: vi.fn(() => true),
+    addIcon: vi.fn(() => true),
     setToggle: vi.fn(() => true),
     toggleFlag: vi.fn(() => true),
     regenerateCaptionsFromTranscript: vi.fn(async () => true),
@@ -476,6 +477,24 @@ describe('timeline panel', () => {
     fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
     fireEvent.click(screen.getByText('Add shape'));
     expect(timeline.addShape).toHaveBeenCalledWith('rect');
+  });
+
+  it('the context menu adds an icon', () => {
+    /*
+      Reachability, and the reason this test exists at all: `iconName` was in the schema, the
+      renderers and the exporter grew support for it — and nothing in the UI could set it. A
+      feature with no control is indistinguishable from one that was never built, and this
+      project has shipped that mistake more than once.
+    */
+    const state = fixture();
+    const timeline = fakeTimeline(state);
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    fireEvent.click(screen.getByText('Add icon'));
+    // A visible default rather than a picker first: the user gets an item they can see and
+    // then chooses which icon, the same reasoning as the placeholder text on a new title.
+    expect(timeline.addIcon).toHaveBeenCalledWith('star');
   });
 
   it('shows and flips the fill lock (SPEC 10 §8.5)', () => {

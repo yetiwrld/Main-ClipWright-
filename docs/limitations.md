@@ -443,3 +443,8 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
+13. **There is no icon picker dialog.** The context menu adds a star, and the item stores its
+    name, but choosing a different icon needs the picker UI that `searchIconLibrary` was built
+    for. The search, the drawable-only list and the geometry are all in place and tested; what
+    is missing is the panel. Until it exists, an icon cannot be changed after it is added
+    except by editing the project file.

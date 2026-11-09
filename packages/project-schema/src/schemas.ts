@@ -253,7 +253,48 @@ export const TimelineItemSchema = z
     shapeKind: z
       .enum(['rect', 'round-rect', 'ellipse', 'triangle', 'polygon', 'star', 'line', 'arrow', 'bubble'])
       .optional(),
+    /*
+      SPEC 11 §12 — an icon item names a Lucide icon rather than carrying its geometry.
+      `iconName` is the normal case and is what the picker writes: the library ships with
+      the build, so the name is enough and two projects using the same icon share nothing.
+      `iconShapes` is the escape hatch for a file opened by a build whose Lucide set is
+      older or newer than the one that saved it — without it, an icon added in a future
+      version would draw nothing, silently. Named shapes win over the library when both
+      are present, because the stored geometry is what the file says the icon *was*.
+    */
     iconName: z.string().optional(),
+    iconShapes: z
+      .array(
+        z.discriminatedUnion('t', [
+          z.object({ t: z.literal('path'), d: z.string() }),
+          z.object({ t: z.literal('circle'), cx: z.number(), cy: z.number(), r: z.number() }),
+          z.object({
+            t: z.literal('rect'),
+            x: z.number(),
+            y: z.number(),
+            w: z.number(),
+            h: z.number(),
+            rx: z.number().optional(),
+          }),
+          z.object({
+            t: z.literal('line'),
+            x1: z.number(),
+            y1: z.number(),
+            x2: z.number(),
+            y2: z.number(),
+          }),
+          z.object({ t: z.literal('polyline'), points: z.string() }),
+          z.object({ t: z.literal('polygon'), points: z.string() }),
+          z.object({
+            t: z.literal('ellipse'),
+            cx: z.number(),
+            cy: z.number(),
+            rx: z.number(),
+            ry: z.number(),
+          }),
+        ])
+      )
+      .optional(),
     aiProvenance: z
       .object({
         tool: z.string(),

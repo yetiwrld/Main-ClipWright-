@@ -506,6 +506,59 @@ describe('painting a shape (SPEC 11 §12)', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('paints an icon item through the same path a shape takes (SPEC 11 §12)', () => {
+    /*
+      The claim this feature rests on: an icon is geometry in the 100-box, so the *existing*
+      painter draws it and no renderer learns that icons exist. If this ever needed its own
+      drawing code, the preview and the export would be two implementations again.
+    */
+    const { ctx, calls } = recordingContext();
+    const painted = paintShape(ctx, { type: 'shape', iconName: 'star', startUs: 0, durationUs: 1 }, '#4ADE80', 1920, 1080);
+    expect(painted).toBe(true);
+    expect(calls.some((call) => call.op === 'bezierCurveTo')).toBe(true);
+    // Filled with the same colour a built-in shape would use.
+    expect(ctx.fillStyle).toBe('#4ADE80');
+    // And in the frame, not in the corner: the default box is the middle half of the canvas.
+    const points = calls
+      .filter((call) => call.op === 'moveTo' || call.op === 'lineTo' || call.op === 'bezierCurveTo')
+      .flatMap((call) => {
+        const args = call.args as number[];
+        return [[args[0]!, args[1]!], [args[args.length - 2]!, args[args.length - 1]!]];
+      });
+    const xs = points.map(([x]) => x!);
+    expect(Math.min(...xs)).toBeGreaterThan(100);
+    expect(Math.max(...xs)).toBeLessThan(1820);
+  });
+
+  it('paints nothing for an icon this build cannot draw, exactly as for an unknown kind', () => {
+    // `gift` is refused for an elliptical arc. Returning false rather than drawing an
+    // approximation is what makes the two renderers agree about what a file contains.
+    const { ctx, calls } = recordingContext();
+    const painted = paintShape(ctx, { type: 'shape', iconName: 'gift', startUs: 0, durationUs: 1 }, '#FFF', 1920, 1080);
+    expect(painted).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('paints an icon from stored shapes when the library has no such name', () => {
+    // The escape hatch: a file written by a build with a different icon set still renders.
+    const { ctx, calls } = recordingContext();
+    const painted = paintShape(
+      ctx,
+      {
+        type: 'shape',
+        iconName: 'not-in-this-build',
+        iconShapes: [{ t: 'path', d: 'M0 0 L24 0 L12 24 Z' }],
+        startUs: 0,
+        durationUs: 1,
+      },
+      '#FFF',
+      1000,
+      1000,
+    );
+    expect(painted).toBe(true);
+    expect(calls.some((call) => call.op === 'closePath')).toBe(true);
+  });
+
   it('restores the context even though it changed the fill', () => {
     // Leaking a fill colour into the text pass would paint every caption in the shape's
     // colour — a bug that reads as a styling problem, not a drawing-order one.

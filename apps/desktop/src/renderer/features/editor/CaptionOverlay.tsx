@@ -13,7 +13,7 @@ import { captionItemAt, captionFrameAt, type CaptionWordTiming } from '@clipwrig
 import type { TimelineState } from '@clipwright/timeline-engine';
 import { canvasMeasure, paintCaptionFrame } from './caption-painter.js';
 import { textFrameAt, type GraphicItemLike } from './graphics.js';
-import { shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
+import { ICON_LIBRARY, resolveIconItem, shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
 import { usePlayheadUs } from './playhead-store.js';
 
 /** The words of a caption that are actually visible, with their timings. */
@@ -135,7 +135,19 @@ export function paintShape(
   width: number,
   height: number
 ): boolean {
-  const geometry = shapeGeometry(shape.shapeKind);
+  /*
+    An icon is painted by the *same* loop as a built-in shape, because it is the same kind of
+    thing: subpaths in the 100-box. The only difference is where the subpaths come from — a
+    built-in kind looks them up, an icon resolves a name or stored children. Returning false
+    for an icon that does not resolve is the same answer as an unknown kind, so the caller has
+    one thing to handle rather than two.
+  */
+  const geometry = shape.iconName || shape.iconShapes?.length
+    ? (() => {
+        const resolved = resolveIconItem(shape, ICON_LIBRARY);
+        return resolved.status === 'drawn' ? resolved.subpaths : null;
+      })()
+    : shapeGeometry(shape.shapeKind);
   if (!geometry) return false;
   const box = shapeBoxAt((shape as { transform?: { x?: number; y?: number; scaleX?: number; scaleY?: number } }).transform);
   const toPx = (x: number, y: number): [number, number] => [

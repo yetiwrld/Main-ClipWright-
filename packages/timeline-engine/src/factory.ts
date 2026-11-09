@@ -284,6 +284,64 @@ export function createShapeItem(params: CreateShapeItemParams): TimelineItem {
   }) as TimelineItem;
 }
 
+/**
+ * An icon item (SPEC 11 §12), which is a shape item that names a Lucide icon.
+ *
+ * Stored as `type: 'shape'` with `iconName` set rather than a new item type, deliberately:
+ * an icon is drawn by the same code as a rectangle — same box, same fill, same transform, same
+ * export path — and a separate `type` would have meant a case in every switch that already
+ * handles shapes, including the ones in the exporter that would silently drop it.
+ *
+ * `iconShapes` is optional and is written by the caller when it wants the file to carry the
+ * geometry, so a project opened by a build with a different icon set still draws what it did.
+ */
+export interface CreateIconItemParams {
+  id?: string;
+  trackId: string;
+  startUs: number;
+  durationUs: number;
+  /** Lucide's kebab-case name, e.g. `star`. */
+  iconName: string;
+  /** The icon's children, if the file should not depend on this build's library. */
+  iconShapes?: TimelineItem['iconShapes'];
+  label?: string;
+  styleId?: string;
+}
+
+export function createIconItem(params: CreateIconItemParams): TimelineItem {
+  return TimelineItemSchema.parse({
+    id: params.id ?? nextId('ico'),
+    trackId: params.trackId,
+    type: 'shape',
+    startUs: params.startUs,
+    durationUs: params.durationUs,
+    label: params.label ?? ICON_LABEL(params.iconName),
+    disabled: false,
+    opacity: 1,
+    blendMode: 'normal',
+    transform: { x: 0, y: 0, scale: 1 },
+    crop: {},
+    keyframes: {},
+    effects: [],
+    iconName: params.iconName,
+    ...(params.iconShapes ? { iconShapes: params.iconShapes } : {}),
+    captionStyleId: params.styleId,
+  }) as TimelineItem;
+}
+
+/**
+ * The timeline chip for an icon: its name in words.
+ *
+ * `star` becomes `Star`, `arrow-up-right` becomes `Arrow up right`. The timeline shows this
+ * rather than an id, for the same reason a text item shows its text — "Icon 1, Icon 2" tells
+ * a user nothing about which is which.
+ */
+export function ICON_LABEL(iconName: string): string {
+  const words = iconName.replace(/[-_]+/g, ' ').trim();
+  if (words.length === 0) return 'Icon';
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** Human names for the shape kinds, so the timeline does not show "round-rect". */
 export const SHAPE_LABELS: Readonly<Record<string, string>> = {
   rect: 'Rectangle',

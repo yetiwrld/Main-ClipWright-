@@ -19,12 +19,15 @@
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import type { TimelineItem } from '@clipwright/project-schema';
 import {
+  ICON_LIBRARY,
   SHAPE_KINDS,
   captionFrameAt,
   layoutText,
   shapeBoxAt,
+  resolveIconItem,
   shapeGeometry,
   shapePath,
+  type IconShape,
   type ShapeBoxPercent,
   type CaptionFrame,
   type MeasureText,
@@ -38,6 +41,10 @@ export interface GraphicItemLike {
   type?: string;
   textContent?: string;
   shapeKind?: string;
+  /** Lucide name, for an icon item (SPEC 11 §12). */
+  iconName?: string;
+  /** Stored children, when the file carries its own copy of the icon. */
+  iconShapes?: readonly IconShape[];
   startUs: number;
   durationUs: number;
 }
@@ -57,7 +64,17 @@ export function isGraphicItem(item: { type?: string }): boolean {
  */
 export function hasGraphicContent(item: GraphicItemLike): boolean {
   if (item.type === 'text') return (item.textContent ?? '').trim().length > 0;
-  if (item.type === 'shape') return shapePath(item.shapeKind) !== null;
+  if (item.type === 'shape') {
+    /*
+      An icon item has no `shapeKind`: it is a shape whose geometry comes from the icon
+      library. It is drawable when it resolves — the same question `paintShape` asks — so the
+      two can never disagree about whether there is something to draw.
+    */
+    if (item.iconName || item.iconShapes?.length) {
+      return resolveIconItem(item, ICON_LIBRARY).status === 'drawn';
+    }
+    return shapePath(item.shapeKind) !== null;
+  }
   return false;
 }
 

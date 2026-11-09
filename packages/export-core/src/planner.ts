@@ -6,6 +6,7 @@
  * items are active, the audio graph, and the output parameters.
  */
 
+import type { IconShape } from '@clipwright/compositor';
 import type { ExportPresetId, OutputFormatId, QualityPresetId, RateControlMode, AudioBitrate, ExportFps } from './presets.js';
 import { computeResolution } from './presets.js';
 
@@ -52,6 +53,15 @@ export interface PlannedItem {
   textContent?: string;
   /** A `shape` item's geometry kind (SPEC 11 §12). */
   shapeKind?: string;
+  /**
+   * An icon item's Lucide name and, when the file carries it, its own geometry (§12).
+   *
+   * Both have to survive the plan: an icon item has no `shapeKind`, so a plan that copied
+   * only that field would turn every icon into an empty shape between the project file and
+   * the burn-in.
+   */
+  iconName?: string;
+  iconShapes?: readonly IconShape[];
   /**
    * The caption's full segment: word timings for karaoke, overrides, speaker.
    * Absent for a caption typed into a build that did not store one.
@@ -265,6 +275,9 @@ export interface ExportSettings {
     textContent?: string;
     /** A `shape` item's geometry kind (SPEC 11 §12), for the ASS drawing pass. */
     shapeKind?: string;
+    /** An icon item's name and stored geometry (§12). */
+    iconName?: string;
+    iconShapes?: readonly IconShape[];
     /** Keyframed properties, so an animated item can be segmented. */
     keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
     /** Crop and transform, so the decoded frame matches the preview. */
@@ -363,6 +376,8 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         captionStyleId: item.captionStyleId,
         textContent: item.textContent,
         shapeKind: item.shapeKind,
+        iconName: item.iconName,
+        iconShapes: item.iconShapes,
         geometry: item.geometry,
         keyframes: item.keyframes,
         opacity: item.opacity,

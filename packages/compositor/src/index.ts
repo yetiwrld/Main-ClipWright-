@@ -198,3 +198,40 @@ export {
   type ShapeSegment,
   type ShapeSubpath,
 } from './shapes';
+
+/**
+ * SPEC 11 §12 — the offline icon set.
+ *
+ * Geometry only: an icon is a `ShapeSubpath[]` in the same 100-box a rectangle is drawn in,
+ * so `shapePath`, `paintShape` and `assShapeDrawing` draw one without knowing icons exist.
+ * The library is bundled data, never a network fetch.
+ */
+export {
+  ICON_VIEWBOX,
+  arcsAreCircular,
+  circularArcToCubics,
+  drawableIconNames,
+  hasArcCommand,
+  iconAppearanceKey,
+  iconGeometry,
+  iconLibraryFromStored,
+  pathToSubpaths,
+  resolveIconItem,
+  searchIcons,
+  supportedPathCommands,
+  tokenisePath,
+  type CubicSegment,
+  type IconDefinition,
+  type IconGeometryResult,
+  type IconItemResolution,
+  type IconShape,
+  type StoredIconChild,
+  type StoredIconLibrary,
+} from './icons.js';
+
+export {
+  ICON_COUNT,
+  ICON_LIBRARY,
+  ICON_NAMES,
+  searchIconLibrary,
+} from './icon-library.js';

@@ -60,6 +60,29 @@ describe('which items this module draws', () => {
     expect(hasGraphicContent(textItem('\n\t '))).toBe(false);
   });
 
+  it('draws an icon only when this build can resolve it (SPEC 11 §12)', () => {
+    /*
+      An icon item is a shape with no `shapeKind`, so the "does it draw" question has to ask
+      the icon library. Answering it any other way — presence of `iconName`, say — would put a
+      tile in the timeline that paints nothing, which is the failure this project keeps
+      having to remove.
+    */
+    const icon = (patch: Record<string, unknown>) => ({
+      type: 'shape',
+      startUs: 0,
+      durationUs: 1,
+      ...patch,
+    });
+    expect(hasGraphicContent(icon({ iconName: 'star' }))).toBe(true);
+    // Refused by name: `gift`'s ribbon is an elliptical arc.
+    expect(hasGraphicContent(icon({ iconName: 'gift' }))).toBe(false);
+    expect(hasGraphicContent(icon({ iconName: 'no-such-icon' }))).toBe(false);
+    // Stored shapes are enough on their own, with no name at all — the escape hatch for a
+    // file written by a build with a different icon set.
+    expect(hasGraphicContent(icon({ iconShapes: [{ t: 'path', d: 'M0 0 L24 0' }] }))).toBe(true);
+    expect(hasGraphicContent(icon({ iconShapes: [] }))).toBe(false);
+  });
+
   it('draws a text item with content', () => {
     expect(hasGraphicContent(textItem('Hello'))).toBe(true);
   });

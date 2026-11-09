@@ -31,6 +31,7 @@ import {
   BarChart3,
   SlidersHorizontal,
   Square,
+  Star,
   Type,
   Link2,
   Frame,
@@ -1654,6 +1655,19 @@ function emptyMenuItems(
       label: 'Add shape',
       icon: <Square size={14} />,
       onSelect: () => timeline.addShape('rect'),
+    },
+    /*
+      Icons sit beside shapes because they are the same kind of item — geometry on a graphics
+      track — and because an icon that only existed in the schema would be exactly the kind of
+      decorative field this project has had to remove before. `star` is the default rather
+      than a dialog: the user gets a visible item immediately and picks the icon afterwards,
+      which is the same reasoning as the placeholder text on a new title.
+    */
+    {
+      id: 'add-icon',
+      label: 'Add icon',
+      icon: <Star size={14} />,
+      onSelect: () => timeline.addIcon('star'),
     },
     {
       id: 'add-adjustment',

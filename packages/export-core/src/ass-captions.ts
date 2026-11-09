@@ -16,7 +16,14 @@
  * ffmpeg and diffable when a style changes.
  */
 import type { CaptionStyle } from '@clipwright/caption-styles';
-import { shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
+import {
+  ICON_LIBRARY,
+  resolveIconItem,
+  shapeBoxAt,
+  shapeGeometry,
+  type IconShape,
+  type ShapeSubpath,
+} from '@clipwright/compositor';
 import { assShapeDrawing, assShapeOverride } from './ass-shapes.js';
 
 /** One word with its timing, as ASS karaoke needs it. */
@@ -40,7 +47,14 @@ export interface AssCue {
    * a stray label would render as a scribble.
    */
   shape?: {
-    kind: string;
+    /*
+      The geometry itself, not a kind to look up later. An icon item (SPEC 11 §12) has no
+      `shapeKind` — its geometry comes from the icon library — and carrying a kind meant the
+      exporter had to know how to resolve one, then silently dropped the item when it could
+      not. Resolving where the cue is *made* means this serialiser has exactly one input shape
+      and cannot be the place where an icon goes missing from a render.
+    */
+    geometry: ShapeSubpath[];
     /** Box in percent of frame, from the item's transform. */
     box: { x: number; y: number; width: number; height: number };
   };
@@ -71,6 +85,21 @@ export interface AssScriptOptions {
  * in `.cwstyle` files, which means an id with a comma is a real possibility and
  * would silently break every `Dialogue` line that referenced it.
  */
+/**
+ * Geometry for a shape-or-icon item, or `null` when this build cannot draw it.
+ *
+ * One function so the preview and the export ask the identical question. The preview calls
+ * `resolveIconItem` too; if the two had their own idea of whether an icon draws, one of them
+ * would show a tile the other dropped.
+ */
+function itemGeometry(item: { shapeKind?: string; iconName?: string; iconShapes?: readonly IconShape[] }): ShapeSubpath[] | null {
+  if (item.iconName || (item.iconShapes && item.iconShapes.length > 0)) {
+    const resolved = resolveIconItem(item, ICON_LIBRARY);
+    return resolved.status === 'drawn' ? resolved.subpaths : null;
+  }
+  return shapeGeometry(item.shapeKind);
+}
+
 export function assStyleName(styleId: string): string {
   return `cw-${styleId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 }
@@ -270,10 +299,10 @@ export function assDialogue(cue: AssCue, options: AssScriptOptions): string {
     absolute coordinates.
   */
   if (cue.shape) {
-    const geometry = shapeGeometry(cue.shape.kind);
-    // An unknown kind draws nothing rather than a rectangle: the file says something
-    // this build cannot draw, and a substitute would be a lie about its content.
-    if (!geometry) return '';
+    const geometry = cue.shape.geometry;
+    // No geometry means the caller already decided nothing can be drawn, and a rectangle
+    // substitute would be a lie about the file's content.
+    if (geometry.length === 0) return '';
     const box = {
       x: (cue.shape.box.x / 100) * options.width,
       y: (cue.shape.box.y / 100) * options.height,
@@ -437,14 +466,22 @@ export function assCuesFromPlan(
       field the style editor does not know about.
     */
     if (item.type === 'shape') {
-      if (!item.shapeKind) continue;
+      const geometry = itemGeometry(item);
+      /*
+        An item whose geometry does not resolve is skipped *silently* here, which needs the
+        reason written down. It is not silence: `itemGeometry` is the same resolution the
+        preview paints with, so an icon that cannot draw is absent from the editor too — the
+        user sees it missing where they added it rather than discovering it in the export. A
+        burn-in that invented a placeholder would hide the problem instead.
+      */
+      if (!geometry) continue;
       cues.push({
         startUs: item.startUs - plan.rangeStartUs,
         endUs: item.startUs - plan.rangeStartUs + item.durationUs,
         // Drawing mode treats every character as geometry, so the body is empty.
         text: '',
         styleId: item.captionStyleId,
-        shape: { kind: item.shapeKind, box: shapeBoxAt(item.geometry?.transform) },
+        shape: { geometry, box: shapeBoxAt(item.geometry?.transform) },
       });
       continue;
     }

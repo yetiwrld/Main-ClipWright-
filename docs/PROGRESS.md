@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `39aa73b`. 2883 automated tests, all passing.
+Last updated after commit `3ac8481`. 2928 automated tests, all passing.
 
 ---
 
@@ -214,7 +214,11 @@ construction rather than by a second implementation that has to be kept in step.
 **Shapes now draw too**, in both the preview and the file: one geometry in the
 compositor with an SVG serialiser for the canvas and an ASS drawing serialiser for the
 burn-in. Before that they were invisible in both, which is worth knowing because the
-docs had claimed otherwise for one commit. The style editor's **colour pickers and anchor grid are in**:
+docs had claimed otherwise for one commit. **Icons are in** (SPEC 11 §12): the whole
+Lucide set ships offline as data, converted to the same geometry a rectangle is drawn
+from, so an icon needs no renderer of its own. 1541 of Lucide's 1555 icons convert; the
+14 that use a genuinely elliptical arc are refused by name rather than drawn
+approximately, and the picker does not offer them. Adding one is a context-menu entry. The style editor's **colour pickers and anchor grid are in**:
 colours are hex-only (no eyedropper, recorded as a limitation), and the nine-cell
 anchor grid is a real control rather than a display — it had to be added alongside a
 fix, because the horizontal half of a caption's anchor was dead code in the layout
@@ -262,7 +266,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 2883 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 2928 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

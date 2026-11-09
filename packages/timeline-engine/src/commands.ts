@@ -20,7 +20,7 @@ import type { CaptionSegment, Marker } from '@clipwright/project-schema/schemas'
 type CaptionWordRef = CaptionSegment['wordRefs'][number];
 import { frameDurationUs, quantizeUs, type Fps } from './time';
 import { itemEndUs, projectDurationUs, snapPoints, sortedItemsOfTrack, tracksInDrawOrder } from './selectors';
-import { createCaptionItem, createShapeItem, createTextItem } from './factory';
+import { createCaptionItem, createIconItem, createShapeItem, createTextItem } from './factory';
 
 /**
  * How long a new text item or shape lasts (SPEC 11 §7 — "3 s default").
@@ -1468,7 +1468,18 @@ export function addShapeItem(
   state: TimelineState,
   params: {
     id: string;
-    shapeKind: NonNullable<TimelineItem['shapeKind']>;
+    /**
+     * A built-in kind, or — when `iconName` is given instead — omitted.
+     *
+     * Union rather than two more optional fields, so the command cannot be called with
+     * neither and produce an item that draws nothing. An icon item has no `shapeKind`: its
+     * geometry comes from the icon library (SPEC 11 §12).
+     */
+    shapeKind?: NonNullable<TimelineItem['shapeKind']>;
+    /** A Lucide icon name; mutually exclusive with `shapeKind`. */
+    iconName?: string;
+    /** The icon's children, when the file should carry its own copy. */
+    iconShapes?: TimelineItem['iconShapes'];
     startUs: number;
     durationUs?: number;
     fps: Fps;
@@ -1477,6 +1488,15 @@ export function addShapeItem(
   },
 ): CommandResult & { trackId?: string } {
   if (state.items[params.id]) return fail('invalid', 'That item already exists.');
+  const isIcon = params.iconName !== undefined;
+  if (isIcon === (params.shapeKind !== undefined)) {
+    /*
+      Refused rather than resolved by precedence. An item with both would leave two
+      renderers free to disagree about which wins, and an item with neither is an item
+      that draws nothing — the silent failure this whole feature is built to avoid.
+    */
+    return fail('invalid', 'Give either a shape kind or an icon name.');
+  }
   const durationUs = params.durationUs ?? DEFAULT_TEXT_DURATION_US;
   if (durationUs < frameDurationUs(params.fps)) {
     return fail('too_short', 'A shape must be at least one frame long.');
@@ -1514,14 +1534,24 @@ export function addShapeItem(
         auto: false,
       } as (typeof draft.tracks)[number]);
     }
-    const item = createShapeItem({
-      id: params.id,
-      trackId,
-      startUs,
-      durationUs,
-      shapeKind: params.shapeKind,
-      styleId: params.styleId,
-    });
+    const item = isIcon
+      ? createIconItem({
+          id: params.id,
+          trackId,
+          startUs,
+          durationUs,
+          iconName: params.iconName!,
+          ...(params.iconShapes ? { iconShapes: params.iconShapes } : {}),
+          styleId: params.styleId,
+        })
+      : createShapeItem({
+          id: params.id,
+          trackId,
+          startUs,
+          durationUs,
+          shapeKind: params.shapeKind!,
+          styleId: params.styleId,
+        });
     draft.items[item.id] = item;
     addToTrack(draft, trackId, item.id);
   });

@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_STYLES, builtInStyle, type CaptionStyle } from '@clipwright/caption-styles';
+import { buildExportPlan } from '../planner.js';
 import {
   assAlignment,
   assColour,
@@ -512,7 +513,9 @@ describe('text items burn in (SPEC 11 §7)', () => {
       ])
     );
     expect(cues.map((cue) => cue.text)).toEqual(['a caption', 'Chapter One', '']);
-    expect(cues[2]!.shape?.kind).toBe('rect');
+    // The cue carries geometry, not a kind: a rectangle is a closed subpath in the 100-box.
+    expect(cues[2]!.shape?.geometry).toHaveLength(1);
+    expect(cues[2]!.shape?.geometry[0]?.closed).toBe(true);
   });
 
   it('does not read caption text off a title, or the reverse', () => {
@@ -559,7 +562,12 @@ describe('a shape becomes a drawing, not text (SPEC 11 §12)', () => {
   it('emits a cue for a shape', () => {
     const cues = assCuesFromPlan(plan([shape()]));
     expect(cues).toHaveLength(1);
-    expect(cues[0]!.shape?.kind).toBe('rect');
+    /*
+      Geometry rather than a kind, so the serialiser has nothing left to look up. That is what
+      lets an icon — which has no `shapeKind` at all — take the same path, instead of being
+      dropped by a `if (!item.shapeKind) continue` that looked correct.
+    */
+    expect(cues[0]!.shape?.geometry.length).toBeGreaterThan(0);
   });
 
   it('carries the box from the item\'s transform', () => {
@@ -618,13 +626,98 @@ describe('a shape becomes a drawing, not text (SPEC 11 §12)', () => {
   });
 
   it('draws nothing for a shape kind this build cannot render', () => {
-    // A newer file. A rectangle would be a claim about content the file does not have.
-    const [cue] = assCuesFromPlan(plan([shape({ shapeKind: 'hexagon-hollow' })]));
-    expect(assDialogue(cue!, options)).toBe('');
+    /*
+      A newer file. A rectangle would be a claim about content the file does not have.
+
+      The check moved earlier: the cue is now built with its geometry resolved, so an
+      undrawable shape produces no cue rather than a cue the serialiser returns `''` for. The
+      observable result is the same — nothing in the script — and this asserts the result
+      rather than which function dropped it.
+    */
+    const cues = assCuesFromPlan(plan([shape({ shapeKind: 'hexagon-hollow' })]));
+    expect(cues).toHaveLength(0);
+    // And no cue is ever built with empty geometry, which would serialise to a bare
+    // `Dialogue:` line: a blank cue in the script that costs a render and shows nothing.
+    expect(cues.every((cue) => cue.shape === undefined || cue.shape.geometry.length > 0)).toBe(true);
   });
 
-  it('skips a shape with no kind at all', () => {
+  it('skips a shape with no kind and no icon at all', () => {
     expect(assCuesFromPlan(plan([shape({ shapeKind: undefined })]))).toHaveLength(0);
+  });
+
+  it('burns an icon item in as a drawing, though it has no shapeKind (SPEC 11 §12)', () => {
+    /*
+      The bug this exists for: an icon item is a shape with `iconName` and no `shapeKind`, and
+      the shape branch began `if (!item.shapeKind) continue` — so every icon was in the editor
+      and absent from every export, with nothing reported. The icon resolves to the same kind
+      of geometry a rectangle does, so it takes the same path.
+    */
+    const [cue] = assCuesFromPlan(plan([{ type: 'shape', startUs: 0, durationUs: 1_000_000, iconName: 'star' }]));
+    expect(cue).toBeDefined();
+    expect(cue!.shape?.geometry.length).toBeGreaterThan(0);
+    const line = assDialogue(cue!, options);
+    expect(line).toContain('Dialogue:');
+    // An ASS drawing, not escaped text: no text body and no drawing-mode escape leak.
+    expect(line.length).toBeGreaterThan('Dialogue: 0,'.length);
+  });
+
+  it('carries an icon from the project through the planner to the script', () => {
+    /*
+      End to end, through `buildExportPlan` rather than a hand-built cue. The hand-built
+      builders in this file cast to `never`, so they cannot catch a field the *planner* drops
+      — and the planner copies fields by hand, which is exactly where an icon would vanish
+      between the project file and the render.
+    */
+    const built = buildExportPlan({
+      compositionId: 'comp-1',
+      projectId: 'proj-1',
+      preset: '1080p',
+      aspect: '16:9',
+      fps: 30,
+      format: 'mp4',
+      quality: 'standard',
+      rateControl: 'vbr',
+      audioBitrate: 192,
+      includeAudio: false,
+      burnCaptions: true,
+      saveSubtitles: false,
+      subtitleFormats: [],
+      embedProjectName: true,
+      normaliseLoudness: false,
+      targetLufs: -16,
+      isDraft: false,
+      rangeUs: [0, 1_000_000],
+      compositionFps: 30,
+      compositionDurationUs: 1_000_000,
+      items: [
+        {
+          id: 'ico_1',
+          trackId: 'track-1',
+          type: 'shape',
+          startUs: 0,
+          durationUs: 1_000_000,
+          sourceInUs: 0,
+          disabled: false,
+          muted: false,
+          hasAudio: false,
+          iconName: 'star',
+        },
+      ],
+    });
+    const icon = built.items.find((item) => item.itemId === 'ico_1');
+    expect(icon?.iconName).toBe('star');
+
+    const [cue] = assCuesFromPlan(built);
+    expect(cue).toBeDefined();
+    expect(cue!.shape?.geometry.length).toBeGreaterThan(0);
+    expect(assDialogue(cue!, options)).toContain('Dialogue:');
+  });
+
+  it('leaves out an icon this build cannot draw rather than substituting one', () => {
+    // `gift` is refused for an elliptical arc; the preview cannot draw it either, so the
+    // user sees it missing where they placed it rather than only in the rendered file.
+    expect(assCuesFromPlan(plan([{ type: 'shape', startUs: 0, durationUs: 1_000_000, iconName: 'gift' }]))).toHaveLength(0);
+    expect(assCuesFromPlan(plan([{ type: 'shape', startUs: 0, durationUs: 1_000_000, iconName: 'no-such-icon' }]))).toHaveLength(0);
   });
 
   it('suppresses the caption style\'s outline on the drawing', () => {
