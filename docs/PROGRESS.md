@@ -76,10 +76,10 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-the scale and rotation modifiers and a `Show anchor` toggle, the playback clock is
-not audio-mastered, and the preview does not switch to proxies (so scrubbing 4K is
-slow). Canvas drag editing *is* built — move, crop, scale, rotate and the anchor
-crosshair — dragging a selected clip moves it, dragging an edge crops it — and so are
+canvas snapping and a `Show anchor` toggle, the playback clock is not audio-mastered,
+and the preview does not switch to proxies (so scrubbing 4K is slow). Canvas drag
+editing *is* built — move, crop, scale, rotate and the anchor crosshair, modifiers
+included — dragging a selected clip moves it, dragging an edge crops it — and so are
 the keyframe inspector and the curve editor. Numeric editing of opacity, level,
 pan, speed, crop, scale, rotation and flip works, is undoable, and — since the
 preview and the export both apply the same geometry — is visible where it matters:
@@ -139,12 +139,13 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — the modifiers (`Shift` for free scale and 15° rotation
-snaps, `Alt` to scale about the centre), a `Show anchor` toggle, and proxy playback.
-Canvas drag editing is otherwise there: a selected clip's picture can be dragged to
-move it, its edges dragged to crop it, its corners dragged to scale it about the
-opposite corner, the handle above it dragged to rotate it about the anchor, and the
-crosshair dragged to move the pivot without moving the picture. Every gesture converts
+**1. Finish Phase 4 ⚠️** — canvas snapping and guides (§9), a `Show anchor` toggle,
+and proxy playback. Canvas drag editing is otherwise complete, modifiers included: a
+selected clip's picture can be dragged to move it (`Shift` locks an axis), its edges
+dragged to crop it, its corners dragged to scale it about the opposite corner
+(`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to
+rotate it about the anchor (`Shift` snaps to 15°), and the crosshair dragged to move
+the pivot without moving the picture. Every gesture converts
 pixels into canvas fractions so it means the same at any preview size, commits once
 on release so the whole drag is one undo step, and `Esc` abandons it without
 touching the undo stack. The anchor point is real too — rotation pivots where the

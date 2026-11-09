@@ -363,6 +363,14 @@ export function scaleAboutCorner(
   options: {
     /** The corner being dragged, and therefore the one opposite it that stays put. */
     corner: Corner;
+    /**
+     * Scale about the picture's own centre instead of the opposite corner
+     * (SPEC 10 §8.2, `Alt`).
+     *
+     * Holding the centre still is the same arithmetic with the fixed point moved: the
+     * corner offset drops to zero and only the anchor's arm remains to be compensated.
+     */
+    aboutCentre?: boolean;
     /** Scale before and after, as the per-axis pair the model stores. */
     fromScale: { x: number; y: number };
     toScale: { x: number; y: number };
@@ -382,9 +390,12 @@ export function scaleAboutCorner(
   const sign = cornerSign(oppositeCorner(options.corner));
   const halfWidth = options.width / 2;
   const halfHeight = options.height / 2;
-  // The opposite corner's offset from the picture's centre.
-  const cornerX = sign.x * halfWidth;
-  const cornerY = sign.y * halfHeight;
+  /*
+    The fixed point's offset from the picture's centre: the opposite corner normally,
+    or the centre itself when `Alt` holds the centre still.
+  */
+  const cornerX = options.aboutCentre ? 0 : sign.x * halfWidth;
+  const cornerY = options.aboutCentre ? 0 : sign.y * halfHeight;
   // The anchor's offset from the centre, which is what the scale grows about.
   const anchorX = (options.anchorX - 0.5) * options.width;
   const anchorY = (options.anchorY - 0.5) * options.height;
@@ -440,4 +451,114 @@ export function cornerAt(
     if (distance <= reach && (!best || distance < best.distance)) best = { corner, distance };
   }
   return best ? best.corner : null;
+}
+
+/** The smallest scale a handle will produce, matching the inspector's own floor. */
+export const MIN_SCALE = 0.1;
+/** The largest, likewise. */
+export const MAX_SCALE = 4;
+
+/**
+ * Which way a move is locked when `Shift` is held.
+ *
+ * A locked move follows whichever axis the pointer has travelled furthest along, so
+ * the drag commits to the direction the user is clearly going rather than flickering
+ * between the two while the pointer wanders.
+ */
+export function lockedAxis(delta: { xPixels: number; yPixels: number }): 'x' | 'y' {
+  return Math.abs(delta.xPixels) >= Math.abs(delta.yPixels) ? 'x' : 'y';
+}
+
+/**
+ * A rotation snapped to 15° steps (SPEC 10 §8.2, `Shift`).
+ *
+ * The cardinals fall out of this for free — 90° and 180° are multiples of 15 — so
+ * there is one rule here rather than a step rule plus a separate cardinal rule that
+ * could disagree with it near a tie.
+ */
+export const ROTATION_STEP = 15;
+
+export function snapRotation(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  const snapped = Math.round(degrees / ROTATION_STEP) * ROTATION_STEP;
+  /*
+    Rounded before returning so 15·k does not arrive as 44.99999999999999 and a user
+    reading the inspector sees the number they aimed at.
+
+    The `+ 0` folds a negative zero into zero. JavaScript produces `-0` for an exact
+    negative multiple (`-90 % 15`), and `-0` is a trap: it fails `Object.is(x, 0)`,
+    it prints as `-0` in a readout, and it only survives serialisation by luck. A
+    rotation of zero is zero.
+  */
+  return Math.round(rotatedBy(0, snapped)) + 0;
+}
+
+/**
+ * The non-uniform scale a `Shift` corner drag has reached (`Shift` *toggles* uniform
+ * into free scale, per SPEC 10 §8.2).
+ *
+ * The pointer is carried back into the picture's own frame using the transform the
+ * drag **started** with, and each axis is then the ratio of the pointer's offset from
+ * the fixed corner to what that offset was at pointer-down. Carrying the pointer back
+ * is what makes this feel right on a rotated clip: without it the axes follow the
+ * screen, so pulling "down" on a clip turned 90° would widen it instead of heightening
+ * it.
+ *
+ * Ratios are clamped, not allowed to go negative: a pointer dragged past the fixed
+ * corner would otherwise mirror the picture, and mirroring is a separate property
+ * (`flipH`/`flipV`) with its own semantics — a scale gesture should not smuggle it in.
+ */
+export function freeScaleAboutCorner(
+  pointer: { x: number; y: number },
+  options: {
+    /** Where the fixed corner is on screen, in client coordinates. */
+    fixed: { x: number; y: number };
+    /** The pointer's position at pointer-down, in client coordinates. */
+    start: { x: number; y: number };
+    /** The scale the drag started from. */
+    startScale: { x: number; y: number };
+    /** The clip's rotation in degrees, so the pointer can be carried back. */
+    rotation: number;
+  },
+): { x: number; y: number } {
+  const radians = (-options.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  /** The pointer's offset from the fixed corner, in the picture's own axes. */
+  const local = (point: { x: number; y: number }) => {
+    const dx = point.x - options.fixed.x;
+    const dy = point.y - options.fixed.y;
+    return { x: cos * dx - sin * dy, y: sin * dx + cos * dy };
+  };
+  const from = local(options.start);
+  const now = local(pointer);
+  const clamp = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+  /*
+    A zero denominator is the pointer starting exactly on the fixed corner, which is a
+    degenerate grab rather than a scale: dividing gives `Infinity`, which clamps to the
+    maximum and would fling the clip to full size. Leaving that axis alone is the only
+    honest answer.
+  */
+  const ratio = (before: number, after: number) =>
+    Math.abs(before) < 1e-6 ? 1 : after / before;
+  return {
+    x: clamp(options.startScale.x * ratio(from.x, now.x)),
+    y: clamp(options.startScale.y * ratio(from.y, now.y)),
+  };
+}
+
+/**
+ * The scale a drag has reached when `Alt` holds the **centre** still instead of the
+ * opposite corner (SPEC 10 §8.2).
+ *
+ * Scaling about the centre is the same radial gesture with a different fixed point,
+ * so it reuses `cornerScaleFactor` — the corner the user grabbed is simply measured
+ * against the picture's centre rather than against the corner across from it.
+ */
+export function scaleAboutCentre(
+  pointer: { x: number; y: number },
+  centre: { x: number; y: number },
+  startDistance: number,
+): number {
+  return cornerScaleFactor(pointer, centre, startDistance);
 }

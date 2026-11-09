@@ -18,10 +18,14 @@ import {
   pixelsToFraction,
   cornerAt,
   cornerScaleFactor,
+  freeScaleAboutCorner,
+  lockedAxis,
   oppositeCorner,
   pointerToPictureFraction,
   rotatedBy,
+  scaleAboutCentre,
   scaleAboutCorner,
+  snapRotation,
 } from '../features/editor/canvas-drag.js';
 
 const canvas = { width: 1080, height: 1920 };
@@ -542,5 +546,171 @@ describe('scaling about the opposite corner', () => {
       canvas,
     );
     expect(position).toEqual({ x: 0.2, y: 0.3 });
+  });
+});
+
+describe('the Shift and Alt modifiers (SPEC 10 §8.2)', () => {
+  it('locks a move to whichever axis the pointer has travelled furthest along', () => {
+    /*
+      A locked move has to commit to a direction rather than track the pointer's
+      instantaneous dominant axis, or it flickers between the two while the pointer
+      wanders near the diagonal. Comparing total travel gives one stable answer.
+    */
+    expect(lockedAxis({ xPixels: 10, yPixels: 3 })).toBe('x');
+    expect(lockedAxis({ xPixels: 3, yPixels: 10 })).toBe('y');
+    // Sign is not direction of travel: a long drag to the left still locks x.
+    expect(lockedAxis({ xPixels: -10, yPixels: 3 })).toBe('x');
+    // A tie is broken one way consistently, so the two axes cannot both claim it.
+    expect(lockedAxis({ xPixels: 10, yPixels: 10 })).toBe('x');
+    expect(lockedAxis({ xPixels: 0, yPixels: 0 })).toBe('x');
+  });
+
+  it('snaps a rotation to 15° steps', () => {
+    expect(snapRotation(0)).toBe(0);
+    expect(snapRotation(7)).toBe(0);
+    expect(snapRotation(8)).toBe(15);
+    expect(snapRotation(22)).toBe(15);
+    expect(snapRotation(23)).toBe(30);
+    expect(snapRotation(44.9)).toBe(45);
+  });
+
+  it('gets the cardinals for free from the 15° rule', () => {
+    /*
+      SPEC 10 §8.2 lists "15° steps; snapping also at 0/90/180/270" as though the
+      cardinals were a second rule. They are multiples of 15, so one rule covers both —
+      and having one means there is no tie for two rules to disagree over.
+    */
+    for (const cardinal of [0, 90, 180, 270]) {
+      // `% 15` yields `-0` for an exact negative multiple, and `toBe(0)` fails on it —
+      // so compare the distance to the nearest step rather than the remainder.
+      const snapped = snapRotation(cardinal);
+      expect(Math.abs(snapped / 15 - Math.round(snapped / 15))).toBeLessThan(1e-9);
+    }
+    // 90 is already a snap point, so a drag just short of it lands exactly on it.
+    expect(snapRotation(88)).toBe(90);
+    expect(snapRotation(92)).toBe(90);
+  });
+
+  it('wraps a snapped rotation into the model range', () => {
+    /*
+      -179 snaps to the antipode, and the model's range is closed at both ends — -180
+      and 180 are the same angle with two representatives. So the assertion is that the
+      *angle* is in range, not that it picked one of the two spellings. Asserting a
+      particular spelling was my first version and it failed on correct code.
+    */
+    const wrapped = snapRotation(-179);
+    expect(Math.abs(wrapped)).toBeLessThanOrEqual(180);
+    expect(Math.abs(wrapped)).toBe(180);
+    // And it is a proper 15° step, not the raw -179.
+    expect(Math.abs(wrapped / 15 - Math.round(wrapped / 15))).toBeLessThan(1e-9);
+  });
+
+  it('solves a free scale per axis in the picture’s frame', () => {
+    /*
+      `Shift` toggles uniform into free scale. The pointer is carried back through the
+      clip's rotation before the two axes are solved, so the axes follow the picture
+      rather than the screen.
+    */
+    const fixed = { x: 0, y: 0 };
+    const free = freeScaleAboutCorner(
+      { x: 400, y: 50 },
+      { fixed, start: { x: 200, y: 100 }, startScale: { x: 1, y: 1 }, rotation: 0 },
+    );
+    expect(free.x).toBeCloseTo(2, 10);
+    expect(free.y).toBeCloseTo(0.5, 10);
+  });
+
+  it('turns the free scale’s axes with the clip', () => {
+    /*
+      The same screen displacement on a 90° clip is the opposite ratio on each axis:
+      what the pointer moved along horizontally is the picture's vertical, and vice
+      versa. Using screen axes instead would widen a clip pulled downwards.
+    */
+    const fixed = { x: 0, y: 0 };
+    const turned = freeScaleAboutCorner(
+      { x: 400, y: 50 },
+      { fixed, start: { x: 200, y: 100 }, startScale: { x: 1, y: 1 }, rotation: 90 },
+    );
+    expect(turned.x).toBeCloseTo(0.5, 10);
+    expect(turned.y).toBeCloseTo(2, 10);
+  });
+
+  it('clamps a free scale instead of mirroring the picture', () => {
+    /*
+      Dragging the pointer past the fixed corner makes a ratio negative, which would
+      flip the clip — but a flip is `flipH`/`flipV` with its own semantics, and a scale
+      gesture should not smuggle one in. The clamp matches the inspector's own floor.
+    */
+    const fixed = { x: 0, y: 0 };
+    const past = freeScaleAboutCorner(
+      { x: -400, y: -400 },
+      { fixed, start: { x: 200, y: 100 }, startScale: { x: 1, y: 1 }, rotation: 0 },
+    );
+    expect(past.x).toBeGreaterThan(0);
+    expect(past.y).toBeGreaterThan(0);
+  });
+
+  it('leaves an axis alone when the pointer starts on the fixed corner', () => {
+    // A degenerate grab: dividing by zero would clamp to the maximum and fling the
+    // clip to full size, so the axis keeps its scale instead.
+    const free = freeScaleAboutCorner(
+      { x: 100, y: 200 },
+      { fixed: { x: 0, y: 0 }, start: { x: 0, y: 0 }, startScale: { x: 1.5, y: 1.5 }, rotation: 0 },
+    );
+    expect(free.x).toBe(1.5);
+    expect(free.y).toBe(1.5);
+  });
+
+  it('holds the picture’s centre still when Alt is held', () => {
+    /*
+      `Alt` scales about the centre rather than the opposite corner, which is the same
+      arithmetic with the fixed point moved: the corner offset drops to zero and only
+      the anchor's arm is compensated. With a centred anchor there is nothing to
+      compensate at all, so the position must not move.
+    */
+    const centred = scaleAboutCorner(
+      {
+        corner: 'se',
+        aboutCentre: true,
+        fromScale: { x: 1, y: 1 },
+        toScale: { x: 2, y: 2 },
+        anchorX: 0.5,
+        anchorY: 0.5,
+        width: 200,
+        height: 100,
+        rotation: 0,
+      },
+      { x: 0.2, y: 0.3 },
+      { width: 1000, height: 800 },
+    );
+    expect(centred.x).toBeCloseTo(0.2, 10);
+    expect(centred.y).toBeCloseTo(0.3, 10);
+  });
+
+  it('still compensates the anchor arm when Alt scales about the centre', () => {
+    // An off-centre anchor grows an arm as the scale grows, so even a centred scale
+    // has to move the position to keep the picture's *centre* still.
+    const offCentre = scaleAboutCorner(
+      {
+        corner: 'se',
+        aboutCentre: true,
+        fromScale: { x: 1, y: 1 },
+        toScale: { x: 2, y: 2 },
+        anchorX: 0.25,
+        anchorY: 0.75,
+        width: 200,
+        height: 100,
+        rotation: 0,
+      },
+      { x: 0, y: 0 },
+      { width: 1000, height: 800 },
+    );
+    expect(offCentre.x).not.toBeCloseTo(0, 6);
+  });
+
+  it('measures an Alt scale from the centre, not from the opposite corner', () => {
+    // The factor is a distance ratio, and Alt changes which point it is measured from.
+    expect(scaleAboutCentre({ x: 200, y: 0 }, { x: 0, y: 0 }, 100)).toBeCloseTo(2, 10);
+    expect(scaleAboutCentre({ x: 0, y: 25 }, { x: 0, y: 0 }, 100)).toBeCloseTo(0.25, 10);
   });
 });

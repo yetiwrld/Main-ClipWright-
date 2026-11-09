@@ -24,12 +24,15 @@ import {
   cornerAt,
   cornerScaleFactor,
   croppedEdge,
+  freeScaleAboutCorner,
+  lockedAxis,
   handleAt,
   movedOffset,
   pixelsToFraction,
   pointerToPictureFraction,
   rotatedBy,
   scaleAboutCorner,
+  snapRotation,
   type Corner,
   type CropEdge,
   type CropEdges,
@@ -96,6 +99,12 @@ interface Gesture {
   corner: Corner | null;
   fixedCorner: { x: number; y: number } | null;
   startDistance: number;
+  /**
+   * The picture's centre in client coordinates, and how far the pointer started from
+   * it — what `Alt` measures against instead of the opposite corner.
+   */
+  centre: { x: number; y: number };
+  startCentreDistance: number;
   /** The canvas's top-left in client coordinates, so pointer positions can be
    * converted back into the picture's own space. */
   boxLeft: number;
@@ -277,6 +286,14 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         startDistance: fixedCorner
           ? Math.hypot(event.clientX - fixedCorner.x, event.clientY - fixedCorner.y)
           : 0,
+        centre: {
+          x: box.left + target.rect.x + target.rect.width / 2,
+          y: box.top + target.rect.y + target.rect.height / 2,
+        },
+        startCentreDistance: Math.hypot(
+          event.clientX - (box.left + target.rect.x + target.rect.width / 2),
+          event.clientY - (box.top + target.rect.y + target.rect.height / 2),
+        ),
         boxLeft: box.left,
         boxTop: box.top,
       };
@@ -307,7 +324,18 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     const dy = event.clientY - current.startY;
 
     if (current.mode === 'move') {
-      const moved = movedOffset(current.from, { xPixels: dx, yPixels: dy }, current.canvas);
+      /*
+        `Shift` locks the move to the dominant axis (SPEC 10 §8.2). Which axis is
+        "dominant" is decided from the pointer's total travel, not per-event, so the
+        lock does not flicker between the two while the pointer wanders near the
+        diagonal — the drag commits to the direction the user is clearly going.
+      */
+      const locked = event.shiftKey ? lockedAxis({ xPixels: dx, yPixels: dy }) : null;
+      const moved = movedOffset(
+        current.from,
+        { xPixels: locked === 'y' ? 0 : dx, yPixels: locked === 'x' ? 0 : dy },
+        current.canvas,
+      );
       current.to = { ...current.to, ...moved };
     } else if (current.mode === 'anchor') {
       /*
@@ -349,10 +377,13 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
       // The gesture is the *change* in the pointer's angle about the pivot, so a drag
       // that circles the handle round the clip produces a continuous rotation.
       const now = angleAbout(current.pivot, { x: event.clientX, y: event.clientY });
-      current.to = {
-        ...current.to,
-        rotation: rotatedBy(current.from.rotation, angleDelta(current.startAngle, now)),
-      };
+      const turned = rotatedBy(current.from.rotation, angleDelta(current.startAngle, now));
+      /*
+        `Shift` snaps to 15° steps. The cardinals are multiples of 15, so they come free
+        rather than needing a separate rule that could disagree with this one near a
+        tie. Applied to the *result* so the readout the user sees is the snapped value.
+      */
+      current.to = { ...current.to, rotation: event.shiftKey ? snapRotation(turned) : turned };
     } else if (current.mode === 'scale') {
       /*
         Uniform scale, measured as the ratio of the pointer's distance from the fixed
@@ -366,15 +397,37 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         and the corner the user is *not* holding would slide, which is the single thing
         a corner handle promises it will not do.
       */
+      /*
+        `Alt` holds the picture's centre still instead of the opposite corner, which is
+        the same radial gesture with the fixed point moved: the factor is measured from
+        the centre and the corner offset in the compensation goes to zero.
+
+        `Shift` toggles uniform into free scale, so the two axes are solved separately
+        by carrying the pointer back into the picture's own frame. Doing that with the
+        *screen* axes instead would make a clip turned 90° widen when the pointer was
+        pulled down.
+      */
+      const aboutCentre = event.altKey;
+      const fixedPoint = aboutCentre
+        ? current.centre ?? { x: current.startX, y: current.startY }
+        : current.fixedCorner ?? { x: current.startX, y: current.startY };
+      const startDistance = aboutCentre ? current.startCentreDistance : current.startDistance;
       const factor = cornerScaleFactor(
         { x: event.clientX, y: event.clientY },
-        current.fixedCorner ?? { x: current.startX, y: current.startY },
-        current.startDistance,
+        fixedPoint,
+        startDistance,
       );
-      const toScale = {
-        x: current.from.scaleX * factor,
-        y: current.from.scaleY * factor,
-      };
+      const toScale = event.shiftKey
+        ? freeScaleAboutCorner(
+            { x: event.clientX, y: event.clientY },
+            {
+              fixed: fixedPoint,
+              start: { x: current.startX, y: current.startY },
+              startScale: { x: current.from.scaleX, y: current.from.scaleY },
+              rotation: current.from.rotation,
+            },
+          )
+        : { x: current.from.scaleX * factor, y: current.from.scaleY * factor };
       const position = scaleAboutCorner(
         {
           corner: current.corner ?? 'se',
@@ -385,6 +438,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
           width: current.target.size.width,
           height: current.target.size.height,
           rotation: current.from.rotation,
+          aboutCentre,
         },
         { x: current.from.x, y: current.from.y },
         current.canvas,

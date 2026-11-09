@@ -1036,6 +1036,138 @@ describe('the corner grips (SPEC 10 §8.2)', () => {
     expect(turned.y!).toBeCloseTo(upright.x!, 4);
   });
 
+  it('locks a Shift move to one axis', () => {
+    /*
+      SPEC 10 §8.2: `Shift` locks the body drag to the dominant axis. Without it a
+      horizontal drag that wobbles a few pixels vertically nudges the clip off its
+      line, which is the whole reason the modifier exists.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    const down = new MouseEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent(layer, down);
+    // A long horizontal pull with a small vertical drift, Shift held throughout.
+    fireEvent(
+      layer,
+      new MouseEvent('pointermove', { clientX: 300, clientY: 210, shiftKey: true, bubbles: true }),
+    );
+    fireEvent(
+      layer,
+      new MouseEvent('pointerup', { clientX: 300, clientY: 210, shiftKey: true, bubbles: true }),
+    );
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    expect(patch.transform.x).toBeGreaterThan(0);
+    // The vertical drift is discarded entirely, not merely reduced.
+    expect(patch.transform.y).toBe(0);
+  });
+
+  it('does not lock an unmodified move', () => {
+    // The lock is the modifier's job, so the same drag without Shift keeps both axes.
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, new MouseEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true }));
+    fireEvent(layer, new MouseEvent('pointermove', { clientX: 300, clientY: 210, bubbles: true }));
+    fireEvent(layer, new MouseEvent('pointerup', { clientX: 300, clientY: 210, bubbles: true }));
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    expect(patch.transform.y).not.toBe(0);
+  });
+
+  it('snaps a Shift rotation to a 15° step', () => {
+    /*
+      Dragging the handle off the top of the clip by a few degrees with `Shift` held
+      must land on a step, not on the raw angle the pointer happened to be at.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const handle = screen.getByTestId('preview-rotate-handle');
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    // Pivot is the picture's centre (200,200). Straight up is 0°; a pointer 20° off it
+    // is a small drag that must land on a multiple of 15.
+    fireEvent(handle, new MouseEvent('pointerdown', { clientX: 200, clientY: 50, bubbles: true }));
+    fireEvent(
+      layer,
+      new MouseEvent('pointermove', { clientX: 250, clientY: 60, shiftKey: true, bubbles: true }),
+    );
+    fireEvent(
+      layer,
+      new MouseEvent('pointerup', { clientX: 250, clientY: 60, shiftKey: true, bubbles: true }),
+    );
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    const rotation = patch.transform.rotation!;
+    expect(rotation % 15).toBe(0);
+    expect(rotation).not.toBe(0);
+  });
+
+  it('toggles a Shift corner drag to free scale', () => {
+    /*
+      SPEC 10 §8.2: `Shift` toggles the corner handle from uniform to free scale. A
+      vertical-only pull is the clearest probe — uniform scaling would change both
+      axes equally, free scaling changes only the one pulled.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, new MouseEvent('pointerdown', { clientX: 400, clientY: 400, bubbles: true }));
+    fireEvent(
+      layer,
+      new MouseEvent('pointermove', { clientX: 400, clientY: 600, shiftKey: true, bubbles: true }),
+    );
+    fireEvent(
+      layer,
+      new MouseEvent('pointerup', { clientX: 400, clientY: 600, shiftKey: true, bubbles: true }),
+    );
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    // The vertical pull stretches height and leaves width at its start value.
+    expect(patch.transform.scaleY!).toBeGreaterThan(1.2);
+    expect(patch.transform.scaleX!).toBeCloseTo(1, 2);
+  });
+
+  it('scales about the centre when Alt is held', () => {
+    /*
+      `Alt` holds the picture's centre still instead of the opposite corner, so with a
+      centred anchor the position must not move at all — where the same drag without
+      Alt shifts it by a quarter canvas.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, new MouseEvent('pointerdown', { clientX: 400, clientY: 400, bubbles: true }));
+    fireEvent(
+      layer,
+      new MouseEvent('pointermove', { clientX: 600, clientY: 600, altKey: true, bubbles: true }),
+    );
+    fireEvent(
+      layer,
+      new MouseEvent('pointerup', { clientX: 600, clientY: 600, altKey: true, bubbles: true }),
+    );
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    expect(patch.transform.scaleX!).toBeGreaterThan(1);
+    expect(patch.transform.x!).toBeCloseTo(0, 6);
+    expect(patch.transform.y!).toBeCloseTo(0, 6);
+  });
+
   it('draws four grips, one per corner', () => {
     stubLayout();
     render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline()} />);
