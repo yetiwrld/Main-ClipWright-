@@ -170,3 +170,34 @@ part of the frame into view without losing it.
   as an asymmetry in the clamp.
 - `canPan` was deleted rather than kept: the zero-overhang rule already says "there is
   nothing to pan to", and the function had no caller outside its own test.
+
+---
+
+## 12. The edge handles scale, and cropping moves to its own tool
+
+**Decision:** under every tool but Crop, dragging one of a clip's four edge handles
+scales that edge's axis (SPEC 10 §8.2). Cropping is the **Crop** tool's gesture (`C`,
+§8.6). `Shift` on an edge gives it the uniform corner behaviour.
+
+**Reasoning:** the two sections describe two different meanings for the same four handles,
+and the app had chosen one of them by accident. Cropping was the edge gesture because it
+was the only edge gesture the surface had ever had, which left §8.2's per-axis scale with
+no pointer affordance at all — expressible in the maths, unreachable by hand. The
+specification's own split is by tool, so adopting that split is what lets both exist
+without either being a modifier away.
+
+**Consequences:**
+- Cropping is now one keystroke further away than it was. That is a real cost, accepted
+  because the alternative is that per-axis scale has no gesture; `C` toggles, so a user
+  who crops repeatedly is not stuck re-pressing it.
+- Corners are unaffected by the tool. §8.2 gives them the uniform gesture unconditionally,
+  and a corner is a two-axis handle whichever tool is active.
+- The compensation had to become per-axis, which exposed a bug in the *existing* corner
+  code: `scaleAboutCorner` averaged the two axes into one delta, right only while the scale
+  stays uniform, so the `Shift` free-scale that already shipped slid the fixed corner by
+  100 px on a 400×200 picture. Every test of it used a uniform factor. The correction is
+  `(S₀ − S₁) · (p_f − anchor)` per axis.
+- The fixed point of an edge is the **opposite** edge, which is what makes the picture grow
+  away from the side the user is not touching. It is computed from the drawn box captured
+  at pointer-down, for the same reason the corner path captures it: a mid-drag layout shift
+  would otherwise move the side that is meant to be still.

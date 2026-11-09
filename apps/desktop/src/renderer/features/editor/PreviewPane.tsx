@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Crop,
   Frame,
   Grid3x3,
   Hand,
@@ -601,7 +602,7 @@ export function PreviewPane({
         setPan(NO_PAN);
         return;
       }
-      if (key !== 'a' && key !== 'h') return;
+      if (key !== 'a' && key !== 'h' && key !== 'c') return;
       if (event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
@@ -618,6 +619,12 @@ export function PreviewPane({
         is drawn, which is why `handlesVisible` takes both facts and owns the whole answer.
       */
       if (key === 'h') setHandlesOn((value) => !value);
+      /*
+        `C` toggles the Crop tool (§8.6). A toggle rather than a mode switch that leaves the
+        user stuck in crop: pressing it again returns to Select, which is the only other
+        tool that edits the picture.
+      */
+      else if (key === 'c') setTool((current) => (current === 'crop' ? 'select' : 'crop'));
       else setShowAnchor((value) => !value);
     };
     document.addEventListener('keydown', onKeyDown);
@@ -1606,6 +1613,13 @@ export function PreviewPane({
                       rect: { x: 0, y: 0, width: box.width, height: box.height },
                     },
                     canvasRef.current,
+                    /*
+                      What an edge drag means under the active tool (SPEC 10 §8.2 against
+                      §8.6): the Crop tool makes the edges crop, and every other tool makes
+                      them scale one axis each. Corners scale either way.
+                    */
+                    undefined,
+                    tool === 'crop' ? 'crop' : 'scale',
                   );
                 }}
                 onRotateStart={(event) => {
@@ -1940,6 +1954,21 @@ export function PreviewPane({
             the only *pointer-only* route, which matters for anyone who cannot hold a key
             and drag at once.
           */}
+          {/*
+            The **Crop** tool (SPEC 10 §3.1, §8.6). What it changes is what the four edge
+            handles mean: with it on, dragging an edge crops; with it off, an edge scales the
+            one axis it governs (§8.2). Cropping used to be the edge gesture in both cases,
+            because it was the only gesture this surface had — which left §8.2's per-axis
+            scale with no pointer affordance at all.
+          */}
+          <IconButton
+            label={tool === 'crop' ? 'Crop tool (on)' : 'Crop tool'}
+            shortcut="C"
+            size={28}
+            active={tool === 'crop'}
+            icon={<Crop size={14} />}
+            onClick={() => setTool((current) => (current === 'crop' ? 'select' : 'crop'))}
+          />
           <IconButton
             label={tool === 'pan' ? 'Pan view (on)' : 'Pan view'}
             shortcut="Space+drag"

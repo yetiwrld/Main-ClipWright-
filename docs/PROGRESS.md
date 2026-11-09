@@ -143,8 +143,10 @@ Also found and fixed two real security holes along the way:
 ## What is left, in order
 
 **1. Finish Phase 4 ⚠️** — what is left is the **preview-quality** control (SPEC 10
-§5.1) and the frame-accurate transport it belongs to, plus per-axis scale on the edge
-handles. The preview now *reads* the frame cache it writes, so a scrub over ground already
+§5.1) and the frame-accurate transport it belongs to, plus the Crop tool's own frame: the
+§8.6 rectangle over the uncropped source, its aspect lock and its rounded corners. The
+edge handles now scale one axis each as §8.2 asks, and cropping is the Crop tool's gesture
+(`C`). The preview now *reads* the frame cache it writes, so a scrub over ground already
 covered is a file read rather than a seek, and §4's view controls are in: the *Handles*
 toggle (`H`) hides the grips without deselecting, and the Pan tool with Space+drag pans
 without taking Space from the transport. Canvas drag editing is otherwise
@@ -159,9 +161,9 @@ immune to both. The composition grid is the thirds or any N×M from 2 to 12, cho
 same menu, and its lines are snap targets while it is showing. The view zooms — Fit, Fill,
 25–400% from the dropdown and `Ctrl`+wheel up to 1600% about the cursor — and past 800%
 the pixel grid draws one line per canvas pixel. A selected clip's
-picture can be dragged to move it (`Shift` locks an axis), its edges
-dragged to crop it, its corners dragged to scale it about the opposite corner
-(`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to
+picture can be dragged to move it (`Shift` locks an axis), its edges dragged to scale one
+axis each — or to crop with the Crop tool on (`C`) — its corners dragged to scale it about
+the opposite corner (`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to
 rotate it about the anchor (`Shift` snaps to 15°), and the crosshair dragged to move
 the pivot without moving the picture. Every gesture converts
 pixels into canvas fractions so it means the same at any preview size, commits once

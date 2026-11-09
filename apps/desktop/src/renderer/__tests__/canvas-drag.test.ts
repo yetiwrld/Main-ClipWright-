@@ -24,8 +24,11 @@ import {
   oppositeCorner,
   pointerToPictureFraction,
   rotatedBy,
+  signForOppositeEdge,
+  edgeScale,
   scaleAboutCentre,
   scaleAboutCorner,
+  scaleAboutEdge,
   snapRotation,
 } from '../features/editor/canvas-drag.js';
 
@@ -480,6 +483,37 @@ describe('scaling about the opposite corner', () => {
     expect(position.y).toBeCloseTo(-50 / 800, 10);
   });
 
+  it('keeps the fixed corner still when the two axes scale differently', () => {
+    /*
+      The bug that survived every existing test. The compensation used to average the two
+      axes into one delta and apply it to both components, which is right *only* while the
+      scale stays uniform — so the tests above, which all use a uniform factor, could not
+      see it. Halving the axes apart exposes it: widening only, with the height untouched,
+      must move the picture purely horizontally. The averaged version moved it vertically
+      too (by 0.03125 here), sliding the "fixed" corner down the screen.
+
+      Expected values derived, not guessed: the fixed point is `se` at (+100, +50) from the
+      centre, so a width-only change gives `(1 − 2) · 100 = −100` px in x and exactly `0` in
+      y, i.e. −0.1 and 0 in fractions of a 1000×800 canvas.
+    */
+    const widen = scaleAboutCorner(
+      { ...base, fromScale: { x: 1, y: 1 }, toScale: { x: 2, y: 1 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(widen.x).toBeCloseTo(-100 / 1000, 10);
+    // Exactly zero: a height that never changed must not displace the picture at all.
+    expect(widen.y).toBeCloseTo(0, 10);
+
+    const heighten = scaleAboutCorner(
+      { ...base, fromScale: { x: 1, y: 1 }, toScale: { x: 1, y: 2 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(heighten.x).toBeCloseTo(0, 10);
+    expect(heighten.y).toBeCloseTo(-50 / 800, 10);
+  });
+
   it('compensates from the anchor, not from the picture centre', () => {
     /*
       Scaling happens about the anchor, so the arm from the anchor to the content grows
@@ -744,5 +778,227 @@ describe('at any preview zoom (SPEC 10 §4)', () => {
       const threshold = snapThresholdPx(drawn);
       expect(threshold * drawn).toBeCloseTo(SNAP_PX, 10);
     }
+  });
+});
+
+describe('scaling one axis from an edge handle', () => {
+  /*
+    SPEC 10 §8.2 gives the four edges "scale along one axis (non-uniform)", and the four
+    corners the uniform gesture. The surface only had the corner behaviour, with crop on the
+    whole edge — so per-axis scale had no pointer affordance at all.
+  */
+  const options = {
+    fixed: { x: 100, y: 0 },
+    start: { x: -100, y: 0 },
+    startScale: { x: 1, y: 1 },
+    rotation: 0,
+  };
+
+  it('widens when the left edge is pulled outward, and leaves the height alone', () => {
+    /*
+      Derived: the fixed right edge is at +100, the pointer starts on the left edge at −100
+      (so −200 from the fixed point) and ends 100 px further out (−300). The ratio is 1.5 —
+      pulling the left edge away from the right one must *enlarge* the picture, not shrink
+      it, which is the sign that a naive `start / now` gets backwards.
+    */
+    const scale = edgeScale({ x: -200, y: 0 }, { ...options, edge: 'left' });
+    expect(scale.x).toBeCloseTo(1.5, 10);
+    expect(scale.y).toBe(1);
+  });
+
+  it('changes only the axis the edge governs, never the other one', () => {
+    /*
+      The whole point. A free-scale solve here would let a bottom-edge drag change the width,
+      which is the shape of bug that looks like "the clip jumped" rather than like a
+      one-axis gesture.
+
+      The fixture has to make the x ratio something other than 1, or the two behaviours are
+      identical and the test proves nothing. That is a trap I fell into twice: starting the
+      pointer at x = 0 puts it exactly *on* the fixed edge's vertical, so the degenerate-grab
+      guard answers 1 and a free solve looks exactly like a one-axis solve. Starting 100 px
+      out and moving to 120 gives a ratio of 1.2, so a two-axis solve would visibly change
+      the width from 1.3 to 1.56 and the mutation fails as it should.
+    */
+    const vertical = edgeScale({ x: 120, y: 120 }, {
+      ...options,
+      edge: 'bottom',
+      fixed: { x: 0, y: -50 },
+      start: { x: 100, y: 50 },
+      startScale: { x: 1.3, y: 1 },
+    });
+    // x is passed through untouched, including a free scale already set on it…
+    expect(vertical.x).toBe(1.3);
+    // …and y did move: the vertical edge governs the height.
+    expect(vertical.y).not.toBe(1);
+  });
+
+  it('pins the other axis at the scale it started from, rather than at 1', () => {
+    // Returning 1 for the untouched axis would silently undo a free scale the user set.
+    const scale = edgeScale({ x: -200, y: 0 }, { ...options, edge: 'right', startScale: { x: 2, y: 0.5 } });
+    expect(scale.y).toBe(0.5);
+  });
+
+  it('scales both axes from the governed one under Shift', () => {
+    // `Shift` on an edge asks for the corner behaviour: the picture grows evenly.
+    const scale = edgeScale({ x: -200, y: 0 }, { ...options, edge: 'left', uniform: true });
+    expect(scale.x).toBeCloseTo(1.5, 10);
+    expect(scale.y).toBeCloseTo(1.5, 10);
+  });
+
+  it('takes the uniform factor from the axis a horizontal edge governs, and the other for a vertical one', () => {
+    /*
+      The pair that pins which ratio a `Shift` edge drag reads. A vertical edge must take its
+      factor from y; reading x for both made a top-edge Shift-drag grow the picture by
+      whatever the pointer did *sideways*, which is the classic wrong-axis bug and is
+      invisible with a fixture whose x does not move.
+    */
+    /*
+      Derived from the *fixed* edge, not from the clip: the fixed bottom edge sits at y = +100,
+      so a start at y = −100 is 200 away from it and a move to y = −200 is 300 away — ratio
+      1.5. My first arithmetic measured the distance from the pointer's own start and got 2,
+      which is the mistake this comment exists to stop someone repeating.
+    */
+    const vertical = edgeScale({ x: 500, y: -200 }, {
+      ...options,
+      edge: 'top',
+      fixed: { x: 0, y: 100 },
+      start: { x: 0, y: -100 },
+      uniform: true,
+    });
+    expect(vertical.x).toBeCloseTo(1.5, 10);
+    expect(vertical.y).toBeCloseTo(1.5, 10);
+  });
+
+  it('clamps to the same limits as a corner', () => {
+    const huge = edgeScale({ x: 1e9, y: 0 }, { ...options, edge: 'left' });
+    expect(huge.x).toBeLessThanOrEqual(10);
+    const tiny = edgeScale({ x: -1, y: 0 }, { ...options, edge: 'left' });
+    expect(tiny.x).toBeGreaterThan(0);
+  });
+
+  it('refuses to invent a scale from a degenerate grab', () => {
+    // Starting exactly on the fixed edge divides by zero; the answer must be "no change".
+    const scale = edgeScale({ x: 100, y: 0 }, { ...options, edge: 'left', start: { x: 100, y: 0 } });
+    expect(scale.x).toBe(1);
+  });
+
+  it('carries the pointer back through the rotation of the clip', () => {
+    /*
+      At 90° the picture's own x axis runs down the screen, so it is a *vertical* screen move
+      that widens a left-edge drag. Reading the screen axes instead would widen it on a
+      sideways move — the clip growing across the direction the user is pulling.
+
+      Derived rather than guessed, and the first version of this test was wrong twice: it put
+      the start point *on* the fixed edge (a degenerate grab, where the honest answer is "no
+      change"), and then expected the ratio to come from the horizontal screen delta when at
+      90° that component is the one that is pinned. The numbers below are a start 200 px
+      below the fixed edge and 300 px further below it, so the ratio is 300/200.
+    */
+    const grab = (endY: number) =>
+      edgeScale(
+        { x: 100, y: endY },
+        { ...options, edge: 'left', rotation: 90, fixed: { x: 100, y: 0 }, start: { x: 100, y: 200 } },
+      ).x;
+    /*
+      At pointer-down the pointer is 200 px below the fixed edge, so the picture's local x
+      there is 200. Moving *further* down to 300 grows it to 300 — ratio 1.5, a widening —
+      and moving back up to 100 shrinks it to 0.5. Both directions are asserted because the
+      pair is what pins the axis mapping: a single value passes under either sign convention,
+      and this test had the two swapped on its first attempt.
+    */
+    expect(grab(300)).toBeCloseTo(1.5, 10);
+    expect(grab(100)).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe('the fixed side of an edge scale', () => {
+  it('holds the opposite side, and nothing on the axis the edge does not govern', () => {
+    // A left-edge drag holds the right side: +x. Its height is symmetric, so 0.
+    expect(signForOppositeEdge('left')).toStrictEqual({ x: 1, y: 0 });
+    expect(signForOppositeEdge('right')).toStrictEqual({ x: -1, y: 0 });
+    expect(signForOppositeEdge('top')).toStrictEqual({ x: 0, y: 1 });
+    expect(signForOppositeEdge('bottom')).toStrictEqual({ x: 0, y: -1 });
+  });
+});
+
+describe('compensating an edge scale', () => {
+  const base = {
+    anchorX: 0.5,
+    anchorY: 0.5,
+    width: 200,
+    height: 100,
+    rotation: 0,
+  };
+  const canvas = { width: 1000, height: 800 };
+
+  it('shifts along the stretched axis only, so the held side stays put', () => {
+    /*
+      Derived: the fixed side is the right edge at +100 from the centre, and the width goes
+      from 1 to 1.5 — so `(1 − 1.5) · 100 = −50` px, i.e. −0.05 of a 1000 px canvas. The
+      untouched axis must contribute *exactly* zero, or the held edge drifts vertically on
+      every horizontal stretch.
+    */
+    const position = scaleAboutEdge(
+      { ...base, sign: { x: 1, y: 0 }, fromScale: { x: 1, y: 1 }, toScale: { x: 1.5, y: 1 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(position.x).toBeCloseTo(-50 / 1000, 10);
+    expect(position.y).toBeCloseTo(0, 10);
+  });
+
+  it('compensates a vertical stretch on the other axis', () => {
+    const position = scaleAboutEdge(
+      { ...base, sign: { x: 0, y: 1 }, fromScale: { x: 1, y: 1 }, toScale: { x: 1, y: 1.5 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(position.x).toBeCloseTo(0, 10);
+    expect(position.y).toBeCloseTo(-25 / 800, 10);
+  });
+
+  it('agrees with the corner compensation when given the same fixed point', () => {
+    /*
+      The two functions must not disagree about the same geometry, or an edge and a corner
+      would place the picture differently for the same scale.
+
+      The fixed point is the thing to get right, and my first attempt got it wrong: dragging
+      the `nw` corner holds the **southeast** one, so `scaleAboutCorner` works from `se`'s
+      sign (+1, +1) — passing `nw`'s (−1, −1) to the edge version asks it to hold a different
+      corner and the answers disagree by the picture's full extent. Compared here against
+      `se`, which is what that function actually holds.
+    */
+    const corner = scaleAboutCorner(
+      { ...base, corner: 'nw', fromScale: { x: 1, y: 1 }, toScale: { x: 2, y: 2 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    const edge = scaleAboutEdge(
+      { ...base, sign: { x: 1, y: 1 }, fromScale: { x: 1, y: 1 }, toScale: { x: 2, y: 2 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(edge.x).toBeCloseTo(corner.x, 10);
+    expect(edge.y).toBeCloseTo(corner.y, 10);
+  });
+
+  it('scales about the anchor, so an off-centre pivot moves the answer', () => {
+    const centred = scaleAboutEdge(
+      { ...base, sign: { x: 1, y: 0 }, fromScale: { x: 1, y: 1 }, toScale: { x: 1.5, y: 1 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    const offsetAnchor = scaleAboutEdge(
+      {
+        ...base,
+        anchorX: 0.25,
+        sign: { x: 1, y: 0 },
+        fromScale: { x: 1, y: 1 },
+        toScale: { x: 1.5, y: 1 },
+      },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(offsetAnchor.x).not.toBeCloseTo(centred.x, 6);
   });
 });

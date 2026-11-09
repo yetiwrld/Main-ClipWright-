@@ -33,8 +33,14 @@
  * involved at all.
  */
 
-/** The preview's active tool (SPEC 10 §3.1's right-hand segmented control). */
-export type PreviewTool = 'select' | 'pan';
+/**
+ * The preview's active tool (SPEC 10 §3.1's right-hand segmented control).
+ *
+ * `crop` matters beyond the cursor: it is what gives the four edge handles a *crop*
+ * meaning. Under `select` those edges scale one axis each, as §8.2 requires, and cropping
+ * moves to the Crop tool (§8.6) rather than competing for the same gesture.
+ */
+export type PreviewTool = 'select' | 'pan' | 'crop';
 
 export interface HandDragInput {
   /** Whether the toolbar's Pan tool is active. */

@@ -271,3 +271,81 @@ describe('Space+drag', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 });
+
+describe('the Crop tool decides what an edge drag means', () => {
+  /*
+    SPEC 10 §8.2 gives the four edges "scale along one axis", §8.6 puts cropping behind the
+    Crop tool. Before this the edges cropped unconditionally, because that was the only
+    gesture the surface had — so per-axis scale existed in the maths and had no pointer
+    affordance, and the two specs could not both be met.
+  */
+  const dragEdge = (edge: 'left' | 'right' | 'top' | 'bottom') => {
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    // A 400×400 box at the origin puts the left edge in the middle of the west grip.
+    fireEvent(layer(), pointer('pointerdown', 2, 200));
+    fireEvent(layer(), pointer('pointermove', 40, 200));
+    fireEvent(layer(), pointer('pointerup', 40, 200));
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    return calls[0]?.[1] as Record<string, unknown> | undefined;
+  };
+
+  it('scales one axis with the Select tool, and writes no crop', () => {
+    /*
+      The assertion is on *which* patch was committed, not on a number: the pure maths in
+      `canvas-drag.test.ts` owns the arithmetic, and what can go wrong here is the routing —
+      an edge that still took the crop branch would commit `crop` and leave the scale alone.
+    */
+    const patch = dragEdge('left');
+    expect(patch).toBeDefined();
+    expect(patch).toHaveProperty('transform');
+    expect(patch).not.toHaveProperty('crop');
+    const transform = patch!.transform as { scaleX: number; scaleY: number };
+    // Left edge only: the width changes and the height does not.
+    expect(transform.scaleX).not.toBe(1);
+    expect(transform.scaleY).toBe(1);
+  });
+
+  it('crops with the Crop tool on', () => {
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
+
+    fireEvent(layer(), pointer('pointerdown', 2, 200));
+    fireEvent(layer(), pointer('pointermove', 40, 200));
+    fireEvent(layer(), pointer('pointerup', 40, 200));
+
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const patch = calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(patch).toBeDefined();
+    expect(patch).toHaveProperty('crop');
+    expect(patch).not.toHaveProperty('transform');
+  });
+
+  it('toggles on C, and off again', () => {
+    render(<PreviewPane state={makeState()} fps={30} timeline={fakeTimeline()} />);
+    fireEvent.keyDown(document, { key: 'c' });
+    expect(screen.getByRole('button', { name: 'Crop tool (on)' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'c' });
+    expect(screen.getByRole('button', { name: 'Crop tool' })).toBeTruthy();
+  });
+
+  it('still scales by corners whatever the tool, since a corner is two axes', () => {
+    // §8.2 gives corners the uniform gesture unconditionally; the tool only repurposes edges.
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
+    // The top-left corner of a 400×400 box at the origin.
+    fireEvent(layer(), pointer('pointerdown', 2, 2));
+    fireEvent(layer(), pointer('pointermove', 60, 60));
+    fireEvent(layer(), pointer('pointerup', 60, 60));
+
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const patch = calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(patch).toHaveProperty('transform');
+    expect(patch).not.toHaveProperty('crop');
+  });
+});

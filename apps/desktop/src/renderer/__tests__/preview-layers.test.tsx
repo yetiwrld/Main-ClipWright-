@@ -527,10 +527,15 @@ describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
       A drag that began on an edge must write crop, not position. Getting this wrong
       is subtle: the clip would slide instead of being framed, and the picture would
       still change under the pointer, so it looks like "something happened".
+
+      The **Crop tool** now turns that meaning on (SPEC 10 §8.6). With every other tool the
+      same edge scales one axis instead (§8.2), which is why this test presses `C` first —
+      the gesture it guards still has to work, it just has a tool of its own now.
     */
     stubBoxes();
     const timeline = fakeTimeline();
     render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
     const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
 
     // 2 px from the left edge, mid-height. 40 px of travel = a tenth of the width.
@@ -658,6 +663,8 @@ describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC
       { id: 'a', keyframes: { 'crop.left': [{ timeUs: 0, value: 0, interpolation: 'linear' }] } },
     ]);
     render(<PreviewPane state={state} fps={30} timeline={timeline} />);
+    // Cropping is the Crop tool's gesture now (SPEC 10 §8.6).
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
     const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
 
     fireEvent(layer, pointer('pointerdown', 2, 300));
@@ -1260,12 +1267,16 @@ describe('the corner grips (SPEC 10 §8.2)', () => {
 
   it('still crops when the pointer goes down along an edge', () => {
     /*
-      The behaviour this slice promised not to disturb. A point midway along the right
-      edge is far from both corners, so it stays a crop.
+      The behaviour this slice promised not to disturb, and the reason it is checked with
+      the Crop tool on: a point midway along the right edge is far from both corners, so it
+      is the edge gesture — which crops under `C` and scales one axis under every other
+      tool. Both meanings are asserted together in `preview-view-tools.test.tsx`; this one
+      keeps the crop meaning honest.
     */
     stubLayout();
     const timeline = fakeTimeline();
     render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
     const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
 
     fireEvent(layer, pointer('pointerdown', 400, 200));

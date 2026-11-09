@@ -160,10 +160,15 @@ This document tracks architectural scope boundaries and honest limitations per `
    chooser and no "Preview ½" chip. The preview draws the DOM layer stack at each
    element's own resolution, so it has no render scale to change — the spec's quality
    levels describe the WebGL renderer, and a control that scaled a resolution nothing
-   is rendered at would be a switch that does nothing. The **four edge handles still
-   crop rather than scaling one axis each**:
-   crop is reachable along the whole edge, which keeps the gesture this app has always
-   had, but it means SPEC 10 §8.2's per-axis scale has no pointer affordance.
+   is rendered at would be a switch that does nothing. The four **edge handles** now
+   scale the one axis each governs, as §8.2 asks, with `Shift` giving them the uniform
+   corner behaviour; cropping moved onto the **Crop tool** (`C`), which is where §8.6 puts
+   it. What the crop tool does *not* have is §8.6's crop rectangle over the uncropped
+   source, its eight handles, the aspect-lock select (Free/Original/1:1/9:16/16:9/4:5/
+   Canvas), the rounded-corner slider, its dimmed-outside look, or `Enter`/`Esc` as
+   apply-and-cancel. Dragging an edge crops in place instead, against the picture's own
+   drawn box rather than against the source, and an `Esc` does abandon the drag. So the
+   gesture is there and the tool frame around it is not.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
    them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
    snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for

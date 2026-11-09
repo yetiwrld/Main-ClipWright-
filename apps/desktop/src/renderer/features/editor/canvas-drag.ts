@@ -299,8 +299,41 @@ export function oppositeCorner(corner: Corner): Corner {
   return ({ nw: 'se', ne: 'sw', se: 'nw', sw: 'ne' } as const)[corner];
 }
 
+/**
+ * The point a scale holds still, as a pair of signs in half-extents from the centre.
+ *
+ * A corner is `(±1, ±1)`. An **edge** is a half-corner — `(0, ±1)` for the top and bottom,
+ * `(±1, 0)` for the left and right — and that zero is the whole of SPEC 10 §8.2's "scale
+ * along one axis": the axis with no sign never grows, so the picture stretches across the
+ * axis the edge is on and leaves the other alone.
+ */
+export interface FixedSign {
+  x: -1 | 0 | 1;
+  y: -1 | 0 | 1;
+}
+
+/** The sign pair of a corner, for use as a `FixedSign`. */
+export function signForCorner(corner: Corner): FixedSign {
+  return cornerSign(corner);
+}
+
+/**
+ * The sign pair of an edge's *opposite* side — the side that stays put.
+ *
+ * Dragging the left edge holds the right one, so the fixed sign is `+x`; dragging the top
+ * holds the bottom, `+y`. The untouched axis is `0`.
+ */
+export function signForOppositeEdge(edge: 'left' | 'right' | 'top' | 'bottom'): FixedSign {
+  return ({
+    left: { x: 1, y: 0 },
+    right: { x: -1, y: 0 },
+    top: { x: 0, y: 1 },
+    bottom: { x: 0, y: -1 },
+  } as const)[edge];
+}
+
 /** A corner's offset from the picture's centre, as a sign pair in half-extents. */
-function cornerSign(corner: Corner): { x: number; y: number } {
+function cornerSign(corner: Corner): FixedSign {
   return {
     x: corner === 'nw' || corner === 'sw' ? -1 : 1,
     y: corner === 'nw' || corner === 'ne' ? -1 : 1,
@@ -400,17 +433,25 @@ export function scaleAboutCorner(
   const anchorX = (options.anchorX - 0.5) * options.width;
   const anchorY = (options.anchorY - 0.5) * options.height;
 
-  // `fromScale`/`toScale` are uniform here (this handle only scales evenly), so either
-  // axis describes the change; averaging keeps a non-uniform clip's factor honest
-  // instead of silently reading one axis and ignoring the other.
-  const deltaScale =
-    (options.fromScale.x + options.fromScale.y) / 2 - (options.toScale.x + options.toScale.y) / 2;
+  /*
+    Per axis, not averaged.
+
+    The compensated shift is `(S₀ − S₁) · (p_f − anchor)` where the scale is a *pair* —
+    the point that must not move has to be projected through both axes independently. The
+    earlier version averaged the two axes into one `deltaScale` and applied it to both
+    components, which is right only while the scale stays uniform. The moment the axes
+    differ — which `Shift` free-scale, and now the edge handles, both produce — the fixed
+    corner slides: doubling only the width of a 400×200 picture moved the "fixed" corner
+    100 px. That is precisely the thing a scaling handle promises it will not do.
+  */
+  const deltaX = options.fromScale.x - options.toScale.x;
+  const deltaY = options.fromScale.y - options.toScale.y;
 
   const radians = (options.rotation * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
-  const localX = deltaScale * (cornerX - anchorX);
-  const localY = deltaScale * (cornerY - anchorY);
+  const localX = deltaX * (cornerX - anchorX);
+  const localY = deltaY * (cornerY - anchorY);
 
   // Rotate into screen axes, then express the shift as a canvas fraction.
   const screenX = cos * localX - sin * localY;
@@ -561,4 +602,155 @@ export function scaleAboutCentre(
   startDistance: number,
 ): number {
   return cornerScaleFactor(pointer, centre, startDistance);
+}
+
+/**
+ * The scale an **edge** drag has reached, given how far the pointer has moved (SPEC 10 §8.2).
+ *
+ * An edge scales one axis, so this is the free-scale solve with the other axis pinned at the
+ * scale it started from. The pointer is carried back into the picture's own frame first —
+ * the same reason `freeScaleAboutCorner` does: a clip turned 90° must widen when the pointer
+ * is pulled sideways, not when it is pulled down.
+ *
+ * Returned as a pair rather than a number because the *pinned* axis still has to come back
+ * out of here: a caller that applied only the moving axis would silently reset any free
+ * scale the user had already set on the other one.
+ */
+export function edgeScale(
+  pointer: { x: number; y: number },
+  options: {
+    edge: CropEdge;
+    /** The opposite edge's position in client coordinates — the point that stays put. */
+    fixed: { x: number; y: number };
+    /** The pointer's position at pointer-down. */
+    start: { x: number; y: number };
+    startScale: { x: number; y: number };
+    rotation: number;
+    /** Uniform instead of one-axis (SPEC 10 §8.2's `Shift`), the corner behaviour. */
+    uniform?: boolean;
+  },
+): { x: number; y: number } {
+  const radians = (-options.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const local = (point: { x: number; y: number }) => {
+    const dx = point.x - options.fixed.x;
+    const dy = point.y - options.fixed.y;
+    return { x: cos * dx - sin * dy, y: sin * dx + cos * dy };
+  };
+  const from = local(options.start);
+  const now = local(pointer);
+  const clamp = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+  /*
+    A start exactly on the fixed edge is a degenerate grab rather than a scale: the ratio
+    divides by zero, gives `Infinity`, and clamps to the maximum — flinging the clip to full
+    size. Leaving that axis alone is the only honest answer, and it is the same guard
+    `freeScaleAboutCorner` makes.
+  */
+  const ratio = (before: number, after: number) =>
+    Math.abs(before) < 1e-6 ? 1 : after / before;
+
+  if (options.uniform) {
+    /*
+      `Shift` on an edge asks for the corner behaviour: both axes move by the axis the edge
+      governs, so the picture grows evenly and the edge being dragged is the one that
+      follows the pointer. Reading the *other* axis here would be the bug this branch
+      exists to avoid — a free-scale solve would let a top-edge drag change the width.
+    */
+    const factor =
+      options.edge === 'left' || options.edge === 'right'
+        ? ratio(from.x, now.x)
+        : ratio(from.y, now.y);
+    return { x: clamp(options.startScale.x * factor), y: clamp(options.startScale.y * factor) };
+  }
+
+  const horizontal = options.edge === 'left' || options.edge === 'right';
+  return {
+    x: horizontal ? clamp(options.startScale.x * ratio(from.x, now.x)) : options.startScale.x,
+    y: horizontal ? options.startScale.y : clamp(options.startScale.y * ratio(from.y, now.y)),
+  };
+}
+
+/**
+ * The position an edge scale needs so the opposite edge stays where it is (SPEC 10 §8.2).
+ *
+ * The same compensation as `scaleAboutCorner`, with the fixed point allowed to be an edge:
+ * a `0` sign means that axis has no fixed side, so a stretch along it is symmetric about the
+ * anchor and needs no shift. Expressed as its own function rather than by widening the
+ * corner signature, because every caller of the corner version is reasoning about corners
+ * and a `'nw' | FixedSign` union would make each of them check.
+ */
+export function scaleAboutEdge(
+  options: {
+    sign: FixedSign;
+    fromScale: { x: number; y: number };
+    toScale: { x: number; y: number };
+    anchorX: number;
+    anchorY: number;
+    width: number;
+    height: number;
+    rotation: number;
+  },
+  position: { x: number; y: number },
+  canvas: { width: number; height: number },
+): { x: number; y: number } {
+  const halfWidth = options.width / 2;
+  const halfHeight = options.height / 2;
+  const cornerX = options.sign.x * halfWidth;
+  const cornerY = options.sign.y * halfHeight;
+  const anchorX = (options.anchorX - 0.5) * options.width;
+  const anchorY = (options.anchorY - 0.5) * options.height;
+
+  /*
+    Per axis, for the reason `scaleAboutCorner` documents at length: these two products are
+    independent, and averaging them slides the fixed side whenever the axes differ — which
+    for an edge handle is *every* drag.
+  */
+  const localX = (options.fromScale.x - options.toScale.x) * (cornerX - anchorX);
+  const localY = (options.fromScale.y - options.toScale.y) * (cornerY - anchorY);
+
+  const radians = (options.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const screenX = cos * localX - sin * localY;
+  const screenY = sin * localX + cos * localY;
+  return {
+    x: position.x + (canvas.width > 0 ? screenX / canvas.width : 0),
+    y: position.y + (canvas.height > 0 ? screenY / canvas.height : 0),
+  };
+}
+
+/**
+ * Where an edge's **opposite** side sits on screen, in client coordinates.
+ *
+ * This is the point an edge scale must hold still, and it is the direct analogue of
+ * `scaleAboutCorner`'s fixed corner. The edge's own midpoint is the anchor of the gesture,
+ * and the opposite side is one full extent away from it along the picture's own axis, so it
+ * has to be carried through the clip's rotation exactly as a corner is — otherwise a turned
+ * clip stretches away from the wrong side and the side the user is *not* holding slides.
+ */
+export function edgeFixedPoint(options: {
+  edge: CropEdge;
+  /** The drawn picture box in client coordinates. */
+  rect: { x: number; y: number; width: number; height: number };
+  rotation: number;
+}): { x: number; y: number } {
+  const { rect } = options;
+  const centreX = rect.x + rect.width / 2;
+  const centreY = rect.y + rect.height / 2;
+  /*
+    The midpoint of the *opposite* side, as an offset from the centre in the picture's own
+    axes. Dragging the left edge holds the right one's midpoint, which is half a width to the
+    right; the other axis contributes nothing, which is what keeps the gesture one-axis.
+  */
+  const sign = signForOppositeEdge(options.edge);
+  const localX = sign.x * (rect.width / 2);
+  const localY = sign.y * (rect.height / 2);
+  const radians = (options.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: centreX + cos * localX - sin * localY,
+    y: centreY + sin * localX + cos * localY,
+  };
 }

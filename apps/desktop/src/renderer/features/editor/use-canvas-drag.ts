@@ -24,13 +24,17 @@ import {
   cornerAt,
   cornerScaleFactor,
   croppedEdge,
+  edgeFixedPoint,
+  edgeScale,
   freeScaleAboutCorner,
   lockedAxis,
   handleAt,
   movedOffset,
   pixelsToFraction,
   pointerToPictureFraction,
+  signForOppositeEdge,
   rotatedBy,
+  scaleAboutEdge,
   scaleAboutCorner,
   snapRotation,
   type Corner,
@@ -115,6 +119,15 @@ export type GestureMode = 'move' | 'rotate' | 'anchor' | 'scale';
 
 interface Gesture {
   target: CanvasDragTarget;
+  /**
+   * Whether an edge drag crops or scales.
+   *
+   * SPEC 10 §8.2 gives the edges "scale along one axis" and §8.6 puts cropping behind the
+   * **Crop** tool (`C`). Before this, the edges cropped because that was the only gesture
+   * the surface had, so per-axis scale had no pointer affordance at all. The tool now
+   * decides which meaning an edge has, rather than the same drag doing both.
+   */
+  edgeMode: 'crop' | 'scale';
   mode: GestureMode | CropEdge;
   startX: number;
   startY: number;
@@ -218,6 +231,11 @@ export interface CanvasDragApi {
     target: CanvasDragTarget,
     canvas: HTMLDivElement | null,
     forcedMode?: 'rotate' | 'anchor' | 'scale' | 'scale',
+    /**
+     * What an **edge** drag means under the active tool: `crop` while the Crop tool is on,
+     * `scale` otherwise (SPEC 10 §8.2 against §8.6). Corners and the body are unaffected.
+     */
+    edgeMode?: 'crop' | 'scale',
   ) => void;
   move: (event: React.PointerEvent) => void;
   end: (event: React.PointerEvent) => void;
@@ -260,6 +278,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
       target: CanvasDragTarget,
       canvas: HTMLDivElement | null,
       forcedMode?: 'rotate' | 'anchor' | 'scale' | 'scale',
+      edgeMode: 'crop' | 'scale' = 'scale',
     ) => {
       if (!canvas) return;
       const box = canvas.getBoundingClientRect();
@@ -326,6 +345,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         : null;
       gesture.current = {
         target,
+        edgeMode,
         mode: forcedMode ?? (corner ? 'scale' : handle) ?? 'move',
         startX: event.clientX,
         startY: event.clientY,
@@ -623,8 +643,8 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         current.canvas,
       );
       current.to = { ...current.to, scaleX: toScale.x, scaleY: toScale.y, ...position };
-    } else {
-      const edge = current.mode;
+    } else if (current.edgeMode === 'crop') {
+      const edge = current.mode as CropEdge;
       // A crop edge moves along one axis only: the horizontal edges are measured
       // against the canvas width and the vertical ones against its height, matching
       // how the crop fractions are stored (both as fractions of the source, but the
@@ -635,6 +655,57 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         horizontal ? current.canvas.width : current.canvas.height,
       );
       current.to = { ...current.to, crop: croppedEdge(current.from.crop, edge, delta) };
+    } else {
+      /*
+        An edge with the Crop tool off: scale the one axis that edge governs (SPEC 10
+        §8.2). The fixed point is the *opposite* edge, which is what makes the picture
+        grow away from the side the user is not touching — the same promise a corner
+        makes, for one axis instead of two.
+
+        `Shift` asks for the corner behaviour instead: both axes by the edge's factor.
+      */
+      const edge = current.mode as CropEdge;
+      const fixed = edgeFixedPoint({
+        edge,
+        /*
+          The drawn box in client coordinates. `boxLeft`/`boxTop` are captured at
+          pointer-down for the same reason the corner path captures them: re-measuring
+          mid-drag would let a layout shift move the "fixed" side under the user's hand.
+        */
+        rect: {
+          x: current.boxLeft + current.target.rect.x,
+          y: current.boxTop + current.target.rect.y,
+          width: current.target.rect.width,
+          height: current.target.rect.height,
+        },
+        rotation: current.from.rotation,
+      });
+      const toScale = edgeScale(
+        { x: event.clientX, y: event.clientY },
+        {
+          edge,
+          fixed,
+          start: { x: current.startX, y: current.startY },
+          startScale: { x: current.from.scaleX, y: current.from.scaleY },
+          rotation: current.from.rotation,
+          uniform: event.shiftKey,
+        },
+      );
+      const position = scaleAboutEdge(
+        {
+          sign: signForOppositeEdge(edge),
+          fromScale: { x: current.from.scaleX, y: current.from.scaleY },
+          toScale,
+          anchorX: current.from.anchorX,
+          anchorY: current.from.anchorY,
+          width: current.target.size.width,
+          height: current.target.size.height,
+          rotation: current.from.rotation,
+        },
+        { x: current.from.x, y: current.from.y },
+        current.canvas,
+      );
+      current.to = { ...current.to, scaleX: toScale.x, scaleY: toScale.y, ...position };
     }
     setPreviewed({ itemId: current.target.itemId, ...current.to });
   }, []);
@@ -710,11 +781,34 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         });
         return;
       }
-      const edge = current.mode;
-      if (current.to.crop[edge] === current.from.crop[edge]) return;
+      const edge = current.mode as CropEdge;
+      if (current.edgeMode === 'crop') {
+        if (current.to.crop[edge] === current.from.crop[edge]) return;
+        commit({
+          itemId: current.target.itemId,
+          crop: { edge, value: current.to.crop[edge] },
+        });
+        return;
+      }
+      /*
+        An edge scale writes both axes and the compensating move, like a corner does. The
+        untouched axis is carried through `to` unchanged, so an edge drag cannot silently
+        reset a free scale the user had already set on the other one.
+      */
+      if (
+        current.to.scaleX === current.from.scaleX &&
+        current.to.scaleY === current.from.scaleY
+      ) {
+        return;
+      }
       commit({
         itemId: current.target.itemId,
-        crop: { edge, value: current.to.crop[edge] },
+        transform: {
+          scaleX: current.to.scaleX,
+          scaleY: current.to.scaleY,
+          x: current.to.x,
+          y: current.to.y,
+        },
       });
     },
     [commit],
