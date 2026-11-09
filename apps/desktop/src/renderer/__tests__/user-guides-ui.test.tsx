@@ -144,6 +144,26 @@ describe('creating a guide with Ctrl and a drag from an edge', () => {
     expect(command?.[0]).toBe('Add guide');
   });
 
+  it('does not make a guide when the Ctrl-drag starts on a clip', () => {
+    /*
+      The layer sits inside the canvas, so its pointer-down bubbles to the canvas handler.
+      Without the origin check one gesture both moved the picture and left a line behind —
+      the same "two things at once" that the rotate handle stops propagation to avoid.
+      Checked from the canvas edge so the *only* reason no guide appears is the origin.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, new MouseEvent('pointerdown', { clientX: 10, clientY: 200, ctrlKey: true, bubbles: true }));
+    fireEvent(layer, new MouseEvent('pointermove', { clientX: 100, clientY: 200, ctrlKey: true, bubbles: true }));
+    fireEvent(layer, new MouseEvent('pointerup', { clientX: 100, clientY: 200, ctrlKey: true, bubbles: true }));
+    const guideCalls = (timeline.run as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call) => call[0] === 'Add guide',
+    );
+    expect(guideCalls).toHaveLength(0);
+  });
+
   it('ignores a Ctrl-drag that does not start at an edge', () => {
     // An ordinary `Ctrl`-drag over the picture is not a gesture this surface gives a
     // meaning; making a guide there would be a surprise.

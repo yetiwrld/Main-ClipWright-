@@ -806,6 +806,16 @@ export function PreviewPane({
           */
           onPointerDown={(event) => {
             if (!(event.ctrlKey || event.metaKey) || !timeline) return;
+            /*
+              A `Ctrl`-drag that began **on a clip** is that clip's drag, not a guide. The
+              layer sits inside this element, so its pointer-down bubbles here — without
+              this check one gesture both moved the picture and left a line behind, which
+              is precisely the "two things at once" the rotate handle has to stop
+              propagation to avoid. Checking the target rather than stopping propagation in
+              the layer keeps the layer's own handler unaware of guides entirely.
+            */
+            const origin = event.target as HTMLElement | null;
+            if (origin?.closest('[data-layer-id]')) return;
             const box = event.currentTarget.getBoundingClientRect();
             if (box.width <= 0 || box.height <= 0) return;
             const fractionX = (event.clientX - box.left) / box.width;
