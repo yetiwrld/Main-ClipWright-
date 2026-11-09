@@ -101,8 +101,10 @@ This document tracks architectural scope boundaries and honest limitations per `
 
    A snapped drag draws a `--brand` hairline on each axis it caught, and the line goes
    when the drag ends or is abandoned, so a line never outlives the gesture that explains
-   it, labelled with how far the snap pulled the clip in preview pixels. Still missing
-   from §8.8: **equal-spacing hints**, **user guides**
+   it, labelled with how far the snap pulled the clip in preview pixels. When the gaps
+   either side of a dragged clip come within the threshold of equal, the two gaps are
+   equalised and drawn as two equal bars — horizontal only, since nothing has confirmed
+   the vertical form reads well stacked. Still missing from §8.8: **user guides**
    (`Ctrl`-drag from the viewport edge, saved with the project) and the **custom N×M
    grid** (the 3×3 thirds toggle exists). Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their

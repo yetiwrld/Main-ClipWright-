@@ -6,8 +6,11 @@ import {
   snapTargetsFor,
   snapThresholdPx,
   snappingApplies,
+  equalSpacingSnap,
+  spacingMayApply,
   targetsForLines,
   targetsForOverlayRect,
+  type ItemBounds,
 } from '../features/editor/snapping.js';
 
 describe('snap targets (SPEC 10 §8.8)', () => {
@@ -294,5 +297,134 @@ describe('snapping to composition lines (SPEC 10 §8.8, §9)', () => {
     // The caller passes an empty list rather than a flag, so this is the shape the
     // overlay-off path takes.
     expect(targetsForLines([])).toEqual([]);
+  });
+});
+
+describe('equal-spacing hints (SPEC 10 §8.8)', () => {
+  const bounds = (left: number, right: number): ItemBounds => ({
+    left,
+    centre: (left + right) / 2,
+    right,
+  });
+
+  it('splits the difference between two neighbours', () => {
+    /*
+      The dragged item sits between two others with gaps of 0.20 and 0.30. Equalising to
+      their mean moves it by half the *difference* — not by the whole one — so the item
+      ends up centred in the space rather than flush against the larger gap.
+
+      Expected values derived rather than guessed: gaps 0.20/0.30, mean 0.25, delta
+      0.05, and after the move both gaps are 0.25.
+    */
+    const snap = equalSpacingSnap(bounds(-0.1, 0.1), [bounds(-0.4, -0.3), bounds(0.4, 0.5)], 0.1);
+    expect(snap).not.toBeNull();
+    expect(snap!.delta).toBeCloseTo(0.05, 10);
+    expect(snap!.gap).toBeCloseTo(0.25, 10);
+  });
+
+  it('draws both gaps, and they are equal after the move', () => {
+    // The hint's whole job is to show two equal spans; a span measured from the item's
+    // *unmoved* edge would draw two different lengths and defeat it.
+    const snap = equalSpacingSnap(bounds(-0.1, 0.1), [bounds(-0.4, -0.3), bounds(0.4, 0.5)], 0.1)!;
+    const [first, second] = snap.spans;
+    expect(first.to - first.from).toBeCloseTo(0.25, 10);
+    expect(second.to - second.from).toBeCloseTo(0.25, 10);
+    expect(first.length).toBeCloseTo(snap.gap, 10);
+  });
+
+  it('matches an existing gap outside the item', () => {
+    /*
+      Two neighbours already sit 0.50 apart and the item is dragged to about that
+      distance to their left. The item's right edge should land exactly 0.50 clear of
+      their left edge — a row that reads as deliberately spaced rather than nearly so.
+    */
+    const snap = equalSpacingSnap(bounds(-0.88, -0.68), [bounds(-0.2, 0), bounds(0.5, 0.7)], 0.1);
+    expect(snap).not.toBeNull();
+    expect(snap!.delta).toBeCloseTo(-0.02, 10);
+    expect(snap!.gap).toBeCloseTo(0.5, 10);
+  });
+
+  it('mirrors that on the right-hand side', () => {
+    // The same case reflected: an item to the right of the pair.
+    const snap = equalSpacingSnap(bounds(1.18, 1.38), [bounds(-0.2, 0), bounds(0.5, 0.7)], 0.1);
+    expect(snap).not.toBeNull();
+    expect(snap!.delta).toBeCloseTo(0.02, 10);
+  });
+
+  it('does nothing when the difference is already too large to be a nudge', () => {
+    // Gaps of 0.40 and 0.80 differ by 0.40, so half of it is a 0.20 move: far outside a
+    // pointer's 8 px. Snapping here would yank the clip across the canvas.
+    const snap = equalSpacingSnap(bounds(-0.2, 0), [bounds(-1.0, -0.6), bounds(0.8, 1.0)], 0.02);
+    expect(snap).toBeNull();
+  });
+
+  it('declines a degenerate threshold rather than accepting every candidate', () => {
+    /*
+      The `NaN` trap again: every comparison against it is false, so a naive
+      `Math.abs(delta) > threshold` guard accepts *everything* and the clip snaps to a
+      spacing that has nothing to do with where it was dragged.
+    */
+    const others = [bounds(-0.4, -0.3), bounds(0.4, 0.5)];
+    expect(equalSpacingSnap(bounds(-0.1, 0.1), others, Number.NaN)).toBeNull();
+    expect(equalSpacingSnap(bounds(-0.1, 0.1), others, 0)).toBeNull();
+    expect(equalSpacingSnap(bounds(-0.1, 0.1), others, -1)).toBeNull();
+  });
+
+  it('returns nothing with no neighbours at all', () => {
+    // A lone clip on the canvas has no spacing to equalise.
+    expect(equalSpacingSnap(bounds(-0.1, 0.1), [], 0.1)).toBeNull();
+  });
+
+  it('ignores a neighbour with no width', () => {
+    // A degenerate bounding box would divide the canvas into meaningless gaps.
+    expect(equalSpacingSnap(bounds(-0.1, 0.1), [bounds(0.4, 0.4), bounds(-0.4, -0.3)], 0.1)).toBeNull();
+  });
+
+  it('prefers the smaller move when two equal-spacings are available', () => {
+    /*
+      A crowded canvas offers several. The nearest one wins, because it is the one the
+      user's pointer was closest to meaning — the same rule the line snaps use.
+    */
+    const others = [bounds(-0.4, -0.3), bounds(0.4, 0.5), bounds(-0.35, -0.34)];
+    const snap = equalSpacingSnap(bounds(-0.1, 0.1), others, 0.1);
+    expect(snap).not.toBeNull();
+    expect(Math.abs(snap!.delta)).toBeLessThanOrEqual(0.05);
+  });
+});
+
+describe('when equal-spacing may apply (SPEC 10 §8.8 precedence)', () => {
+  const target = { at: 0, kind: 'canvas-centre' as const };
+
+  it('declines on an axis where a line caught', () => {
+    /*
+      The precedence rule, tested where it can actually be reached. A line is the older,
+      more legible answer and users already have it in their hands; a spacing hint that
+      outbid it would quietly take a drag away from an edge that had caught.
+    */
+    expect(spacingMayApply({ position: 0, target, delta: 0.01 })).toBe(false);
+  });
+
+  it('allows it on an axis where nothing caught', () => {
+    // `snapAxis` returns the unchanged position with a null target when nothing is near,
+    // and that is the state spacing exists for.
+    expect(spacingMayApply({ position: 0.4, target: null, delta: 0 })).toBe(true);
+  });
+
+  it('declines when snapping was suppressed entirely', () => {
+    // `null` is what `Alt` produces. A user who asked to place the clip exactly must not
+    // be nudged by the spacing rule either.
+    expect(spacingMayApply(null)).toBe(false);
+  });
+
+  it('is not fooled by a result that has a position but no target', () => {
+    /*
+      The bug this function was extracted to fix: the guard read
+      `snapped.x.position != null`, and `snapAxis` *always* returns a position, so the
+      rule never declined and the spacing correction was computed and then thrown away by
+      the commit. Testing the predicate directly is what makes that inversible mistake
+      visible at the point where it is made.
+    */
+    expect(spacingMayApply({ position: 0.1, target: null, delta: 0 })).toBe(true);
+    expect(spacingMayApply({ position: 0.1, target, delta: 0 })).toBe(false);
   });
 });

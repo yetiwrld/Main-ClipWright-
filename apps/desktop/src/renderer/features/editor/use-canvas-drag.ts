@@ -38,7 +38,9 @@ import {
   type CropEdges,
 } from './canvas-drag.js';
 import {
+  equalSpacingSnap,
   itemBounds,
+  spacingMayApply,
   snapAxis,
   snapTargetsFor,
   snapThresholdPx,
@@ -47,6 +49,7 @@ import {
   type ItemBounds,
   type SnapGuide,
   type SnapTarget,
+  type SpacingSpan,
 } from './snapping.js';
 
 export interface CanvasDragTarget {
@@ -189,6 +192,23 @@ export interface CanvasDragApi {
    */
   guides: { x: SnapGuide | null; y: SnapGuide | null };
   /**
+   * The two equal gaps to draw, when this drag is equalising a spacing
+   * (SPEC 10 §8.8's "distance guides between three items").
+   *
+   * Empty in every other case. Separate from `guides` because a spacing hint is not a
+   * line on a target — it is two spans between three items, and drawing it as a line
+   * would say the wrong thing.
+   */
+  /**
+   * The two equal gaps to draw, when this drag is equalising a horizontal spacing
+   * (SPEC 10 §8.8's "distance guides between three items"), or empty.
+   *
+   * Horizontal only. Vertical spacing is the same maths, but nothing has been built to
+   * confirm it reads well stacked — and a hint that draws on an axis the user is not
+   * dragging along is worse than none.
+   */
+  spacing: readonly SpacingSpan[];
+  /**
    * @param forcedMode Starts a specific gesture regardless of hit testing — how the
    * rotate handle and the anchor crosshair begin, since they are not edges of the
    * picture and the hit test would read them as a move.
@@ -228,6 +248,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     render — the guide would only appear on whichever pointer move happened to coincide
     with some other re-render, which is not an affordance but a flicker.
   */
+  const [spacing, setSpacing] = useState<readonly SpacingSpan[]>([]);
   const [guides, setGuides] = useState<{ x: SnapGuide | null; y: SnapGuide | null }>({
     x: null,
     y: null,
@@ -446,7 +467,55 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
           ? previous
           : guide,
       );
-      current.to = { ...current.to, x: snapped?.x.position ?? moved.x, y: snapped?.y.position ?? moved.y };
+      /*
+        Equal-spacing hints (SPEC 10 §8.8).
+
+        Only considered on an axis where no line caught. A flush edge is the stronger,
+        more visible intent — and it is what this app already did before spacing existed,
+        so letting a spacing hint outbid a line would silently take away an alignment
+        users have. `Alt` bypasses the lot, because a user who has asked to place the
+        clip exactly should not be nudged by either rule.
+      */
+      let spacedX: number | null = null;
+      let spacingSpans: readonly SpacingSpan[] = [];
+      if (spacingMayApply(snapped?.x ?? null)) {
+        const half = current.target.extent.x / 2;
+        const spacingSnap = equalSpacingSnap(
+          { left: moved.x - half, centre: moved.x, right: moved.x + half },
+          current.target.others.x,
+          snapThresholdPx(current.canvas.width),
+        );
+        if (spacingSnap) {
+          spacedX = moved.x + spacingSnap.delta;
+          spacingSpans = spacingSnap.spans;
+        }
+      }
+      /*
+        Only replaced when the spans actually change, for the same reason the guides are:
+        sixty pointer moves a second must not repaint the canvas for two bars that have
+        not moved.
+      */
+      setSpacing((previous) =>
+        previous.length === spacingSpans.length &&
+        previous.every(
+          (span, index) =>
+            span.from === spacingSpans[index]!.from && span.to === spacingSpans[index]!.to,
+        )
+          ? previous
+          : spacingSpans,
+      );
+      /*
+        Keyed on whether a *target* was hit, not on whether a position came back.
+        `snapAxis` returns the unchanged position when nothing is near enough, so
+        `snapped.x.position` is never null and `?? spacedX` would have silently discarded
+        every spacing correction — the hint would draw and the commit would ignore it.
+        That is exactly what the discriminating test caught.
+      */
+      current.to = {
+        ...current.to,
+        x: snapped?.x.target ? snapped.x.position : (spacedX ?? moved.x),
+        y: snapped?.y.target ? snapped.y.position : moved.y,
+      };
     } else if (current.mode === 'anchor') {
       /*
         Dragging the crosshair moves the pivot *without moving the picture* — the
@@ -583,6 +652,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         ended up.
       */
       setGuides({ x: null, y: null });
+      setSpacing([]);
       (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
       if (!current) return;
 
@@ -661,7 +731,14 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     setDragging(false);
     setMode(null);
     setPreviewed(null);
+    /*
+      Both overlays go with the gesture, for the same reason the preview does: a guide or
+      a spacing left behind would describe a drag that is no longer happening. The spacing
+      was missed here when it was added to `end()` and not to `cancel()`, and a test that
+      released the pointer found it while `Esc` did not.
+    */
     setGuides({ x: null, y: null });
+    setSpacing([]);
   }, []);
 
   const preview = useCallback(
@@ -669,5 +746,5 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     [previewed],
   );
 
-  return { preview, dragging, mode, guides, begin, move, end, cancel };
+  return { preview, dragging, mode, guides, spacing, begin, move, end, cancel };
 }

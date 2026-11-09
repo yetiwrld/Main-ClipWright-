@@ -34,6 +34,51 @@ function makeState(transform: Record<string, number> = {}): TimelineState {
   return { ...base, tracks, items: { a: item } } as unknown as TimelineState;
 }
 
+/**
+ * Three narrow clips in a row, for the spacing tests.
+ *
+ * Each is a tenth of the canvas wide, so two neighbours leave a real gap between them —
+ * with the full-canvas items the other fixtures use, nothing can ever fit between two of
+ * them and a spacing hint is not constructible at all.
+ *
+ * The width comes from **crop**, not from `scaleX`. Snapping measures the cropped
+ * fraction of the canvas, which stays 1.0 with no crop no matter what the scale is, so a
+ * scaled-down item still bids for the whole canvas and no gap exists.
+ *
+ * The row sits entirely **right of centre**, and that is deliberate rather than tidy:
+ * with the equal spacing at the canvas centre, item `a`'s own centre would be within 8 px
+ * of the canvas centre line, a line snap would catch first by design, and the spacing
+ * test would be asserting on a code path it never reached. That mistake cost a debugging
+ * round here — the guard was working exactly as intended and the fixture was wrong.
+ *
+ * Geometry: `l` spans [0.05,0.15] and `r` [0.45,0.55] in canvas fractions, so the two
+ * gaps are equal when `a`'s centre is at 0.3. At 0.315 they are 0.115 and 0.085 — a 6 px
+ * difference on a 400 px canvas, inside the 8 px threshold.
+ */
+function makeSpacedState(x: number): TimelineState {
+  const base = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+  const mainTrack = base.tracks.find((track) => track.role === 'main')!;
+  const tracks = base.tracks.map((track) => ({ ...track, itemIds: [] as string[] }));
+  tracks.find((track) => track.id === mainTrack.id)!.itemIds.push('l', 'a', 'r');
+  const item = (id: string, x: number) => ({
+    id,
+    trackId: mainTrack.id,
+    type: 'video' as const,
+    mediaId: `media-${id}`,
+    startUs: 0,
+    durationUs: 5_000_000,
+    sourceInUs: 0,
+    transform: { x },
+    crop: { left: 0.45, right: 0.45 },
+    keyframes: {},
+  });
+  return {
+    ...base,
+    tracks,
+    items: { l: item('l', 0.1), a: item('a', x), r: item('r', 0.5) },
+  } as unknown as TimelineState;
+}
+
 function fakeTimeline(): TimelineApi {
   return {
     fps: 30,
@@ -272,5 +317,140 @@ describe('snapping to the thirds (SPEC 10 §8.8, §9)', () => {
   it('pulls onto the first third when the lines are showing', () => {
     // 1/3, not 0.325: the clip's left edge lands on the visible line.
     expect(commitX(true)).toBeCloseTo(1 / 3, 6);
+  });
+});
+
+describe('equal-spacing hints reaching the canvas (SPEC 10 §8.8)', () => {
+  /*
+    See `makeSpacedState` for the geometry: equal spacing is at x = 0.3, and the drag
+    starts at 0.315 so the gaps differ by 6 px — inside the threshold, so the hint should
+    appear and the commit should land exactly on 0.3.
+  */
+  const dragOnce = (startX: number, moveToX: number) => {
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeSpacedState(startX)} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', moveToX, 200));
+    return { timeline, layer };
+  };
+
+  it('shows the hint while the gaps are nearly equal', () => {
+    dragOnce(0.315, 200);
+    expect(screen.getByTestId('spacing-hints')).toBeTruthy();
+    expect(screen.getByTestId('spacing-hint-0')).toBeTruthy();
+    expect(screen.getByTestId('spacing-hint-1')).toBeTruthy();
+  });
+
+  it('commits the equalised position rather than the raw drag', () => {
+    /*
+      The wiring check: the maths returning a delta is worth nothing if the committed
+      position ignores it.
+
+      The drag has to move, because a pointer that ends where it began is a click and
+      commits nothing at all (`§8.10`). Six pixels left takes 0.315 to 0.3 — the equal
+      spacing — so the raw and equalised values coincide here; the *next* test is what
+      distinguishes them.
+    */
+    const { timeline, layer } = dragOnce(0.315, 194);
+    fireEvent(layer, pointer('pointerup', 194, 200));
+    const calls = (timeline.setItemProperties as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[1]?.transform?.x).toBeCloseTo(0.3, 6);
+  });
+
+  it('overrides the raw drag, landing on the equal spacing rather than near it', () => {
+    /*
+      The discriminating case. Starting at 0.32 and dragging 2 px left leaves the raw
+      position at 0.315 — visibly unequal — and the equalising delta of −0.015 carries it
+      to 0.3. A commit that ignored the spacing would write 0.315, which is a two-pixel
+      lie about gaps the hint just drew as equal.
+    */
+    const { timeline, layer } = dragOnce(0.32, 198);
+    fireEvent(layer, pointer('pointerup', 198, 200));
+    const calls = (timeline.setItemProperties as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[1]?.transform?.x).toBeCloseTo(0.3, 6);
+  });
+
+  it('still shows the hint once the gaps are exactly equal', () => {
+    /*
+      A zero-delta spacing is the *confirmation*, not a no-op: the moment the snap lands
+      is the moment the user wants to see the two equal bars. Suppressing it would make
+      the feedback vanish exactly at the instant it succeeded — which is the opposite of
+      the rule the guide *label* follows, because a label reading "0 px" is a number
+      saying nothing while two equal bars are the whole message.
+    */
+    dragOnce(0.3, 196);
+    expect(screen.getByTestId('spacing-hints')).toBeTruthy();
+  });
+
+  it('drops the hint when the drag is released', () => {
+    /*
+      A hint left behind after release would claim the spacing is *still* being
+      corrected, when the clip is simply where it ended up — the same rule the guide
+      lines follow, and the reason both are cleared in `end()`.
+    */
+    // 0.33 dragged 12 px left lands on the equal spacing at 0.3, so the hint is up
+    // when the pointer comes off.
+    const { timeline, layer } = dragOnce(0.33, 188);
+    expect(screen.getByTestId('spacing-hints')).toBeTruthy();
+    fireEvent(layer, pointer('pointerup', 188, 200));
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
+  });
+
+  it('drops the hint when the drag is cancelled', () => {
+    // `Esc` abandons the gesture, and the hint belongs to the gesture.
+    const { layer } = dragOnce(0.33, 188);
+    expect(screen.getByTestId('spacing-hints')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
+  });
+
+  it('draws no hint before the drag has moved', () => {
+    /*
+      A hint on pointer-down, before the user has done anything, would read as the editor
+      reacting to a gesture that has not started. The spacing is only interesting once the
+      pointer is actually going somewhere.
+    */
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeSpacedState(0.315)} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
+  });
+
+  it('draws no hint when the gaps are far too unequal to nudge', () => {
+    /*
+      0.5 puts `a` outside both neighbours, where no equal-spacing is within 8 px. Snapping
+      there would yank the clip across the canvas rather than nudge it.
+    */
+    dragOnce(0.5, 200);
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
+  });
+
+  it('leaves the hint alone while Alt is held', () => {
+    // `Alt` means "place it exactly here"; a spacing nudge would contradict it.
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeSpacedState(0.315)} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, new MouseEvent('pointerdown', { clientX: 200, clientY: 200, altKey: true, bubbles: true }));
+    fireEvent(layer, new MouseEvent('pointermove', { clientX: 200, clientY: 200, altKey: true, bubbles: true }));
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
+  });
+
+  it('keeps a line snap winning over a spacing hint', () => {
+    /*
+      Precedence matters because the line is the older, more legible answer and users
+      already have it in their hands: a spacing hint must never quietly take a drag away
+      from an edge that caught. Dragging `a` onto the canvas centre line puts its centre
+      well inside the threshold of 0.
+    */
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeSpacedState(0.1)} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    // 110 px left of centre: 0.1 - 110/400 = -0.175... not near 0. Use 36 px -> 0.01.
+    fireEvent(layer, pointer('pointermove', 164, 200));
+    expect(screen.getByTestId('snap-guide-x')).toBeTruthy();
+    expect(screen.queryByTestId('spacing-hints')).toBeNull();
   });
 });

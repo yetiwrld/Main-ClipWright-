@@ -21,6 +21,7 @@ import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
+import { SpacingHints } from './SpacingHints.js';
 import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -788,6 +789,12 @@ export function PreviewPane({
             overlays the user switched on deliberately.
           */}
           <SnapGuides guides={drag.guides} />
+          {/*
+            The equal-spacing hint sits with the guides rather than below them: both
+            explain the same gesture, and a hint on its own is the only thing on screen
+            when a clip is being spaced rather than aligned.
+          */}
+          <SpacingHints spans={drag.spacing} />
           {/*
             Every layer's geometry, computed before the render loop rather than inside
             it, because snapping needs the *other* items' bounds — and an item cannot

@@ -324,3 +324,159 @@ export function itemBounds(
   const half = drawn / 2;
   return { left: centre - half, centre, right: centre + half };
 }
+
+/**
+ * Whether equal-spacing should be considered on an axis, given what the line snaps found.
+ *
+ * The precedence rule, on its own so it can be tested: a line that caught wins, and
+ * spacing is what happens on an axis where nothing caught. Written as a function rather
+ * than an `if` in the gesture because the rule is a *decision*, not plumbing, and a
+ * decision buried where no test can reach it is a decision that will one day be inverted
+ * by someone reading the call site too quickly — which is what happened here: the first
+ * version guarded on `snapped.x.position`, which `snapAxis` never returns null for, so
+ * the rule silently did nothing and the spacing correction was discarded on commit.
+ *
+ * `snapped` is null when `Alt` suppressed snapping entirely, and spacing follows it: a
+ * user who asked to place the clip exactly should not be nudged by either rule.
+ */
+export function spacingMayApply(snapped: SnapResult | null): boolean {
+  return snapped !== null && snapped.target === null;
+}
+
+/**
+ * A gap between two items, after the drag is adjusted, for drawing the hint.
+ *
+ * `from`/`to` are canvas fractions from the centre on one axis, so the renderer converts
+ * them the same way it converts a guide line. Ordered `from < to` so a span draws
+ * left-to-right whichever neighbour produced it.
+ */
+export interface SpacingSpan {
+  from: number;
+  to: number;
+  /** The gap's length, in canvas fractions. Equal for both spans of a hint. */
+  length: number;
+}
+
+/** Equal spacing found: how far to move, and the two gaps that would then match. */
+export interface SpacingSnap {
+  /** How far to move the dragged item's position to equalise the gaps. */
+  delta: number;
+  /** The equal gap after the move, in canvas fractions. */
+  gap: number;
+  /** The two gaps to draw, after the move. */
+  spans: readonly [SpacingSpan, SpacingSpan];
+}
+
+/**
+ * Equal-spacing snapping on one axis (SPEC 10 §8.8's "equal-spacing hints — distance
+ * guides between three items").
+ *
+ * Two shapes, both of which a user means when they say "even the spacing out":
+ *
+ *   1. **Between two neighbours.** The dragged item sits between two others and its two
+ *      gaps differ slightly. Equalise them to their mean — which keeps the item centred
+ *      in the space, as a user dragging it there intends.
+ *   2. **Matching an existing gap.** Two other items already sit a comfortable distance
+ *      apart, and the dragged item is dragged until its own gap to one of them is *about*
+ *      that. Snap to exactly that distance, so a row of three reads as deliberately
+ *      spaced rather than nearly so.
+ *
+ * Only the closest candidate is returned, and ties prefer the between-case: it is the
+ * one that moves the item least and the one a user is more likely to be doing.
+ *
+ * Returns `null` when nothing is within `threshold` (in canvas fractions, converted from
+ * `SNAP_PX` by the caller), when the threshold is degenerate, or when the numbers are not
+ * finite — the same guards `snapAxis` applies, for the same reason.
+ */
+export function equalSpacingSnap(
+  dragged: ItemBounds,
+  others: readonly ItemBounds[],
+  threshold: number,
+): SpacingSnap | null {
+  if (!Number.isFinite(threshold) || threshold <= 0) return null;
+  if (![dragged.left, dragged.centre, dragged.right].every(Number.isFinite)) return null;
+  const width = dragged.right - dragged.left;
+  if (!(width > 0)) return null;
+  const usable = others.filter(
+    (other) =>
+      Number.isFinite(other.left) &&
+      Number.isFinite(other.right) &&
+      other.right > other.left,
+  );
+
+  /*
+    A plain pair of variables rather than an object the closure mutates: TypeScript
+    narrows a `let` captured by a callback to `never` at the read below, because it cannot
+    see the callback running.
+  */
+  let bestDelta = Number.POSITIVE_INFINITY;
+  let bestSnap: SpacingSnap | null = null;
+  const consider = (delta: number, snap: SpacingSnap) => {
+    if (!Number.isFinite(delta) || Math.abs(delta) > threshold) return;
+    if (Math.abs(delta) < Math.abs(bestDelta)) {
+      bestDelta = delta;
+      bestSnap = snap;
+    }
+  };
+
+  for (const left of usable) {
+    for (const right of usable) {
+      /* ---- 1. Between: `left` is clear of the item, `right` is clear of it too. ---- */
+      if (left.right <= dragged.left && right.left >= dragged.right && left !== right) {
+        const gapLeft = dragged.left - left.right;
+        const gapRight = right.left - dragged.right;
+        const mean = (gapLeft + gapRight) / 2;
+        if (mean >= 0) {
+          // Moving by half the difference splits the error evenly between the two gaps.
+          const delta = (gapRight - gapLeft) / 2;
+          const movedLeft = dragged.left + delta;
+          const movedRight = dragged.right + delta;
+          consider(delta, {
+            delta,
+            gap: mean,
+            spans: [
+              { from: left.right, to: movedLeft, length: mean },
+              { from: movedRight, to: right.left, length: mean },
+            ],
+          });
+        }
+      }
+
+      /* ---- 2. Outside: `left` and `right` already form a gap the item can match. ---- */
+      if (left.right <= right.left && left !== right) {
+        const existing = right.left - left.right;
+        if (!(existing > 0)) continue; // a zero gap is a line snap's job, not this
+        // Item entirely left of the pair.
+        if (dragged.right <= left.left) {
+          const delta = left.left - existing - dragged.right;
+          const movedLeft = dragged.left + delta;
+          const movedRight = dragged.right + delta;
+          consider(delta, {
+            delta,
+            gap: existing,
+            spans: [
+              { from: movedRight, to: left.left, length: existing },
+              { from: left.right, to: right.left, length: existing },
+            ],
+          });
+        }
+        // Item entirely right of the pair.
+        if (dragged.left >= right.right) {
+          const delta = right.right + existing - dragged.left;
+          const movedLeft = dragged.left + delta;
+          const movedRight = dragged.right + delta;
+          consider(delta, {
+            delta,
+            gap: existing,
+            spans: [
+              { from: left.right, to: right.left, length: existing },
+              { from: right.right, to: movedLeft, length: existing },
+            ],
+          });
+        }
+      }
+    }
+  }
+
+  return bestSnap;
+}
