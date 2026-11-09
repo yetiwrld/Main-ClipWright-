@@ -1895,6 +1895,73 @@ export function addKeyframe(
 }
 
 /**
+ * Write several keyframes at one instant as **one** undo step (SPEC 10 §8.6, §13).
+ *
+ * `addKeyframe` and `updateKeyframe` each commit on their own, which is right for a single
+ * diamond and wrong for anything that writes a *point*. The Crop tool's reframe is exactly
+ * that case: a framing is a position and a scale, and four separate commands would leave the
+ * undo stack with four entries for one gesture — so `Ctrl+Z` after setting a framing would undo
+ * a quarter of it, and the picture would land on a state the user never chose.
+ *
+ * Existing keys at the instant are *replaced* rather than refused, which is the other
+ * difference from `addKeyframe`. Setting the framing for a moment the user has already framed
+ * is a correction, not an error, and refusing it would make the second attempt at a framing a
+ * dead button.
+ *
+ * Interpolation is carried over from the key being replaced when there is one, so a curve the
+ * user shaped on a bias keyframe is not silently flattened to linear by re-framing that moment.
+ */
+export function setKeyframesAt(
+  state: TimelineState,
+  params: {
+    itemId: string;
+    timeUs: number;
+    /** Property path to value, all written at the same instant. */
+    values: Readonly<Record<string, number>>;
+    fps: Fps;
+  },
+): CommandResult {
+  const item = state.items[params.itemId];
+  if (!item) return fail('not_found', 'That item no longer exists.');
+  const track = state.tracks.find((candidate) => candidate.id === item.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+  if (track.locked) return fail('locked', `"${track.name}" is locked.`);
+
+  const paths = Object.keys(params.values);
+  if (paths.length === 0) return fail('invalid', 'There is nothing to write.');
+  // Quantised once, outside the loop: two paths quantised separately would still agree, but
+  // doing it per path invites a later edit that computes the instant from something that drifts.
+  const localTime = quantizeUs(Math.max(0, params.timeUs), params.fps);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.items[params.itemId] as TimelineItem;
+    if (!target.keyframes) target.keyframes = {};
+    for (const path of paths) {
+      const existing = target.keyframes[path] ?? [];
+      const previous = existing.find((kf) => kf.timeUs === localTime);
+      const entry = {
+        timeUs: localTime,
+        value: params.values[path]!,
+        interpolation: previous?.interpolation ?? ('linear' as const),
+      };
+      target.keyframes[path] = [
+        ...existing.filter((kf) => kf.timeUs !== localTime),
+        entry,
+      ].sort((a, b) => a.timeUs - b.timeUs);
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [params.itemId],
+    notes: ['Keyframes set.'],
+  };
+}
+
+/**
  * Remove a keyframe (SPEC 09 §17). Delete key removes the selected keyframe.
  */
 export function removeKeyframe(

@@ -68,6 +68,7 @@ export {
   setWorkArea,
   clearWorkArea,
   addKeyframe,
+  setKeyframesAt,
   removeKeyframe,
   updateKeyframe,
   setBezierHandles,

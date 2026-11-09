@@ -249,3 +249,41 @@ statement to be expressible.
   a `NaN` radius blanks the layer without throwing.
 - §8.6's **"Set framing…"** button and the reframe gesture behind it (the manual precursor
   of auto-reframe, `13`) are *not* built. The limitation records it.
+
+## 14. Reframing moves the picture, and a framing is written as one point
+
+**Decision:** §8.6's **"Set framing…"** is a mode of its own, not a control inside the crop
+frame. The window is the canvas — fixed — and the drag moves the **picture** under it, with
+the wheel zooming. `Enter` writes position and scale as four keyframes through one new
+`setKeyframesAt` command; `Esc` writes nothing.
+
+**Reasoning:** cropping and reframing are opposite gestures over the same visual grammar. A
+crop drag moves a window over a still picture; a reframe drag moves the picture under a still
+window. Offering both at once would make one drag mean two contradictory things depending on
+where it started, which is the sort of ambiguity that produces a bug report saying "cropping
+moves my video". Keeping them separate also matches what auto-reframe will write (`13`): that
+feature produces position and scale, not crop edges, so a manual gesture producing anything
+else could not be compared with it, replaced by it, or keyframed beside it.
+
+`setKeyframesAt` exists because a framing is a *point*. `addKeyframe` commits per property, so
+four calls would leave four entries in the undo stack for one drag — `Ctrl+Z` after framing a
+shot would undo a quarter of the framing and leave a picture nobody chose. The command also
+replaces an existing key at the instant rather than refusing (re-framing a moment already
+framed is a correction, not an error) and keeps that key's interpolation, so a curve the user
+shaped is not flattened by re-framing its own moment.
+
+**Consequences:**
+- The clamp is half the **overhang**, not half the size: a picture of size `s` still reaches
+  the canvas's edge while `|centre| ≤ (s − 1) / 2`. Half the size would expose canvas at every
+  scale a user can reach, which §13's acceptance criteria forbid.
+- An axis the picture cannot cover is held **centred**, not clamped to a range that does not
+  exist. A 16:9 shot in a 9:16 canvas covers the width exactly at scale 1 and only 0.3164 of
+  the height, so there is no vertical position that covers — and the `max(0, …)` on the limit
+  is what makes the degenerate case centre instead of producing a nonsense offset.
+- The gesture needs a zoom because of that. The scale at which a 16:9 picture covers a 9:16
+  canvas is `sourceAspect / canvasAspect` = 3.16; below it the vertical axis can only be
+  centred, which is a real constraint rather than a missing feature.
+- Scaling re-clamps the offset at the new size. A framing legal at 2× can hang off the window
+  at 0.5×.
+- Neither mode writes during the drag. Both are drafts, and both refuse to commit a gesture
+  that ended where it started — an empty undo entry makes the next `Ctrl+Z` look broken.

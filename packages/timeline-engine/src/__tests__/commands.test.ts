@@ -33,6 +33,7 @@ import {
   setWorkArea,
   clearWorkArea,
   addKeyframe,
+  setKeyframesAt,
   removeKeyframe,
   updateKeyframe,
   setBezierHandles,
@@ -2035,5 +2036,173 @@ describe('user composition guides (SPEC 10 §8.8)', () => {
     const removed = removeGuide(withGuide.state, { id: 'g1' });
     if (!removed.ok) throw new Error('remove');
     expect(applyPatches(removed.state, removed.inverse).guides).toHaveLength(1);
+  });
+});
+
+describe('setKeyframesAt (SPEC 10 §8.6 reframe)', () => {
+  /** One item on one track, with whatever keyframes the caller wants to start from. */
+  function fixture(starting: Record<string, { timeUs: number; value: number; interpolation?: string }[]> = {}) {
+    const base = createDefaultTimeline({ id: 'reframe', name: 'Reframe' });
+    const track = base.tracks[0]!;
+    const item = {
+      ...createMediaItem({
+        id: 'a',
+        trackId: track.id,
+        label: 'Framed clip',
+        mediaId: 'media-1',
+        startUs: 0,
+        durationUs: 5_000_000,
+        sourceDurationUs: 10_000_000,
+      }),
+      keyframes: starting as never,
+    };
+    return {
+      state: {
+        ...base,
+        tracks: base.tracks.map((candidate) =>
+          candidate.id === track.id ? { ...candidate, itemIds: [item.id] } : candidate,
+        ),
+        items: { [item.id]: item },
+      } as TimelineState,
+      itemId: item.id,
+    };
+  }
+
+  it('writes every path at the same instant in one command', () => {
+    /*
+      The whole reason the command exists. Four separate `addKeyframe` calls would be four undo
+      entries for one gesture, so `Ctrl+Z` after setting a framing would undo a quarter of it and
+      leave the picture in a state the user never chose.
+    */
+    const { state, itemId } = fixture();
+    const result = setKeyframesAt(state, {
+      itemId,
+      timeUs: 1_000_000,
+      values: { 'transform.x': 0.2, 'transform.y': -0.1, 'transform.scaleX': 1.4, 'transform.scaleY': 1.4 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const keys = result.state.items[itemId]!.keyframes!;
+    for (const [path, value] of Object.entries({
+      'transform.x': 0.2,
+      'transform.y': -0.1,
+      'transform.scaleX': 1.4,
+      'transform.scaleY': 1.4,
+    })) {
+      expect(keys[path]).toHaveLength(1);
+      expect(keys[path]![0]!.timeUs).toBe(1_000_000);
+      expect(keys[path]![0]!.value).toBeCloseTo(value, 10);
+    }
+  });
+
+  it('lands every path on the same frame, not just the same millisecond', () => {
+    /*
+      The property the gesture needs is that all four keys share one *time*, so the evaluator
+      reads them as one point rather than interpolating between a framing's position and a
+      previous framing's scale.
+
+      1_016_666 µs is 30.5 frames at 30 fps, so it is deliberately off the grid: an implementation
+      that wrote the raw time would put this key half a frame away from every other write at that
+      moment. (Recomputing the quantisation inside the loop is *equivalent* here, since
+      `quantizeUs` is pure — that mutation cannot be caught and does not need to be.)
+    */
+    const { state, itemId } = fixture();
+    const result = setKeyframesAt(state, {
+      itemId,
+      timeUs: 1_016_666,
+      values: { 'transform.x': 0, 'transform.y': 0 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const keys = result.state.items[itemId]!.keyframes!;
+    expect(keys['transform.x']![0]!.timeUs).toBe(keys['transform.y']![0]!.timeUs);
+    // And that shared time is the frame boundary, not the raw request.
+    expect(keys['transform.x']![0]!.timeUs).toBe(1_000_000);
+  });
+
+  it('replaces an existing key at that instant rather than refusing', () => {
+    /*
+      Re-framing a moment already framed is a correction. `addKeyframe` fails on a duplicate
+      time, which would make the second attempt at a framing a dead button.
+    */
+    const { state, itemId } = fixture({ 'transform.x': [{ timeUs: 1_000_000, value: 0.5 }] });
+    const result = setKeyframesAt(state, {
+      itemId,
+      timeUs: 1_000_000,
+      values: { 'transform.x': 0.1, 'transform.scaleX': 2 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const x = result.state.items[itemId]!.keyframes!['transform.x']!;
+    // Still one key, not two at the same time — two would make the evaluator's answer arbitrary.
+    expect(x).toHaveLength(1);
+    expect(x[0]!.value).toBe(0.1);
+  });
+
+  it('keeps the interpolation of the key it replaces', () => {
+    // A curve the user shaped on this key must not be flattened to linear by re-framing the
+    // moment it belongs to.
+    const { state, itemId } = fixture({
+      'transform.x': [{ timeUs: 1_000_000, value: 0.5, interpolation: 'hold' }],
+    });
+    const result = setKeyframesAt(state, {
+      itemId,
+      timeUs: 1_000_000,
+      values: { 'transform.x': 0.9 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items[itemId]!.keyframes!['transform.x']![0]!.interpolation).toBe('hold');
+  });
+
+  it('leaves other keys on the same path alone, and keeps them sorted', () => {
+    const { state, itemId } = fixture({
+      'transform.x': [
+        { timeUs: 0, value: 0 },
+        { timeUs: 4_000_000, value: 1 },
+      ],
+    });
+    const result = setKeyframesAt(state, { itemId, timeUs: 2_000_000, values: { 'transform.x': 0.5 }, fps: 30 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const x = result.state.items[itemId]!.keyframes!['transform.x']!;
+    expect(x.map((kf) => kf.timeUs)).toStrictEqual([0, 2_000_000, 4_000_000]);
+    expect(x.map((kf) => kf.value)).toStrictEqual([0, 0.5, 1]);
+  });
+
+  it('is one undo step: the inverse restores every path at once', () => {
+    /*
+      Asserted through the patches rather than by trusting the label, because "one undo step" is
+      a claim about the *patch set*, not about how many functions were called.
+    */
+    const { state, itemId } = fixture();
+    const result = setKeyframesAt(state, {
+      itemId,
+      timeUs: 1_000_000,
+      values: { 'transform.x': 0.2, 'transform.scaleX': 1.4 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const restored = applyPatches(result.state, result.inverse);
+    expect(restored.items[itemId]!.keyframes?.['transform.x']).toBeUndefined();
+    expect(restored.items[itemId]!.keyframes?.['transform.scaleX']).toBeUndefined();
+  });
+
+  it('refuses an empty set, a missing item, and a locked track', () => {
+    const { state, itemId } = fixture();
+    expect(setKeyframesAt(state, { itemId, timeUs: 0, values: {}, fps: 30 }).ok).toBe(false);
+    expect(setKeyframesAt(state, { itemId: 'nope', timeUs: 0, values: { 'transform.x': 0 }, fps: 30 }).ok).toBe(false);
+    const locked = {
+      ...state,
+      tracks: state.tracks.map((track) => ({ ...track, locked: true })),
+    };
+    const lockedResult = setKeyframesAt(locked, { itemId, timeUs: 0, values: { 'transform.x': 0 }, fps: 30 });
+    expect(lockedResult.ok).toBe(false);
+    if (!lockedResult.ok) expect(lockedResult.code).toBe('locked');
   });
 });

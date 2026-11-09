@@ -29,6 +29,7 @@ import {
   setWorkArea,
   clearWorkArea,
   addKeyframe,
+  setKeyframesAt,
   removeKeyframe,
   updateKeyframe,
   setBezierHandles,
@@ -157,6 +158,14 @@ export interface TimelineApi {
   setWorkArea: (edge: 'in' | 'out', timeUs: number) => boolean;
   clearWorkArea: () => boolean;
   addKeyframe: (itemId: string, property: string, timeUs: number, value: number | [number, number, number, number]) => boolean;
+  /**
+   * Write several properties at one instant as **one** undo step (SPEC 10 §8.6).
+   *
+   * The reframe gesture needs this: a framing is a position and a scale, and four separate
+   * `addKeyframe` calls would leave four entries in the undo stack for one drag, so `Ctrl+Z`
+   * after framing a shot would undo a quarter of the framing.
+   */
+  setKeyframesAt: (itemId: string, timeUs: number, values: Readonly<Record<string, number>>) => boolean;
   removeKeyframe: (itemId: string, property: string, timeUs: number) => boolean;
   updateKeyframe: (itemId: string, property: string, timeUs: number, patch: { value?: number | [number, number, number, number]; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset'; easing?: { preset: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeInCubic' | 'easeOutCubic' | 'easeInOutCubic' | 'easeInBack' | 'easeOutBack' | 'easeOutBounce' | 'easeOutElastic' } }) => boolean;
   /**
@@ -516,6 +525,8 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Clear work area', (s) => clearWorkArea(s)),
       addKeyframe: (itemId, property, timeUs, value) =>
         run('Add keyframe', (s) => addKeyframe(s, { itemId, property, timeUs, value, fps })),
+      setKeyframesAt: (itemId, timeUs, values) =>
+        run('Set framing', (s) => setKeyframesAt(s, { itemId, timeUs, values, fps })),
       removeKeyframe: (itemId, property, timeUs) =>
         run('Remove keyframe', (s) => removeKeyframe(s, { itemId, property, timeUs, fps })),
       updateKeyframe: (itemId, property, timeUs, patch) =>

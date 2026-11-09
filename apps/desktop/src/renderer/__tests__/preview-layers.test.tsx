@@ -387,6 +387,7 @@ describe('on-canvas drag editing (SPEC 12 Phase 4)', () => {
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }
@@ -503,6 +504,7 @@ describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }
@@ -637,6 +639,165 @@ describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
   });
 });
 
+describe('the reframe gesture (SPEC 10 §8.6 "Set framing…")', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      setKeyframesAt: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  function stubBoxes() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('opens a fixed window and writes nothing until Enter', () => {
+    /*
+      The gesture §8.6 describes, end to end: a window that does not move, a picture dragged
+      under it, and nothing written until the user commits. The draft is the point — `Esc` has to
+      be able to discard a framing that was already visible on screen.
+
+      The clip starts at **scale 2**, and that is not a convenience. A picture that exactly fills
+      the window has no overhang, so its centre may not move at all without exposing canvas — the
+      clamp holds it still, correctly. jsdom never loads a video, so `sourceAspect` falls back to
+      the canvas's and a scale-1 clip covers exactly; only a zoomed clip has room to pan.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', transform: { scaleX: 2, scaleY: 2 } }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Set framing' }));
+
+    expect(screen.getByTestId('preview-reframe')).toBeTruthy();
+    const window_ = screen.getByTestId('preview-reframe');
+    fireEvent(window_, pointer('pointerdown', 200, 300));
+    fireEvent(window_, pointer('pointermove', 240, 300));
+    fireEvent(window_, pointer('pointerup', 240, 300));
+
+    // A tenth of the canvas to the right, and still nothing in the document.
+    expect(timeline.setKeyframesAt).not.toHaveBeenCalled();
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(timeline.setKeyframesAt).toHaveBeenCalledTimes(1);
+    const [itemId, , values] = (timeline.setKeyframesAt as unknown as { mock: { calls: [string, number, Record<string, number>][] } }).mock.calls[0]!;
+    expect(itemId).toBe('a');
+    // All four paths in one call, which is what makes it one undo step.
+    expect(Object.keys(values).sort()).toStrictEqual([
+      'transform.scaleX',
+      'transform.scaleY',
+      'transform.x',
+      'transform.y',
+    ]);
+    expect(values['transform.x']).toBeCloseTo(0.1, 6);
+    expect(values['transform.y']).toBeCloseTo(0, 6);
+  });
+
+  it('discards the framing on Esc, writing nothing', () => {
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set framing' }));
+    const window_ = screen.getByTestId('preview-reframe');
+    fireEvent(window_, pointer('pointerdown', 200, 300));
+    fireEvent(window_, pointer('pointermove', 300, 380));
+    fireEvent(window_, pointer('pointerup', 300, 380));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(timeline.setKeyframesAt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('preview-reframe')).toBeNull();
+  });
+
+  it('draws the picture from the draft, so it follows the pointer', () => {
+    /*
+      The half of the gesture that is not about the document at all: the *picture* has to move
+      while nothing is written. A draft that the overlay tracked but the layer ignored would
+      leave the outline sliding over a stationary shot — the gesture would look implemented and
+      feel broken.
+
+      Asserted on the real element, by the transform the layer computes from `itemGeometry`. The
+      draft's `x` shows up as a translate fraction, and the draft's scale multiplies the picture.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', transform: { scaleX: 2, scaleY: 2 } }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Set framing' }));
+    const layer_ = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    const before = layer_.style.transform;
+    const window_ = screen.getByTestId('preview-reframe');
+    fireEvent(window_, new MouseEvent('pointerdown', { clientX: 200, clientY: 300, bubbles: true }));
+    fireEvent(window_, new MouseEvent('pointermove', { clientX: 260, clientY: 300, bubbles: true }));
+    fireEvent(window_, new MouseEvent('pointerup', { clientX: 260, clientY: 300, bubbles: true }));
+
+    const after = layer_.style.transform;
+    expect(after).not.toBe(before);
+    // A tenth of a step at 0.15 of the width: the translate is in percent of the canvas.
+    expect(after).toContain('translate(15%');
+  });
+
+  it('writes nothing for a gesture that ended where it started', () => {
+    // `Enter` on an untouched window is a way to leave the mode, not an edit.
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set framing' }));
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(timeline.setKeyframesAt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('preview-reframe')).toBeNull();
+  });
+
+  it('keeps the picture inside the canvas, so no empty canvas is exposed', () => {
+    /*
+      SPEC 13's acceptance criteria say "no empty canvas exposed", and the clamp is where that is
+      enforced. A drag of nine canvas-widths must stop at the picture's own edge rather than
+      sliding the shot out of the window.
+
+      At scale 2 the picture covers 2× the canvas, so its centre may travel 0.5 before an edge
+      comes inside. The 4,000-px drag below is ten canvas widths and must land exactly on 0.5.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', transform: { scaleX: 2, scaleY: 2 } }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Set framing' }));
+    const window_ = screen.getByTestId('preview-reframe');
+    fireEvent(window_, pointer('pointerdown', 200, 300));
+    fireEvent(window_, pointer('pointermove', 4200, 300));
+    fireEvent(window_, pointer('pointerup', 4200, 300));
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    const [, , values] = (timeline.setKeyframesAt as unknown as { mock: { calls: [string, number, Record<string, number>][] } }).mock.calls[0]!;
+    // Half the overhang of a 2× picture, and not a pixel further.
+    expect(values['transform.x']).toBeCloseTo(0.5, 6);
+  });
+});
+
 describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC 12 §2.4)', () => {
   function fakeTimeline(selection: string[] = ['a']) {
     return {
@@ -644,6 +805,7 @@ describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }
@@ -758,6 +920,7 @@ describe('the rotate handle and Esc (SPEC 10 §8.2, §8.3)', () => {
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }
@@ -879,6 +1042,7 @@ describe('the anchor crosshair (SPEC 10 §8.2)', () => {
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }
@@ -1027,6 +1191,7 @@ describe('the corner grips (SPEC 10 §8.2)', () => {
       selection,
       setItemProperties: vi.fn(() => true),
       addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
       updateKeyframe: vi.fn(() => true),
     } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
   }

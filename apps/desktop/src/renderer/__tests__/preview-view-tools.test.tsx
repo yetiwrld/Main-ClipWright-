@@ -45,6 +45,7 @@ function fakeTimeline(): TimelineApi {
     selection: ['a'],
     setItemProperties,
     addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
     updateKeyframe: vi.fn(() => true),
     run: vi.fn(() => true),
   } as unknown as TimelineApi;

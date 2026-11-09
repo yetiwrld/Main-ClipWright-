@@ -74,6 +74,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     setWorkArea: vi.fn(() => true),
     clearWorkArea: vi.fn(() => true),
     addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
     removeKeyframe: vi.fn(() => true),
     updateKeyframe: vi.fn(() => true),
     setBezierHandles: vi.fn(() => true),

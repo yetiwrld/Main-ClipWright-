@@ -143,8 +143,10 @@ Also found and fixed two real security holes along the way:
 ## What is left, in order
 
 **1. Finish Phase 4 ⚠️** — what is left is the **preview-quality** control (SPEC 10
-§5.1) and the frame-accurate transport it belongs to, plus §8.6's **"Set framing…"** button
-and the video-reframe gesture behind it. The Crop tool now has its own frame: a rectangle
+§5.1) and the frame-accurate transport it belongs to. The Crop tool now has its own frame,
+including **"Set framing…"** — a fixed canvas window with the picture dragged under it and a
+wheel to zoom, written as four keyframes in one undo step (what `13`'s auto-reframe will
+automate): a rectangle
 over the **uncropped** source with eight handles, dimmed outside, the aspect lock
 (Free/Original/1:1/9:16/16:9/4:5/Canvas) and a rounded-corners slider, with `Enter`
 applying the session as one undo step and `Esc` discarding it — and the radius is real

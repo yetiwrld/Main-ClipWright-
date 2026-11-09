@@ -64,6 +64,7 @@ function fakeTimeline(state: TimelineState): TimelineApi {
     pasteEffects: vi.fn(() => true),
     effectClipboardSize: 0,
     addKeyframe: vi.fn(() => true),
+    setKeyframesAt: vi.fn(() => true),
     removeKeyframe: vi.fn(() => true),
     updateKeyframe: vi.fn(() => true),
     addTransition: vi.fn(() => true),

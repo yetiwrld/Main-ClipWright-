@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import {
   Check,
   Crop,
+  Move,
   Frame,
   Grid3x3,
   Hand,
@@ -95,6 +96,13 @@ import safeAreasData from '../../../../../../assets/safe-areas.json';
 import { CaptionOverlay } from './CaptionOverlay.js';
 import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
 import { CropFrame } from './CropFrame.js';
+import { ReframeFrame } from './ReframeFrame.js';
+import {
+  framingChanged,
+  framingPaths,
+  framingValues,
+  reframeCoverage,
+} from './reframe.js';
 import {
   ASPECT_CHOICES,
   appliedAspect,
@@ -320,6 +328,18 @@ const ASPECT_LABELS: Record<AspectChoice, string> = {
   canvas: 'Canvas',
 };
 
+/**
+ * A reframe session's draft: the framing the user is building, and the item it belongs to.
+ *
+ * Carries `before` so `Enter` can tell an edit from a dismissal without re-reading the document
+ * — the document has not changed during the session, by design.
+ */
+interface ReframeDraft {
+  itemId: string;
+  before: { x: number; y: number; scale: number };
+  now: { x: number; y: number; scale: number };
+}
+
 interface CropTarget {
   itemId: string;
   crop: CropEdgesWithRadius;
@@ -440,6 +460,14 @@ export function PreviewPane({
     canvas aspect is used as a stand-in until then, which is what the preview itself does.
   */
   const [sourceAspect, setSourceAspect] = useState<number | null>(null);
+  /*
+    §8.6's **"Set framing…"** mode (SPEC 10 §8.6): drag the picture under a fixed canvas window.
+
+    A draft like the crop session, and for the same reason — `Enter` writes it as one undo step
+    and `Esc` throws it away. The difference is what the drag moves: the crop gesture moves a
+    window over the picture, this moves the picture under the window.
+  */
+  const [reframing, setReframing] = useState<ReframeDraft | null>(null);
   /*
     Whether Space is currently held, for Space+drag (SPEC 10 §4).
 
@@ -934,6 +962,60 @@ export function PreviewPane({
   }, [cropDraft, cropTarget, timeline, state.items, fps]);
 
   /**
+   * Open a reframe session for the selected clip at the playhead (SPEC 10 §8.6).
+   *
+   * The framing it starts from is the clip's *current* one at this instant, which means asking
+   * `itemGeometry` rather than reading `transform` directly: on an animated clip the stored
+   * static values are not what is on screen, and starting the draft from them would make the
+   * first nudge jump the picture back to wherever the animation started.
+   */
+  const beginReframe = useCallback(() => {
+    if (!selectedId || !timeline) return;
+    const item = state.items[selectedId];
+    if (!item) return;
+    const geometry = itemGeometry({
+      ...item,
+      timeUs: playheadStore.get() - item.startUs,
+      canvas: { width: canvas.width, height: canvas.height },
+    });
+    /*
+      The geometry's offsets are *canvas fractions already rotated and anchored*, which is the
+      space a drag adds to — but they are not the framing the user thinks of. Storing the
+      geometry's offset as the framing and then writing it back through `transform.x/y` would
+      double-count the anchor on a clip with an off-centre pivot. So the draft starts from the
+      stored transform, and the geometry is used only to confirm the clip is drawable.
+    */
+    const before = {
+      x: item.transform.x ?? 0,
+      y: item.transform.y ?? 0,
+      scale: geometry.scaleX,
+    };
+    setReframing({ itemId: selectedId, before, now: before });
+  }, [selectedId, timeline, state.items, canvas.width, canvas.height]);
+
+  /**
+   * `Enter` for a reframe — write the framing as one undo step (SPEC 10 §8.6).
+   *
+   * Four keyframes through `setKeyframesAt`, which is the command that exists for exactly this:
+   * a framing is a point, and four separate `addKeyframe` calls would leave the undo stack with
+   * one entry per property, so `Ctrl+Z` would undo a quarter of the framing.
+   */
+  const applyReframe = useCallback(() => {
+    const draft = reframing;
+    if (!timeline || !draft) return;
+    if (!framingChanged(draft.before, draft.now)) {
+      setReframing(null);
+      return;
+    }
+    const paths = framingPaths();
+    const values = framingValues(draft.now);
+    const write: Record<string, number> = {};
+    for (let index = 0; index < paths.length; index += 1) write[paths[index]!] = values[index]!;
+    timeline.setKeyframesAt(draft.itemId, playheadStore.get() - (state.items[draft.itemId]?.startUs ?? 0), write);
+    setReframing(null);
+  }, [reframing, timeline, state.items]);
+
+  /**
    * `Esc` — throw the session away (SPEC 10 §8.6).
    *
    * Nothing was written, so there is nothing to undo: dropping the draft and leaving the tool
@@ -971,8 +1053,15 @@ export function PreviewPane({
     been cancelled — which is why it stands down while `drag.dragging` is still true.
   */
   useEffect(() => {
-    if (!cropDraft) return;
+    if (!cropDraft && !reframing) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      /*
+        Both sessions answer the same two keys, and neither is ever open while the other is:
+        entering the Crop tool cancels a reframe and vice versa. Handling them together keeps the
+        text-field guard written once, which is the part that is easy to forget in a second copy.
+      */
+      const apply = reframing ? applyReframe : applyCrop;
+      const cancel = reframing ? () => setReframing(null) : cancelCrop;
       const target = event.target as HTMLElement | null;
       /*
         Guarded against text fields and selects for the same reason `H`/`C` are: `Enter` is how
@@ -984,17 +1073,17 @@ export function PreviewPane({
       }
       if (event.key === 'Enter') {
         event.preventDefault();
-        applyCrop();
+        apply();
         return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        cancelCrop();
+        cancel();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [cropDraft, applyCrop, cancelCrop]);
+  }, [cropDraft, reframing, applyCrop, cancelCrop, applyReframe]);
 
 
 
@@ -1748,11 +1837,39 @@ export function PreviewPane({
                 the picture as it is actually placed.
               */
               const cropping = cropTarget?.itemId === layer.id;
+              /*
+                A reframe is drawn from the *draft*, not from the document: the picture has to
+                follow the pointer while nothing is written. And like the crop frame it needs the
+                picture whole, so the stored crop is dropped here too — reframing a clip that is
+                already cropped should show the shot as it exists, with the crop applied as a
+                clip *around* the window rather than inside it.
+
+                The transform is overridden rather than added to, because a framing *is* the
+                position and the scale: leaving the stored values in place would mean the draft
+                was being applied on top of the framing it is replacing.
+              */
+              const framing = reframing?.itemId === layer.id ? reframing.now : null;
               const geometry = itemGeometry({
                 ...item,
                 ...(live ? { transform: { ...item.transform, x: live.x, y: live.y } } : {}),
                 ...(live ? { crop: live.crop } : {}),
                 ...(cropping ? { crop: {} } : {}),
+                ...(framing
+                  ? {
+                      crop: {},
+                      transform: {
+                        ...item.transform,
+                        x: framing.x,
+                        y: framing.y,
+                        scaleX: framing.scale,
+                        scaleY: framing.scale,
+                        // The legacy field is cleared for the same reason it is never written
+                        // here: leaving it set would make `effectiveScale` prefer it on a clip
+                        // whose axes the draft has just set to something else.
+                        scale: 1,
+                      },
+                    }
+                  : {}),
                 timeUs: playheadUs,
                 canvas: { width: canvas.width, height: canvas.height },
               });
@@ -1930,7 +2047,19 @@ export function PreviewPane({
                 showAnchor={showAnchor}
                 onSourceAspect={cropping ? setSourceAspect : undefined}
                 cropOverlay={
-                  cropping && cropDraft ? (
+                  reframing?.itemId === layer.id ? (
+                    <ReframeFrame
+                      framing={reframing.now}
+                      canvasAspect={canvas.width / Math.max(1, canvas.height)}
+                      sourceAspect={sourceAspect ?? cropSource.width}
+                      onPreview={(next) =>
+                        setReframing((current) => (current ? { ...current, now: next } : current))
+                      }
+                      onCommit={(next) =>
+                        setReframing((current) => (current ? { ...current, now: next } : current))
+                      }
+                    />
+                  ) : cropping && cropDraft ? (
                     <CropFrame
                       /*
                         The draft, not the stored crop: the whole point of the session is that
@@ -2314,6 +2443,50 @@ export function PreviewPane({
                 active
                 icon={<Check size={14} />}
                 onClick={applyCrop}
+              />
+            </>
+          ) : null}
+          {/*
+            §8.6's **"Set framing…"** (SPEC 10 §8.6). A separate mode from the crop frame, not
+            another control inside it, because the gesture is the opposite one: cropping moves a
+            window over the picture, reframing moves the picture under a window. Offering both at
+            once would make the same drag mean two contradictory things depending on where it
+            started.
+          */}
+          {selectedId && !reframing ? (
+            <IconButton
+              label="Set framing"
+              shortcut="Shift+C"
+              size={28}
+              icon={<Move size={14} />}
+              onClick={() => {
+                // The two modes are exclusive: a reframe with a crop session open would be two
+                // drafts of the same picture, and whichever was applied last would win.
+                cancelCrop();
+                setTool('crop');
+                beginReframe();
+              }}
+            />
+          ) : null}
+          {reframing ? (
+            <>
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                Drag the picture · wheel to zoom
+              </span>
+              <IconButton
+                label="Cancel reframe"
+                shortcut="Esc"
+                size={28}
+                icon={<X size={14} />}
+                onClick={() => setReframing(null)}
+              />
+              <IconButton
+                label="Apply framing"
+                shortcut="Enter"
+                size={28}
+                active
+                icon={<Check size={14} />}
+                onClick={applyReframe}
               />
             </>
           ) : null}
