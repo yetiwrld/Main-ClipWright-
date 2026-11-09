@@ -12,6 +12,7 @@ import {
   redact,
   uuidv7,
   CURRENT_SCHEMA_VERSION,
+  CompositionPayloadSchema,
 } from '../index.js';
 import {
   StorageService,
@@ -389,4 +390,70 @@ describe('Spec 03 — Storage, Migrations, Recovery, Redaction & Portability', (
     fs.rmSync(wsDir, { recursive: true, force: true });
     fs.rmSync(appDataDir, { recursive: true, force: true });
   });
+  it('persists user composition guides with the project (SPEC 10 §8.8)', () => {
+    /*
+      A guide is the one overlay that is document state, so the claim "saved with the
+      project" has to be checked against a real save and a real load rather than against
+      the schema in isolation. `CompositionRecordSchema.parse` runs on save, which is what
+      makes this a round-trip and not just an object comparison: a field the schema did not
+      know about would be dropped by that parse.
+    */
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-guides-'));
+    const appDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-guides-app-'));
+    const storage = new StorageService(tmpDir, appDataDir);
+    const proj = storage.createProject({ name: 'Guides Project' });
+    const compId = uuidv7();
+    storage.saveComposition(proj.id, {
+      id: compId,
+      projectId: proj.id,
+      name: 'Clip 1',
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      payload: {
+        id: compId,
+        name: 'Clip 1',
+        fps: 30,
+        canvas: { width: 1080, height: 1920, aspect: '9:16', backgroundColor: '#000000', backgroundBlur: false },
+        tracks: [],
+        items: {},
+        markers: [],
+        guides: [
+          { id: 'g1', axis: 'x', at: 0.25 },
+          { id: 'g2', axis: 'y', at: 0.75 },
+        ],
+        links: [],
+        groups: [],
+        playheadUs: 0,
+        toggles: {},
+        viewState: {},
+        editByTranscriptDeletedWordIds: [],
+      },
+    } as never);
+
+    const loaded = storage.getComposition(proj.id, compId);
+    expect(loaded?.payload.guides).toEqual([
+      { id: 'g1', axis: 'x', at: 0.25 },
+      { id: 'g2', axis: 'y', at: 0.75 },
+    ]);
+  });
+
+  it('opens a project saved before guides existed', () => {
+    /*
+      Every field added since v1 defaults, so an older file loads with an empty list rather
+      than failing validation and dropping the user into read-only recovery. This is the
+      half of the compatibility story that a fixture with the field already present cannot
+      check.
+    */
+    const parsed = CompositionPayloadSchema.parse({
+      id: 'comp',
+      name: 'Clip',
+      // `canvas` is the one field with no default, so a minimal valid payload still
+      // carries it; everything else — including `guides` — has to fill itself in.
+      canvas: { width: 1080, height: 1920, aspect: '9:16', backgroundColor: '#000000', backgroundBlur: false },
+      tracks: [],
+      items: {},
+    });
+    expect(parsed.guides).toEqual([]);
+  });
+
 });
