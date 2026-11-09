@@ -445,3 +445,33 @@ a command-type union) and wrong on the first draft. It was deleted.
   called the function. A function with tests and no caller is indistinguishable from a working
   feature in every artifact except a running app. The check that finds it is asking "who calls
   this?" — which is the same question that caught `proxyPending` (decisions §15).
+
+## 19. Linked selection expands the selection; it does not make the commands aware
+
+SPEC 09 §9.6 says a detached audio item and its video share a `linkId`, and that with **Linked
+selection** on, "moving, trimming, splitting, deleting and speed changes apply to both together".
+None of those five commands did anything with `linkId` — `linkedTrackIds` existed and was read
+only by the ripple paths. Detaching audio and dragging the picture left the sound behind.
+
+- **One expansion, called by every command.** `withLinkedSelection(state, itemIds)` returns the
+  ids plus their link partners and group members, honouring the document's own toggle. Each
+  command expands its input once and then works with the result, rather than teaching five
+  separate mutation loops about links — which is how five places to get it wrong.
+- **Partners move by the delta, never to the same time.** A detached item deliberately placed
+  200 ms after its picture must still be 200 ms after it. Snapping a partner to the picture's
+  absolute position closes the gap on the first drag and the sound drifts against the lip.
+- **A trimmed partner trims its own edge by the delta.** Using the picture's new end directly
+  collapses an offset partner onto it and `trimGeometry` then clamps the sound to one frame — a
+  silent picture with a sliver of audio, which looked like the trim itself failing.
+- **The gap-closing pass must skip every move in the batch.** `closeMainGaps` skipped "items the
+  caller named", and a linked partner is not one of those: a group member on the main track moved
+  correctly to 7 s and was then pulled back to 6 s. The set that skips is now the whole batch.
+- **A duplicate is a pair under a new shared link.** One fresh id per copy would leave the copies
+  unlinked from each other, so dragging the copy of the picture would leave the copy of the sound
+  behind — the original bug, reintroduced on the copy.
+- **Groups and links are separate relations, expanded in one pass each.** Making expansion
+  transitive through both would move a link partner of a group member the user did not group.
+- **The toggle is document state and needed a command.** `linkedSelection` and `coverLock` were
+  schema fields with no writer and no control: every project was permanently in whatever state
+  the schema default named, and could not say otherwise. `setToggles` writes it through the undo
+  stack, and the toolbar reads the document's value rather than a component default.

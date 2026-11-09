@@ -55,6 +55,7 @@ import {
   updateMarker,
   deleteMarker,
   setViewState,
+  setToggles,
   renameTrack,
   toggleItemDisabled,
   addTrack,
@@ -224,6 +225,10 @@ export interface TimelineApi {
   addText: (text: string) => boolean;
   /** Add a shape at the playhead (SPEC 11 §12). */
   addShape: (kind: NonNullable<TimelineItem['shapeKind']>) => boolean;
+  /** Toggle one editing flag on the composition (SPEC 09 §9.6). */
+  setToggle: (patch: Partial<NonNullable<TimelineState['toggles']>>) => boolean;
+  /** Whether linked items travel together; defaults to on, as the schema does. */
+  linkedSelection: boolean;
   toggleTrackLock: (trackId: string) => boolean;
   toggleTrackHidden: (trackId: string) => boolean;
   deleteTrack: (trackId: string) => boolean;
@@ -651,6 +656,14 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
           addShapeItem(s, { id, shapeKind: kind, startUs: playheadStore.get(), fps })
         );
       },
+      /*
+        The linked-selection flag is document state, so it is written through a command
+        rather than held in component state: it is saved with the project and undoes like
+        everything else. Reading it from the document is what makes the toolbar show the
+        project's real value rather than a guess that resets on reload.
+      */
+      setToggle: (patch) => run('Change setting', (s) => setToggles(s, { patch })),
+      linkedSelection: state?.toggles?.linkedSelection !== false,
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
       deleteTrack: (trackId) => run('Delete track', (s) => deleteTrack(s, { trackId })),

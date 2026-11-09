@@ -32,6 +32,7 @@ import {
   SlidersHorizontal,
   Square,
   Type,
+  Link2,
 } from 'lucide-react';
 import {
   Button,
@@ -868,6 +869,18 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
           <IconButton label={playback.isPlaying ? 'Pause' : 'Play'} shortcut='Space' size={28} icon={playback.isPlaying ? <Pause size={14} /> : <Play size={14} />} onClick={playback.toggle} />
           <IconButton label={loopPlayback ? 'Loop playback: on' : 'Loop playback: off'} size={28} active={loopPlayback} icon={<Repeat size={14} />} onClick={() => setLoopPlayback((value) => !value)} />
           <IconButton label={followPlayhead ? 'Follow playhead: on' : 'Follow playhead: off'} size={28} active={followPlayhead} icon={<Lock size={14} />} onClick={() => setFollowPlayhead((value) => !value)} />
+          {/*
+            SPEC 09 §9.6: with linked selection on, moving, trimming, splitting and
+            deleting apply to a video and its detached audio together. The flag lives in
+            the document, so this reads and writes the project's own value.
+          */}
+          <IconButton
+            label={timeline.linkedSelection ? 'Linked selection: on' : 'Linked selection: off'}
+            size={28}
+            active={timeline.linkedSelection}
+            icon={<Link2 size={14} />}
+            onClick={() => timeline.setToggle({ linkedSelection: !timeline.linkedSelection })}
+          />
           <PlayheadReadout durationUs={durationUs} fps={fps} />
           <IconButton label="Zoom out" size={28} icon={<Minus size={14} />} onClick={() => zoomBy(1 / 1.25)} />
           <div style={{ width: 96 }}>

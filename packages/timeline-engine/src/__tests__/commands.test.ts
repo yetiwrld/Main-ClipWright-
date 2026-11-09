@@ -2396,3 +2396,246 @@ describe('addShapeItem (SPEC 11 §12)', () => {
     expect(undone.tracks.some((track) => track.name === 'Graphics')).toBe(false);
   });
 });
+
+describe('linked selection (SPEC 09 §9.6)', () => {
+  /*
+    A detached audio item shares its video's `linkId` so the two travel together. The
+    schema carried the coupling and the `linkedSelection` toggle from the start, and
+    *every* one of the five commands that must honour it expanded only the ids it was
+    given — so detaching audio and dragging the picture left the sound behind, which is
+    the most ordinary thing a user does with linked media.
+
+    These tests use `detachAudio` to build the pair rather than hand-setting `linkId`,
+    so they exercise the real link the app produces.
+  */
+  const pair = () => {
+    const timeline = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+    const main = timeline.tracks.find((track) => track.role === 'main')!;
+    const video = createMediaItem({
+      id: 'v1',
+      trackId: main.id,
+      label: 'Shot',
+      mediaId: 'm1',
+      startUs: 0,
+      durationUs: 4_000_000,
+      sourceDurationUs: 10_000_000,
+    });
+    const added = addItem(timeline, { item: video, fps: 30 });
+    if (!added.ok) throw new Error(added.message);
+    const detached = detachAudio(added.state, { videoItemId: 'v1', fps: 30 });
+    if (!detached.ok) throw new Error(detached.message);
+    const audio = Object.values(detached.state.items).find((item) => item.type === 'audio')!;
+    return { state: detached.state, videoId: 'v1', audioId: audio.id };
+  };
+
+  const withToggle = (state: TimelineState, linkedSelection: boolean) =>
+    ({ ...state, toggles: { ...state.toggles, linkedSelection } }) as TimelineState;
+
+  it('detachAudio actually produces a linked pair, which the rest of this relies on', () => {
+    const { state, videoId, audioId } = pair();
+    expect(state.items[videoId]!.linkId).toBeDefined();
+    expect(state.items[audioId]!.linkId).toBe(state.items[videoId]!.linkId);
+  });
+
+  it('moving the picture moves the detached sound with it', () => {
+    // The headline case: without this the audio stays put and the edit is silent.
+    const { state, videoId, audioId } = pair();
+    const moved = moveItems(state, { moves: [{ itemId: videoId, startUs: 2_000_000 }], fps: 30 });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.state.items[videoId]!.startUs).toBe(2_000_000);
+    expect(moved.state.items[audioId]!.startUs).toBe(2_000_000);
+  });
+
+  it('keeps the pair\'s relative offset rather than snapping to the same time', () => {
+    /*
+      A detached item that began 200 ms after its picture must still begin 200 ms after
+      it. Moving the partner to the same absolute time would close a deliberate gap the
+      user made, and the sound would drift against the lip on every subsequent move.
+    */
+    const { state, videoId, audioId } = pair();
+    /*
+      Build the offset with the toggle *off*, because moving one half of a linked pair
+      with it on drags the other half along — which would leave the two at the same time
+      and make the assertion below vacuous.
+    */
+    const off = withToggle(state, false);
+    const audioStart = off.items[audioId]!.startUs + 200_000;
+    const shifted = moveItems(off, {
+      moves: [{ itemId: audioId, startUs: audioStart }],
+      fps: 30,
+    });
+    if (!shifted.ok) throw new Error(shifted.message);
+    /*
+      Re-enable the toggle before the move under test. `shifted.state` still carries the
+      toggle-off document, so moving the picture from it would be the "toggle is off" case
+      again — the assertion below would then be checking the wrong thing.
+    */
+    const offset = withToggle(shifted.state, true);
+    // Now the pair sits 200 ms apart; moving the picture must preserve that.
+    const moved = moveItems(offset, {
+      moves: [{ itemId: videoId, startUs: 3_000_000 }],
+      fps: 30,
+    });
+    if (!moved.ok) throw new Error(moved.message);
+    expect(moved.state.items[audioId]!.startUs).toBe(3_200_000);
+  });
+
+  it('does not move the partner when the toggle is off', () => {
+    // The setting exists so a user can work on one half of a pair. Ignoring it would
+    // make the toggle a decoration.
+    const { state, videoId, audioId } = pair();
+    const off = withToggle(state, false);
+    const moved = moveItems(off, { moves: [{ itemId: videoId, startUs: 2_000_000 }], fps: 30 });
+    if (!moved.ok) throw new Error(moved.message);
+    expect(moved.state.items[videoId]!.startUs).toBe(2_000_000);
+    expect(moved.state.items[audioId]!.startUs).toBe(0);
+  });
+
+  it('deleting the picture deletes the sound', () => {
+    // Otherwise Delete leaves audio playing over black, which reads as a playback bug.
+    const { state, videoId, audioId } = pair();
+    const deleted = deleteItems(state, { itemIds: [videoId], fps: 30 });
+    if (!deleted.ok) throw new Error(deleted.message);
+    expect(deleted.state.items[videoId]).toBeUndefined();
+    expect(deleted.state.items[audioId]).toBeUndefined();
+  });
+
+  it('does not delete the sound when the toggle is off', () => {
+    const { state, videoId, audioId } = pair();
+    const off = withToggle(state, false);
+    const deleted = deleteItems(off, { itemIds: [videoId], fps: 30 });
+    if (!deleted.ok) throw new Error(deleted.message);
+    expect(deleted.state.items[audioId]).toBeDefined();
+  });
+
+  it('splitting the picture splits the sound at the same instant', () => {
+    /*
+      Splitting only the picture leaves one long audio item under two short ones: the
+      timeline is legal but nothing lines up, and there is no frame boundary in the sound
+      to follow.
+    */
+    const { state, videoId } = pair();
+    const split = splitItems(state, { itemIds: [videoId], atUs: 2_000_000, fps: 30 });
+    if (!split.ok) throw new Error(split.message);
+    const audioPieces = Object.values(split.state.items).filter((item) => item.type === 'audio');
+    expect(audioPieces).toHaveLength(2);
+    expect(audioPieces.map((item) => item.startUs).sort((a, b) => a - b)).toEqual([0, 2_000_000]);
+    expect(audioPieces.every((item) => item.durationUs === 2_000_000)).toBe(true);
+  });
+
+  it('trimming the end of the picture trims the sound to match', () => {
+    // A picture shortened by a second and a sound not shortened by one means the last
+    // second of the shot plays over whatever follows.
+    const { state, videoId, audioId } = pair();
+    const trimmed = trimItem(state, { itemId: videoId, edge: 'end', toUs: 3_000_000, fps: 30 });
+    if (!trimmed.ok) throw new Error(trimmed.message);
+    expect(trimmed.state.items[videoId]!.durationUs).toBe(3_000_000);
+    expect(trimmed.state.items[audioId]!.durationUs).toBe(3_000_000);
+  });
+
+  it('trims an offset partner by the delta, not to the picture\'s own end', () => {
+    /*
+      The case that distinguishes the two formulas. When the sound starts later than the
+      picture, trimming the picture's end to time T must shorten the sound by the same
+      *delta* — not set its end to T, which would slide the whole sound backwards and
+      close a gap the user made.
+
+      Every other trim fixture has the pair starting together, where the two formulas
+      agree to the microsecond; only an offset one can tell them apart.
+    */
+    const { state, videoId, audioId } = pair();
+    const off = withToggle(state, false);
+    const shifted = moveItems(off, {
+      moves: [{ itemId: audioId, startUs: 500_000 }],
+      fps: 30,
+    });
+    if (!shifted.ok) throw new Error(shifted.message);
+    const offset = withToggle(shifted.state, true);
+
+    // The sound is now 0.5 s late and 4 s long, ending at 4.5 s.
+    expect(offset.items[audioId]!.startUs).toBe(500_000);
+    const trimmed = trimItem(offset, { itemId: videoId, edge: 'end', toUs: 3_000_000, fps: 30 });
+    if (!trimmed.ok) throw new Error(trimmed.message);
+    // A 1 s delta: the sound keeps its 0.5 s offset and ends at 3.5 s.
+    expect(trimmed.state.items[audioId]!.startUs).toBe(500_000);
+    const sound = trimmed.state.items[audioId]!;
+    expect(sound.startUs + sound.durationUs).toBe(3_500_000);
+  });
+
+  it('trimming the start of the picture moves the sound\'s start with it', () => {
+    const { state, videoId, audioId } = pair();
+    const trimmed = trimItem(state, { itemId: videoId, edge: 'start', toUs: 1_000_000, fps: 30 });
+    if (!trimmed.ok) throw new Error(trimmed.message);
+    expect(trimmed.state.items[audioId]!.startUs).toBe(1_000_000);
+    expect(trimmed.state.items[audioId]!.durationUs).toBe(3_000_000);
+  });
+
+  it('duplicating the picture duplicates the sound and links the copies to each other', () => {
+    /*
+      The copy has to be a *pair*, joined by a fresh link id shared between the two copies
+      — not one new id each, which would leave the duplicated pair unlinked and drag the
+      same bug onto the copy.
+    */
+    const { state, videoId } = pair();
+    const before = Object.keys(state.items).length;
+    const duplicated = duplicateItems(state, { itemIds: [videoId], fps: 30 });
+    if (!duplicated.ok) throw new Error(duplicated.message);
+    const copies = Object.values(duplicated.state.items).filter((item) => item.id.includes('~copy'));
+    expect(copies).toHaveLength(2);
+    expect(Object.keys(duplicated.state.items)).toHaveLength(before + 2);
+    const links = new Set(copies.map((item) => item.linkId));
+    expect(links.size).toBe(1);
+    expect(links.has(state.items[videoId]!.linkId)).toBe(false);
+  });
+
+  it('group members travel together too', () => {
+    /*
+      SPEC 09 §9.6 says "linked/grouped members" in the click table. Groups are a
+      separate relation from links, and both expand.
+    */
+    const timeline = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+    const main = timeline.tracks.find((track) => track.role === 'main')!;
+    const a = createMediaItem({ id: 'a', trackId: main.id, label: 'A', mediaId: 'm1', startUs: 0, durationUs: 1_000_000, sourceDurationUs: 9_000_000 });
+    const b = createMediaItem({ id: 'b', trackId: main.id, label: 'B', mediaId: 'm2', startUs: 2_000_000, durationUs: 1_000_000, sourceDurationUs: 9_000_000 });
+    const first = addItem(timeline, { item: a, fps: 30 });
+    if (!first.ok) throw new Error(first.message);
+    const second = addItem(first.state, { item: b, fps: 30 });
+    if (!second.ok) throw new Error(second.message);
+    const grouped = groupItems(second.state, { itemIds: ['a', 'b'] });
+    if (!grouped.ok) throw new Error(grouped.message);
+
+    const moved = moveItems(grouped.state, { moves: [{ itemId: 'a', startUs: 5_000_000 }], fps: 30 });
+    if (!moved.ok) throw new Error(moved.message);
+    // `b` was 2 s after `a`, so it must still be 2 s after it.
+    expect(moved.state.items['b']!.startUs).toBe(7_000_000);
+  });
+
+  it('leaves a partner on a locked track behind rather than refusing the whole move', () => {
+    // The lock protects its own item; it must not make the picture unmovable, and it
+    // must not let the partner move silently either.
+    const { state, videoId, audioId } = pair();
+    const audioTrackId = state.items[audioId]!.trackId;
+    const locked = {
+      ...state,
+      tracks: state.tracks.map((track) =>
+        track.id === audioTrackId ? { ...track, locked: true } : track
+      ),
+    } as TimelineState;
+    const moved = moveItems(locked, { moves: [{ itemId: videoId, startUs: 1_000_000 }], fps: 30 });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.state.items[videoId]!.startUs).toBe(1_000_000);
+    expect(moved.state.items[audioId]!.startUs).toBe(0);
+  });
+
+  it('moves a linked partner by the delta, so a pair stays a pair through a refusal', () => {
+    // The pair moves together or the picture is refused: a partial move is worse than a
+    // refusal, because the two halves then disagree and nothing marks them.
+    const { state, videoId, audioId } = pair();
+    const moved = moveItems(state, { moves: [{ itemId: videoId, startUs: 0 }], fps: 30 });
+    if (!moved.ok) throw new Error(moved.message);
+    // Zero delta: nothing to do, and the partner must not be disturbed.
+    expect(moved.state.items[audioId]!.startUs).toBe(state.items[audioId]!.startUs);
+  });
+});

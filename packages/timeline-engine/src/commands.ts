@@ -156,6 +156,65 @@ export interface MoveTarget {
  * track; Insert shifts later items right; Overwrite trims or removes what it
  * covers. Nothing is destroyed in Normal mode.
  */
+
+/**
+ * The items that travel with `itemIds` (SPEC 09 §9.6, §9.7): link partners and group
+ * members, when the composition's **Linked selection** toggle is on.
+ *
+ * The rule the spec states is that a detached audio item and its video share a `linkId`,
+ * and with Linked selection on, moving, trimming, splitting, deleting and speed changes
+ * apply to both. None of the five commands did that — each expanded only the ids it was
+ * given — so detaching audio and then dragging the picture left the sound behind, which
+ * is the single most common thing a user does with linked media.
+ *
+ * Two deliberate limits:
+ *
+ * - **Groups are included, links are not transitive through groups.** A group holds an
+ *   explicit `itemIds` list and a link holds a shared `linkId`; expanding one then the
+ *   other would make a group member's link partner travel even though the user grouped
+ *   only one of them. Expansion is one pass over each relation.
+ * - **A locked track stops its own item, not the whole operation.** The commands already
+ *   refuse a locked source track; expanding a selection must not let a locked partner be
+ *   moved silently, so partners on locked tracks are dropped here and the command's own
+ *   validation sees only what it may touch.
+ */
+export function withLinkedSelection(
+  state: TimelineState,
+  itemIds: readonly string[],
+): string[] {
+  const result = new Set(itemIds);
+  // The toggle is document state, saved with the project, so it is read here rather than
+  // passed in: every caller would otherwise have to remember to forward it, and the one
+  // that forgot would be a silent inconsistency.
+  if (state.toggles?.linkedSelection === false) return [...result];
+
+  for (const id of itemIds) {
+    const item = state.items[id];
+    if (!item) continue;
+
+    if (item.linkId) {
+      for (const candidate of Object.values(state.items)) {
+        if (candidate.linkId !== item.linkId) continue;
+        const track = state.tracks.find((entry) => entry.id === candidate.trackId);
+        if (track?.locked) continue;
+        result.add(candidate.id);
+      }
+    }
+
+    if (item.groupId) {
+      const group = state.groups?.find((entry) => entry.id === item.groupId);
+      for (const memberId of group?.itemIds ?? []) {
+        const member = state.items[memberId];
+        if (!member) continue;
+        const track = state.tracks.find((entry) => entry.id === member.trackId);
+        if (track?.locked) continue;
+        result.add(memberId);
+      }
+    }
+  }
+  return [...result];
+}
+
 export function moveItems(
   state: TimelineState,
   params: { moves: MoveTarget[]; fps: Fps; mode?: EditMode },
@@ -163,11 +222,49 @@ export function moveItems(
   const mode = params.mode ?? 'normal';
   if (!params.moves.length) return fail('invalid', 'Nothing to move.');
 
-  const movingIds = new Set(params.moves.map((move) => move.itemId));
+  /*
+    Expand the selection with linked partners and group members (SPEC 09 §9.6).
+
+    A partner moves by the **same delta** as the item it follows, never to the same
+    absolute position: a detached audio item that began 200 ms later than its picture
+    must still begin 200 ms later afterwards, or the sound drifts against the lip. That
+    is the whole reason a link is a relationship rather than a shared timestamp.
+  */
+  const explicit = new Set(params.moves.map((move) => move.itemId));
+  const linkedMoves: MoveTarget[] = [];
+  for (const move of params.moves) {
+    const item = state.items[move.itemId];
+    if (!item) continue;
+    const delta = move.startUs - item.startUs;
+    if (delta === 0) continue;
+    for (const partnerId of withLinkedSelection(state, [move.itemId])) {
+      if (explicit.has(partnerId)) continue;
+      const partner = state.items[partnerId];
+      if (!partner) continue;
+      // A partner stays on its own track: moving the picture to another video track
+      // must not drag the sound onto a track it cannot live on.
+      linkedMoves.push({ itemId: partnerId, startUs: Math.max(0, partner.startUs + delta) });
+      explicit.add(partnerId);
+    }
+  }
+
+  const moves = [...params.moves, ...linkedMoves];
+  if (!moves.length) return fail('invalid', 'Nothing to move.');
+
+  /*
+    Every move in this batch is inside `movingIds`, which the ripple paths already skip —
+    a linked partner or group member must not be shifted a second time as a neighbour of
+    the item it is travelling with.
+  */
+  const movingIds = new Set(moves.map((move) => move.itemId));
   const notes: string[] = [];
+  if (linkedMoves.length > 0) {
+    const noun = linkedMoves.length === 1 ? 'item' : 'items';
+    notes.push(`Moved ${linkedMoves.length} linked ${noun} with it.`);
+  }
 
   // Validate everything before mutating so a refusal leaves the state untouched.
-  for (const move of params.moves) {
+  for (const move of moves) {
     const item = state.items[move.itemId];
     if (!item) return fail('not_found', 'That item no longer exists.');
     const trackId = move.trackId ?? item.trackId;
@@ -182,7 +279,7 @@ export function moveItems(
   }
 
   const [next, patches, inverse] = produceWithPatches(state, (draft) => {
-    for (const move of params.moves) {
+    for (const move of moves) {
       const item = draft.items[move.itemId] as TimelineItem;
       const originalTrackId = item.trackId;
       let trackId = move.trackId ?? originalTrackId;
@@ -282,7 +379,13 @@ export function moveItems(
     // left (SPEC 09 §9.4.2). Clips still on the main track act as anchors.
     const mainTrack = draft.tracks.find((track) => track.role === 'main');
     if (mainTrack?.magnetic) {
-      const movedFromMain = params.moves
+      /*
+        Every move in this batch, not only the ones the caller named: a linked partner is
+        moved by this command too, so `closeMainGaps` must skip it. Leaving it out was a
+        real bug — a group member sharing the main track was moved to 7 s and then pulled
+        back to 6 s by the gap-closing pass, which looked like the link simply not working.
+      */
+      const movedFromMain = moves
         .map((move) => {
           const original = state.items[move.itemId];
           return original && state.tracks.find((track) => track.id === original.trackId)?.role === 'main'
@@ -438,6 +541,12 @@ export function trimItem(state: TimelineState, params: TrimParams): CommandResul
   );
   notes.push(...geometryNotes);
 
+  // Linked partners trim with the same edge (SPEC 09 §9.6). Computed from the state
+  // before mutation so it is the same set the rest of the command works against.
+  const linkedPartners = withLinkedSelection(state, [params.itemId]).filter(
+    (id) => id !== params.itemId,
+  );
+
   // Ripple (SPEC 09 §13.3–13.4): extending/shortening this edge shifts the
   // later items on this track — and on the tracks of linked partners — by the
   // same delta. Locked tracks never move: a ripple that would push a locked
@@ -495,6 +604,42 @@ export function trimItem(state: TimelineState, params: TrimParams): CommandResul
     }
     target.startUs = finalStart;
     target.durationUs = nextDuration;
+
+    /*
+      Trim linked partners with the same edge by the same delta (SPEC 09 §9.6). The
+      partner's own clamps are honoured — `trimGeometry` is asked rather than the result
+      being forced — so a detached audio item at the end of its source cannot be dragged
+      past it just because the picture had room.
+    */
+    if (linkedPartners.length > 0) {
+      const appliedDelta = params.edge === 'start' ? finalStart - item.startUs : 0;
+      for (const partnerId of linkedPartners) {
+        const partner = draft.items[partnerId] as TimelineItem | undefined;
+        if (!partner) continue;
+        const partnerTrack = draft.tracks.find((candidate) => candidate.id === partner.trackId);
+        if (partnerTrack?.locked) continue;
+        /*
+          The partner's new edge is its *own* edge plus the delta the picture's edge
+          moved by — not the picture's new edge. Using the picture's end directly made a
+          partner that started elsewhere collapse onto it, and then `trimGeometry` clamped
+          it to one frame: a sound that shrank to nothing while the picture looked right.
+        */
+        const endDelta = nextStart + nextDuration - itemEndUs(item);
+        const wanted =
+          params.edge === 'start' ? partner.startUs + appliedDelta : itemEndUs(partner) + endDelta;
+        const geometry = trimGeometry(
+          draft as TimelineState,
+          partner,
+          params.edge,
+          wanted,
+          params.fps,
+          new Set([partnerId]),
+        );
+        partner.startUs = geometry.nextStart;
+        partner.durationUs = geometry.nextDuration;
+        sortTrackItems(draft, partner.trackId);
+      }
+    }
 
     if (params.ripple && deltaUs !== 0) {
       for (const trackId of rippleTrackIds) {
@@ -858,8 +1003,18 @@ export function splitItems(
   const atUs = quantizeUs(params.atUs, params.fps);
   const minDuration = frameDurationUs(params.fps);
 
+  /*
+    Split a linked pair together (SPEC 09 §9.6). Splitting only the picture leaves the
+    sound as one long item under two short ones, and the audio then has no frame boundary
+    to follow at all — the timeline is legal, but nothing lines up any more.
+  */
+  const splitIds =
+    params.itemIds && params.itemIds.length
+      ? new Set(withLinkedSelection(state, params.itemIds))
+      : undefined;
+
   const targets = Object.values(state.items).filter((item) => {
-    if (params.itemIds && params.itemIds.length && !params.itemIds.includes(item.id)) return false;
+    if (splitIds && !splitIds.has(item.id)) return false;
     const track = state.tracks.find((candidate) => candidate.id === item.trackId);
     if (!track || track.locked) return false;
     return atUs > item.startUs + minDuration && atUs < itemEndUs(item) - minDuration;
@@ -907,20 +1062,27 @@ export function deleteItems(
 ): CommandResult {
   if (!params.itemIds.length) return fail('invalid', 'Nothing is selected.');
 
-  for (const id of params.itemIds) {
+  /*
+    Deleting a picture deletes its detached sound (SPEC 09 §9.6). Without this the most
+    ordinary action in the editor — select a clip, press Delete — leaves an audio item
+    playing over black, which sounds like a bug in playback rather than a stray clip.
+  */
+  const deleteIds = withLinkedSelection(state, params.itemIds);
+
+  for (const id of deleteIds) {
     const item = state.items[id];
     if (!item) continue;
     const track = state.tracks.find((candidate) => candidate.id === item.trackId);
     if (track?.locked) return fail('locked', `“${track.name}” is locked.`);
   }
 
-  const removedOnMain = params.itemIds.some((id) => {
+  const removedOnMain = deleteIds.some((id) => {
     const item = state.items[id];
     return item && state.tracks.find((track) => track.id === item.trackId)?.role === 'main';
   });
 
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
-    for (const id of params.itemIds) {
+    for (const id of deleteIds) {
       const item = draft.items[id];
       if (!item) continue;
       const trackId = item.trackId;
@@ -949,13 +1111,13 @@ export function deleteItems(
     // Magnetic main track: a non-ripple delete still closes the gap (SPEC 09 §9.4.2).
     if (!params.ripple && removedOnMain) {
       const minStart = Math.min(
-        ...params.itemIds.map((id) => state.items[id]?.startUs ?? 0),
+        ...deleteIds.map((id) => state.items[id]?.startUs ?? 0),
       );
       closeMainGaps(draft, params.fps, minStart);
     }
   });
 
-  return { ok: true, state: nextState, patches, inverse, affectedItemIds: params.itemIds, notes: [] };
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: deleteIds, notes: [] };
 }
 
 /** Duplicate: the copy lands immediately after the original on the same track. */
@@ -966,19 +1128,44 @@ export function duplicateItems(
   if (!params.itemIds.length) return fail('invalid', 'Nothing is selected.');
   const copies: string[] = [];
 
+  /*
+    Duplicate the whole linked set (SPEC 09 §9.6). A copy of the picture without a copy
+    of its sound is a clip that plays silently next to one that does not, and the pair
+    is re-linked so the copy behaves like the original.
+  */
+  const duplicateIds = withLinkedSelection(state, params.itemIds);
+  const duplicateSet = new Set(duplicateIds);
+  /*
+    One new link id per *original* link, shared by every copy that belonged to it — not
+    one per copy. Giving each copy its own id would leave the duplicated pair unlinked
+    from each other, so dragging the copy of the picture would leave the copy of the
+    sound behind: the same bug, reintroduced on the copy.
+  */
+  const newLinkIds = new Map<string, string>();
+
   const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
-    for (const id of params.itemIds) {
+    for (const id of duplicateIds) {
       const item = draft.items[id] as TimelineItem | undefined;
       if (!item) continue;
       const track = draft.tracks.find((candidate) => candidate.id === item.trackId);
       if (!track || track.locked) continue;
       const existing = sortedItemsOfTrack(draft as TimelineState, item.trackId).filter(
-        (candidate) => !params.itemIds.includes(candidate.id),
+        (candidate) => !duplicateSet.has(candidate.id),
       );
       const startUs = quantizeUs(itemEndUs(item), params.fps);
       if (overlapsAny(existing, startUs, item.durationUs)) continue;
       const copyId = `${item.id}~copy${copies.length}`;
       draft.items[copyId] = { ...copyDraft(item), id: copyId, startUs };
+      /*
+        A copied pair shares a fresh link, not the original's: leaving the old `linkId`
+        on the copy would make dragging the copy also drag the original.
+      */
+      if (item.linkId) {
+        const existingLink = newLinkIds.get(item.linkId);
+        const copyLink = existingLink ?? `link-${item.linkId}-copy${copies.length}`;
+        if (!existingLink) newLinkIds.set(item.linkId, copyLink);
+        draft.items[copyId]!.linkId = copyLink;
+      }
       addToTrack(draft, item.trackId, copyId);
       copies.push(copyId);
     }
@@ -3009,6 +3196,37 @@ export function deleteMarker(
  * and header width. View state is not part of the editing history — it is
  * persisted with the project but not undoable via Ctrl+Z.
  */
+
+/**
+ * Change one or more of the composition's editing toggles (SPEC 09 §9.6, §12).
+ *
+ * These live in the document — saved with the project and part of the undo stack — and
+ * until now nothing in the editor could write them: `linkedSelection`, `coverLock` and
+ * the rest were schema fields with no control and no command, so the defaults in
+ * `CompositionTogglesSchema` were the only values a project could ever have.
+ *
+ * A patch rather than a whole object, so toggling one flag cannot silently reset the
+ * other nine to their schema defaults.
+ */
+export function setToggles(
+  state: TimelineState,
+  params: { patch: Partial<NonNullable<TimelineState['toggles']>> },
+): CommandResult {
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    draft.toggles = { ...(draft.toggles ?? {}), ...params.patch } as NonNullable<
+      TimelineState['toggles']
+    >;
+  });
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [],
+    notes: [],
+  };
+}
+
 export function setViewState(
   state: TimelineState,
   params: {

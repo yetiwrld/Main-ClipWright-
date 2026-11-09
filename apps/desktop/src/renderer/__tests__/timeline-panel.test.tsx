@@ -107,6 +107,8 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     addAdjustmentLayer: vi.fn(() => true),
     addText: vi.fn(() => true),
     addShape: vi.fn(() => true),
+    setToggle: vi.fn(() => true),
+    linkedSelection: true,
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
     deleteTrack: vi.fn(() => true),
@@ -470,6 +472,30 @@ describe('timeline panel', () => {
     fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
     fireEvent.click(screen.getByText('Add shape'));
     expect(timeline.addShape).toHaveBeenCalledWith('rect');
+  });
+
+  it('shows and flips the linked-selection toggle (SPEC 09 §9.6)', () => {
+    /*
+      The flag is document state that no control could reach: it was in the schema with
+      a default and nothing read or wrote it, so "linked selection" was permanently on and
+      invisible. The button has to read the project's own value, not a component default
+      that resets on reload.
+    */
+    const timeline = fakeTimeline(fixture());
+    render(<TimelinePanel timeline={timeline} />);
+    const button = screen.getByRole('button', { name: /linked selection/i });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(button);
+    expect(timeline.setToggle).toHaveBeenCalledWith({ linkedSelection: false });
+  });
+
+  it('renders the toggle as off when the project says so', () => {
+    // The other direction: a project saved with links off must not show them as on.
+    const timeline = { ...fakeTimeline(fixture()), linkedSelection: false };
+    render(<TimelinePanel timeline={timeline} />);
+    expect(
+      screen.getByRole('button', { name: /linked selection/i }).getAttribute('aria-pressed')
+    ).toBe('false');
   });
 
   it('Escape closes the context menu', () => {
