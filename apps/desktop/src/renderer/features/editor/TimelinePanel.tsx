@@ -33,6 +33,7 @@ import {
   Square,
   Type,
   Link2,
+  Frame,
 } from 'lucide-react';
 import {
   Button,
@@ -97,6 +98,12 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const [showWaveforms, setShowWaveforms] = useState(true);
   const [loopPlayback, setLoopPlayback] = useState(false);
   const [followPlayhead, setFollowPlayhead] = useState(true);
+  /*
+    SPEC 10 §8.5's fill lock. Read from the document with `!== false` rather than
+    `?? true`: a project written before the field existed has no value, and the spec's
+    default is on — the same reading the preview and the `Ctrl+L` handler use.
+  */
+  const coverLock = timeline.state?.toggles?.coverLock !== false;
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [marquee, setMarquee] = useState<{
     x1: number;
@@ -874,6 +881,18 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
             deleting apply to a video and its detached audio together. The flag lives in
             the document, so this reads and writes the project's own value.
           */}
+          {/*
+            SPEC 10 §8.5: the fill lock's chip. `Ctrl+L` flips the same flag, so the two
+            cannot disagree — and the value is read from the document, so a project saved
+            with it off opens with the chip off.
+          */}
+          <IconButton
+            label={coverLock ? 'Fill lock: on' : 'Fill lock: off'}
+            size={28}
+            active={coverLock}
+            icon={<Frame size={14} />}
+            onClick={() => timeline.toggleFlag('coverLock')}
+          />
           <IconButton
             label={timeline.linkedSelection ? 'Linked selection: on' : 'Linked selection: off'}
             size={28}

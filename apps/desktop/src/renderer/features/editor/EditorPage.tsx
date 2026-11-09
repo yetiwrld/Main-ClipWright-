@@ -164,6 +164,16 @@ export function EditorPage({
         event.preventDefault();
         setExportOpen(true);
       }
+      /*
+        SPEC 10 §8.5: the fill lock toggles with Ctrl+L. Written through the same command
+        the toolbar chip uses, so the shortcut and the button cannot disagree — and so the
+        setting lands on the undo stack like every other document change.
+      */
+      if (key === 'l' && !event.shiftKey) {
+        event.preventDefault();
+        // Flipped inside the command, not from the value this listener closed over.
+        timeline.toggleFlag('coverLock');
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

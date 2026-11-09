@@ -41,6 +41,7 @@ import {
   type CropEdge,
   type CropEdges,
 } from './canvas-drag.js';
+import { clampCoverPosition, coverScaleFloor, type CoverExtent } from './cover-lock.js';
 import {
   equalSpacingSnap,
   itemBounds,
@@ -84,6 +85,24 @@ export interface CanvasDragTarget {
    * distance from the item's centre to its edge, which is what `snapAxis` needs.
    */
   extent: { x: number; y: number };
+  /**
+   * Whether the fill lock is engaged for this gesture (SPEC 10 §8.5).
+   *
+   * Supplied by the caller rather than read from the document here, because whether the
+   * lock applies depends on which item this is and what the user has switched on — the
+   * panel already knows both, and a hook that read `state.toggles` would need the whole
+   * document threaded through it.
+   */
+  coverLock?: boolean;
+  /**
+   * The picture's drawn size as a fraction of the canvas, which is what the lock's
+   * clamp is expressed in: `extent.x` is a *fraction of the canvas width* but the
+   * snapping code wants only the half-extent, while the cover rule needs the whole.
+   *
+   * Stored separately rather than re-derived, because `extent` is already scaled and
+   * halved in the caller and re-deriving from it would silently drift if either changed.
+   */
+  cover?: CoverExtent;
   /**
    * Every *other* visible item's bounds, in canvas fractions from the canvas centre —
    * the lines this drag can snap to (SPEC 10 §8.8).
@@ -158,6 +177,14 @@ interface Gesture {
    * converted back into the picture's own space. */
   boxLeft: number;
   boxTop: number;
+  /**
+   * Whether the fill lock stopped this gesture at its last pointer move.
+   *
+   * Kept on the gesture rather than in state: it is read once, on release, to put the
+   * "Fill lock on" chip up. Setting state from a 60 Hz move handler for a boolean that
+   * changes twice a drag would repaint the canvas for nothing.
+   */
+  coverBlocked: boolean;
 }
 
 /**
@@ -249,6 +276,14 @@ export interface CanvasDragApi {
    * so `Esc` is strictly the better affordance.
    */
   cancel: () => void;
+  /**
+   * Whether the fill lock stopped the gesture at its last move (SPEC 10 §8.5).
+   *
+   * Exposed so the preview can say "Fill lock on" while the picture refuses to move:
+   * the spec asks for a status chip, and a clamp with no explanation is the drag feeling
+   * broken. False for every gesture when the lock is off.
+   */
+  coverBlocked: boolean;
 }
 
 /**
@@ -271,6 +306,13 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     x: null,
     y: null,
   });
+  /*
+    Held in state, unlike the gesture's own flag, because the chip has to appear while
+    the drag is still happening. It changes at most twice a gesture — when the picture
+    reaches the wall and when it comes off it — so the guard below keeps the 60 Hz move
+    handler from repainting for a boolean that did not change.
+  */
+  const [coverBlocked, setCoverBlocked] = useState(false);
 
   const begin = useCallback(
     (
@@ -388,6 +430,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         ),
         boxLeft: box.left,
         boxTop: box.top,
+        coverBlocked: false,
       };
       setDragging(true);
       setMode(forcedMode ?? (corner ? 'scale' : handle) ?? 'move');
@@ -531,10 +574,30 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         every spacing correction — the hint would draw and the commit would ignore it.
         That is exactly what the discriminating test caught.
       */
-      current.to = {
-        ...current.to,
+      const landed = {
         x: snapped?.x.target ? snapped.x.position : (spacedX ?? moved.x),
         y: snapped?.y.target ? snapped.y.position : moved.y,
+      };
+      /*
+        The fill lock (SPEC 10 §8.5), last, so it has the final say. Snapping and spacing
+        both move the picture towards where the user asked; the lock is the one rule that
+        can *override* them, because a snap to a guide that exposes canvas is a snap the
+        setting exists to refuse.
+
+        Clamped per axis and reporting which, rather than silently adjusting: the caller
+        draws a "Fill" chip from that, and a drag that stops at an invisible wall with no
+        explanation is the failure mode this feedback is for.
+      */
+      const clamped =
+        current.target.coverLock && current.target.cover
+          ? clampCoverPosition(landed, current.target.cover)
+          : null;
+      current.coverBlocked = clamped ? clamped.clampedX || clamped.clampedY : false;
+      setCoverBlocked(current.coverBlocked);
+      current.to = {
+        ...current.to,
+        x: clamped ? clamped.x : landed.x,
+        y: clamped ? clamped.y : landed.y,
       };
     } else if (current.mode === 'anchor') {
       /*
@@ -642,7 +705,38 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         { x: current.from.x, y: current.from.y },
         current.canvas,
       );
-      current.to = { ...current.to, scaleX: toScale.x, scaleY: toScale.y, ...position };
+      /*
+        The floor under the scale (SPEC 10 §8.5): a picture that covers must not shrink
+        out of cover, so the gesture's result is raised to the smallest factor that still
+        fills. Both the scale and its compensating position come from the floored value —
+        keeping the position the unfloored scale needed would slide the fixed corner, the
+        one thing a corner handle promises not to do.
+      */
+      const floored =
+        current.target.coverLock && current.target.cover && !event.shiftKey
+          ? coverScaleFloor({ x: current.from.scaleX, y: current.from.scaleY }, toScale, current.target.cover)
+          : toScale;
+      const flooredPosition =
+        floored === toScale
+          ? position
+          : scaleAboutCorner(
+              {
+                corner: current.corner ?? 'se',
+                fromScale: { x: current.from.scaleX, y: current.from.scaleY },
+                toScale: floored,
+                anchorX: current.from.anchorX,
+                anchorY: current.from.anchorY,
+                width: current.target.size.width,
+                height: current.target.size.height,
+                rotation: current.from.rotation,
+                aboutCentre,
+              },
+              { x: current.from.x, y: current.from.y },
+              current.canvas,
+            );
+      current.coverBlocked = floored !== toScale;
+      setCoverBlocked(current.coverBlocked);
+      current.to = { ...current.to, scaleX: floored.x, scaleY: floored.y, ...flooredPosition };
     } else if (current.edgeMode === 'crop') {
       const edge = current.mode as CropEdge;
       // A crop edge moves along one axis only: the horizontal edges are measured
@@ -724,6 +818,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
       */
       setGuides({ x: null, y: null });
       setSpacing([]);
+      setCoverBlocked(false);
       (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
       if (!current) return;
 
@@ -825,6 +920,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     setDragging(false);
     setMode(null);
     setPreviewed(null);
+    setCoverBlocked(false);
     /*
       Both overlays go with the gesture, for the same reason the preview does: a guide or
       a spacing left behind would describe a drag that is no longer happening. The spacing
@@ -840,5 +936,16 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     [previewed],
   );
 
-  return { preview, dragging, mode, guides, spacing, begin, move, end, cancel };
+  return {
+    preview,
+    dragging,
+    mode,
+    guides,
+    spacing,
+    coverBlocked,
+    begin,
+    move,
+    end,
+    cancel,
+  };
 }

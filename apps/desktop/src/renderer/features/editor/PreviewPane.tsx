@@ -115,6 +115,7 @@ import {
 } from './crop-tool.js';
 import type { TimelineApi } from './use-timeline.js';
 import { useCanvasDrag } from './use-canvas-drag.js';
+import { drawnExtent, isMainVideo } from './cover-lock.js';
 import { commitKeyed } from './keyframe-controls.js';
 
 const MEDIA_ORIGIN = 'clipwright-media://media/';
@@ -486,6 +487,16 @@ export function PreviewPane({
     canvas aspect is used as a stand-in until then, which is what the preview itself does.
   */
   const [sourceAspect, setSourceAspect] = useState<number | null>(null);
+  /**
+   * Each layer's own source ratio, reported by the layer once its metadata loads.
+   *
+   * The fill lock needs the *dragged* clip's ratio (SPEC 10 §8.5): a 16:9 source in a
+   * 9:16 project letterboxes and cannot cover, so nothing may be clamped. The crop tool
+   * has its own single `sourceAspect`, but that is the ratio of the clip being cropped
+   * and is only set while the crop tool is open — reading it here would give the lock
+   * nothing for the ordinary case of dragging an unskimmed clip.
+   */
+  const [aspectByItem, setAspectByItem] = useState<Record<string, number>>({});
   /*
     §8.6's **"Set framing…"** mode (SPEC 10 §8.6): drag the picture under a fixed canvas window.
 
@@ -1842,6 +1853,35 @@ export function PreviewPane({
           */}
           <SpacingHints spans={drag.spacing} />
           {/*
+            The fill lock's status chip (SPEC 10 §8.5). Shown while the lock is actually
+            holding something back — not permanently, because a chip that reads "Fill lock
+            on" over a title overlay would claim a promise about a clip the lock does not
+            govern. It appears the moment a drag or a scale reaches the wall, which is what
+            stops the clamp feeling like a broken handle.
+          */}
+          {drag.coverBlocked ? (
+            <div
+              data-testid="preview-fill-lock"
+              role="status"
+              style={{
+                position: 'absolute',
+                left: '50%',
+                bottom: 12,
+                transform: 'translateX(-50%)',
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--surface-card)',
+                border: '1px solid var(--line-subtle)',
+                color: 'var(--text-secondary)',
+                font: 'var(--text-caption)',
+                pointerEvents: 'none',
+                zIndex: 4,
+              }}
+            >
+              Fill lock on
+            </div>
+          ) : null}
+          {/*
             Every layer's geometry, computed before the render loop rather than inside
             it, because snapping needs the *other* items' bounds — and an item cannot
             know its neighbours while its neighbours are still being drawn. One pass
@@ -1930,6 +1970,34 @@ export function PreviewPane({
                 x: geometry.source.width * geometry.scaleX,
                 y: geometry.source.height * geometry.scaleY,
               };
+              /*
+                The fill lock (SPEC 10 §8.5) applies to the **main video** and nothing else,
+                which is what the spec's sentence is about: a title or a logo overlay is
+                meant to sit inside the frame, and clamping one to the canvas edges would
+                make every caption unplaceable.
+
+                It is passed as an extent rather than a boolean so the hook needs no opinion
+                about which item is main — the panel decides once, here, and the drag code
+                only has to clamp. `offsetX/Y` come from the *resolved* geometry, so a
+                position the lock would already refuse (set with the lock off) is not
+                silently rewritten: it is simply clamped on the next drag.
+              */
+              const canvasAspect = canvas.width / Math.max(1, canvas.height);
+              const drawn = drawnExtent({
+                source: geometry.source,
+                scaleX: geometry.scaleX,
+                scaleY: geometry.scaleY,
+                sourceAspect: aspectByItem[layer.id] ?? canvasAspect,
+                canvasAspect,
+              });
+              const cover = {
+                width: drawn.width,
+                height: drawn.height,
+                offsetX: geometry.offsetX,
+                offsetY: geometry.offsetY,
+              };
+              const lockApplies =
+                isMainVideo(item, state) && (state.toggles?.coverLock ?? true);
               const snapOthers = {
                 x: Object.entries(snapBounds)
                   .filter(([id]) => id !== layer.id)
@@ -1983,6 +2051,8 @@ export function PreviewPane({
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
                       extent: snapExtent,
+                      cover,
+                      coverLock: lockApplies,
                       others: snapOthers,
                       /*
                         Only the move gesture gets these: a scale or a rotate has its own
@@ -2034,6 +2104,8 @@ export function PreviewPane({
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
                       extent: snapExtent,
+                      cover,
+                      coverLock: lockApplies,
                       others: snapOthers,
                       // The pivot has to be measured against the *picture's* box, so
                       // the handle turns about the crosshair rather than the frame.
@@ -2068,6 +2140,8 @@ export function PreviewPane({
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
                       extent: snapExtent,
+                      cover,
+                      coverLock: lockApplies,
                       others: snapOthers,
                       rect: fitBox
                         ? {
@@ -2091,7 +2165,12 @@ export function PreviewPane({
                   drag.end(event);
                 }}
                 showAnchor={showAnchor}
-                onSourceAspect={cropping ? setSourceAspect : undefined}
+                onSourceAspect={(aspect) => {
+                  if (cropping) setSourceAspect(aspect);
+                  setAspectByItem((previous) =>
+                    previous[layer.id] === aspect ? previous : { ...previous, [layer.id]: aspect },
+                  );
+                }}
                 cropOverlay={
                   reframing?.itemId === layer.id ? (
                     <ReframeFrame

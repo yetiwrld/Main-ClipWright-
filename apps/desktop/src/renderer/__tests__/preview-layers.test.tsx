@@ -65,7 +65,13 @@ function makeState(layers: Overrides[] = [{}]): TimelineState {
     entry.itemIds.push(item.id);
   });
 
-  return { ...base, tracks, items } as unknown as TimelineState;
+  /*
+    The fill lock is off for these fixtures (SPEC 10 §8.5). They are about layer order, stacking and visibility, and
+    a full-frame video at scale 1 is exactly the clip the lock pins to the centre — so
+    leaving it on would make every drag here a no-op for a reason this file is not
+    testing. The locked path has its own suite in `preview-cover-lock.test.tsx`.
+  */
+  return { ...base, toggles: { ...base.toggles, coverLock: false }, tracks, items } as unknown as TimelineState;
 }
 
 const layerNodes = () =>

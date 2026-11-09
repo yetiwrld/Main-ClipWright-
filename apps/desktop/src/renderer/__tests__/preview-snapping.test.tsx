@@ -31,7 +31,18 @@ function makeState(transform: Record<string, number> = {}): TimelineState {
     crop: {},
     keyframes: {},
   };
-  return { ...base, tracks, items: { a: item } } as unknown as TimelineState;
+  /*
+    The fill lock is off for these fixtures (SPEC 10 §8.5). They are about snapping arithmetic reaching a real gesture, and
+    a full-frame video at scale 1 is exactly the clip the lock pins to the centre — so
+    leaving it on would make every drag here a no-op for a reason this file is not
+    testing. The locked path has its own suite in `preview-cover-lock.test.tsx`.
+  */
+  return {
+    ...base,
+    toggles: { ...base.toggles, coverLock: false },
+    tracks,
+    items: { a: item },
+  } as unknown as TimelineState;
 }
 
 /**
@@ -74,6 +85,10 @@ function makeSpacedState(x: number): TimelineState {
   });
   return {
     ...base,
+    // The fill lock is off here for the same reason as in `makeState`: these clips are
+    // cropped to a tenth of the frame, which the lock correctly reads as *not* covering,
+    // and the question this file asks is about spacing rather than about the lock.
+    toggles: { ...base.toggles, coverLock: false },
     tracks,
     items: { l: item('l', 0.1), a: item('a', x), r: item('r', 0.5) },
   } as unknown as TimelineState;

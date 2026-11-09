@@ -108,6 +108,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     addText: vi.fn(() => true),
     addShape: vi.fn(() => true),
     setToggle: vi.fn(() => true),
+    toggleFlag: vi.fn(() => true),
     linkedSelection: true,
     toggleTrackLock: vi.fn(() => true),
     toggleTrackHidden: vi.fn(() => true),
@@ -472,6 +473,33 @@ describe('timeline panel', () => {
     fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
     fireEvent.click(screen.getByText('Add shape'));
     expect(timeline.addShape).toHaveBeenCalledWith('rect');
+  });
+
+  it('shows and flips the fill lock (SPEC 10 §8.5)', () => {
+    /*
+      The spec asks for a lock chip in the toolbar and `Ctrl+L`. The flag had a schema
+      default and no control, so every project was permanently locked and could not say
+      otherwise — the same shape of gap as `linkedSelection`.
+    */
+    const timeline = fakeTimeline(fixture());
+    render(<TimelinePanel timeline={timeline} />);
+    const button = screen.getByRole('button', { name: /fill lock/i });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(button);
+    expect(timeline.toggleFlag).toHaveBeenCalledWith('coverLock');
+  });
+
+  it('renders the fill lock as off when the project says so', () => {
+    // A project made with the lock off must not show the chip lit.
+    const base = fakeTimeline(fixture());
+    const timeline = {
+      ...base,
+      state: { ...base.state!, toggles: { ...base.state!.toggles, coverLock: false } },
+    };
+    render(<TimelinePanel timeline={timeline} />);
+    expect(screen.getByRole('button', { name: /fill lock/i }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
   });
 
   it('shows and flips the linked-selection toggle (SPEC 09 §9.6)', () => {

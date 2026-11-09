@@ -115,9 +115,16 @@ This document tracks architectural scope boundaries and honest limitations per `
    the renderer to ask for a frame *after* the playhead has settled, which is an IPC
    round trip this change does not add.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
-4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** transition handles, markers in the ruler — the
+4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Fill lock scope.** SPEC 10 §8.5's cover lock is implemented for the **preview's** move and
+scale gestures, which is where the spec asks for it. The export does not re-apply it: it
+draws whatever the document says, so a project made entirely by editing fractions by hand
+could still be exported with an exposed edge. That is deliberate — the export should render
+the document, not second-guess it — but it does mean the lock is an editing rule rather than
+a guarantee about the file.
+
+**Not implemented yet:** transition handles, markers in the ruler — the
 rest of that list has since landed (linked audio detach/unlink and linked selection,
-context menus, in-editor import).
+context menus, in-editor import, the fill lock).
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
 6. **The canvas supports moving, cropping, rotating, scaling and the anchor crosshair,
    with the `Shift`/`Alt` modifiers, plus object snapping and the *Show anchor* toggle;

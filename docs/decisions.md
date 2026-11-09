@@ -475,3 +475,40 @@ only by the ripple paths. Detaching audio and dragging the picture left the soun
   schema fields with no writer and no control: every project was permanently in whatever state
   the schema default named, and could not say otherwise. `setToggles` writes it through the undo
   stack, and the toolbar reads the document's value rather than a component default.
+
+## 20. The fill lock is arithmetic on fractions, applied last
+
+SPEC 10 §8.5 gives the main video a cover lock: a drag may not expose empty canvas, and a scale
+may not shrink below cover. `coverLock` had sat in the schema with no reader since it was
+written, so every project was permanently in whatever state the default named.
+
+- **Expressed in canvas fractions, not pixels.** `offsetX/Y` and `scale` are what the document
+  stores; a rule in pixels would behave differently at preview zoom and could not be applied by
+  the export, which has no screen. The clamp is closed-form — `|offset| <= (size − 1)/2` — because
+  half a canvas of slop is *visible*, so there is no tolerance to tune and nothing to iterate.
+- **Applied last, after snapping and spacing.** A snap that lands the picture on a guide while
+  exposing canvas is exactly what the setting refuses, so the lock gets the final say over both.
+  Clamping before them would have let a snap undo the clamp.
+- **A negative limit means "no opinion", not "zero".** A picture narrower than the canvas cannot
+  cover at any position; returning a limit anyway gives a lower bound above the upper one, the two
+  clamps fight, and the clip lands somewhere arbitrary. The lock leaves it alone.
+- **A scale is floored, not refused.** A handle that stops dead reads as broken; one that keeps
+  tracking the pointer while the picture stops shrinking reads as a wall, which is what the
+  setting is. The floor takes the *maximum* of the per-axis factors, because the axis needing the
+  most magnification decides.
+- **The extent is not `source × scale`.** The preview lays the picture out across the whole canvas
+  width and magnifies the cropped region to fill it, so width is `scaleX` alone and height is
+  `scaleY · canvasAspect / sourceAspect`. Getting this wrong in either direction is a rule that
+  clamps the wrong clips: multiplying the crop in makes a punch-in look like it stopped covering,
+  and ignoring the aspect makes a 16:9 clip in a 9:16 project — which letterboxes and can never
+  cover — get clamped as though it did.
+- **It governs the main video, by the document's own word.** A video on an overlay track is a
+  picture-in-picture, and a full-frame graphic on the main track is still a graphic. The rule
+  tests the item's type and its track's `role`, not the size of the frame it happens to fill.
+- **Breaking 22 existing tests was the honest result.** Every one was a full-frame video dragged
+  at scale 1, which the lock correctly pins. Those suites ask about snapping, stacking and
+  Space+drag, so their fixtures opt out explicitly rather than the rule being weakened.
+
+The same lesson as §19, one field later: a schema field with a default and no reader is not a
+feature, it is a placeholder describing a feature. `coverLock` had a `Ctrl+L` in the spec, a chip
+in the toolbar specified, and no code at all.

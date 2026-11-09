@@ -227,6 +227,17 @@ export interface TimelineApi {
   addShape: (kind: NonNullable<TimelineItem['shapeKind']>) => boolean;
   /** Toggle one editing flag on the composition (SPEC 09 §9.6). */
   setToggle: (patch: Partial<NonNullable<TimelineState['toggles']>>) => boolean;
+  /**
+   * Flip one flag, reading the current value from the document inside the command.
+   *
+   * `setToggle` takes a value, which means the caller has to read it — and the reader is
+   * usually a key handler bound once with `[]` dependencies, whose `state` is the one it
+   * closed over at mount. Negating that stale value flips the setting back and forth
+   * between the same two documents: pressing Ctrl+L twice returns to where you started
+   * without ever consulting the file. Flipping inside `run` is the only version that
+   * reads the state the command is actually applied to.
+   */
+  toggleFlag: (key: keyof NonNullable<TimelineState['toggles']>) => boolean;
   /** Whether linked items travel together; defaults to on, as the schema does. */
   linkedSelection: boolean;
   toggleTrackLock: (trackId: string) => boolean;
@@ -663,6 +674,11 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         project's real value rather than a guess that resets on reload.
       */
       setToggle: (patch) => run('Change setting', (s) => setToggles(s, { patch })),
+      toggleFlag: (key) =>
+        run('Change setting', (s) => {
+          const current = (s.toggles?.[key] ?? true) as boolean;
+          return setToggles(s, { patch: { [key]: !current } as Partial<NonNullable<TimelineState['toggles']>> });
+        }),
       linkedSelection: state?.toggles?.linkedSelection !== false,
       toggleTrackLock: (trackId) => run('Toggle lock', (s) => toggleTrackLock(s, { trackId })),
       toggleTrackHidden: (trackId) => run('Toggle hide', (s) => toggleTrackHidden(s, { trackId })),
