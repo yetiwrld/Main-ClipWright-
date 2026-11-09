@@ -3,6 +3,8 @@
 
 export const TIMELINE_ENGINE_VERSION = '1.0.0';
 
+export * from './caption-segments';
+
 export {
   US_PER_SECOND,
   frameToUs,

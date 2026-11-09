@@ -10,7 +10,7 @@
  * directly, which is what keeps an edit undoable and the autosave honest.
  */
 import React, { useMemo, useState } from 'react';
-import { Captions, Palette, Pencil, Sparkles, Type, Wand2 } from 'lucide-react';
+import { Captions, Link2, Palette, Pencil, Sparkles, Type, Wand2 } from 'lucide-react';
 import { Button, Card, Chip, EmptyState, IconButton, Input, TextArea } from '@clipwright/design-system';
 import {
   BUILT_IN_STYLES,
@@ -103,6 +103,45 @@ export function CaptionPanel({
         <span style={{ flex: 1, fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
           {rows.length} caption{rows.length === 1 ? '' : 's'}
         </span>
+        {/*
+          SPEC 11 §9's "Linked to transcript". Reads the document's flag, so a project
+          saved with it off opens with it off — and both regenerate actions refuse while
+          it is, because with linking off a caption track is independent text.
+        */}
+        <Button
+          size={28}
+          variant={timeline.linkedToTranscript ? 'primary' : 'secondary'}
+          icon={<Link2 size={12} />}
+          aria-label={
+            timeline.linkedToTranscript
+              ? 'Linked to transcript: on'
+              : 'Linked to transcript: off'
+          }
+          aria-pressed={timeline.linkedToTranscript}
+          onClick={() => timeline.toggleFlag('linkedToTranscript')}
+        >
+          {timeline.linkedToTranscript ? 'Linked' : 'Unlinked'}
+        </Button>
+        <Button
+          size={28}
+          variant="secondary"
+          icon={<Wand2 size={12} />}
+          aria-label="Rebuild captions from the transcript"
+          disabled={!timeline.linkedToTranscript}
+          onClick={() => void timeline.regenerateCaptionsFromTranscript()}
+        >
+          Regenerate
+        </Button>
+        <Button
+          size={28}
+          variant="secondary"
+          icon={<Sparkles size={12} />}
+          aria-label="Realign captions to a changed transcript"
+          disabled={!timeline.linkedToTranscript}
+          onClick={() => void timeline.syncCaptionsToTranscript()}
+        >
+          Realign
+        </Button>
         <Button
           size={28}
           variant="secondary"

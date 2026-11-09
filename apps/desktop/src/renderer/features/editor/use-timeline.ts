@@ -46,6 +46,9 @@ import {
   setWordEmphasis,
   regenerateCaptions,
   syncCaptionsWithTranscript,
+  captionTrackId,
+  segmentTranscript,
+  transcriptWords,
   applyEffect,
   removeEffect,
   toggleEffectEnabled,
@@ -196,6 +199,24 @@ export interface TimelineApi {
   retimeCaption: (itemId: string, startUs?: number, endUs?: number) => boolean;
   trimCaptionWordsToRange: (itemId: string) => boolean;
   applyCaptionStyle: (itemIds: string[], styleId: string, keepOverrides?: boolean) => boolean;
+  /**
+   * Rebuild the caption track from the project's transcript (SPEC 11 §9).
+   *
+   * Hand-edited captions survive unless `force`, which is the spec's "Regenerate all".
+   * Both paths were engine commands with tests and no caller, so nothing could rebuild
+   * captions after the transcript changed.
+   */
+  regenerateCaptionsFromTranscript: (options?: { force?: boolean }) => Promise<boolean>;
+  /**
+   * Realign existing captions to a transcript whose timings moved (SPEC 11 §9).
+   *
+   * Distinct from regenerating: this keeps each caption's words and boundaries where
+   * they still match, which is what makes it safe to run on a track the user has
+   * arranged rather than only on a freshly generated one.
+   */
+  syncCaptionsToTranscript: () => Promise<boolean>;
+  /** Whether the caption track follows the transcript at all (SPEC 11 §9). */
+  linkedToTranscript: boolean;
   setWordEmphasis: (itemId: string, wordIndex: number, emphasis: boolean, color?: string, scale?: number) => boolean;
   applyEffect: (itemId: string, effectId: string, params?: Record<string, number | boolean | string>) => boolean;
   removeEffect: (itemId: string, effectId: string) => boolean;
@@ -418,6 +439,33 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
     [scheduleSave],
   );
 
+  /**
+   * The project's transcript words, read through the bridge.
+   *
+   * Returns an empty list for every failure — no transcript, no bridge, a malformed file —
+   * because every caller's response to "no words" is the same message and none of them
+   * can do anything with the distinction. The alternative was throwing into an `onClick`,
+   * which leaves the panel looking as though the button did nothing.
+   *
+   * `useCallback` with `projectId` so a project switch invalidates it; reading a stale
+   * project's transcript would regenerate captions from the wrong speech.
+   */
+  const loadTranscriptWords = useCallback(async () => {
+    if (!isDesktop()) return [];
+    try {
+      const raw = await api.getTranscript(projectId);
+      const parsed = raw as { words?: Array<{ id?: string; text: string; startUs: number; endUs: number }> } | null;
+      return transcriptWords(
+        parsed?.words
+          ? { words: parsed.words.map((word) => ({ ...word, text: word.text ?? '' })) }
+          : null,
+      );
+    } catch (error) {
+      setNotes([describeError(error)]);
+      return [];
+    }
+  }, [projectId]);
+
   const run = useCallback(
     (label: string, command: (current: TimelineState) => CommandResult | null) => {
       const history = historyRef.current;
@@ -581,6 +629,58 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         run('Apply caption style', (s) =>
           applyCaptionStyle(s, { itemIds, styleId, keepOverrides }),
         ),
+      /*
+        SPEC 11 §9's "Linked to transcript". The flag is checked here rather than in the
+        panel because it is a rule about the *document*: with it off, a project's captions
+        are independent text and nothing may overwrite them, whatever opened the command.
+        A panel that forgot the check would be a second place to get it wrong.
+
+        Both actions read the transcript first and refuse with a message when there is
+        none, rather than sending an empty segment list — which `regenerateCaptions`
+        would faithfully apply by deleting every caption on the track.
+      */
+      linkedToTranscript: state?.toggles?.linkedToTranscript !== false,
+      regenerateCaptionsFromTranscript: async (options) => {
+        if (state?.toggles?.linkedToTranscript === false) {
+          setNotes(['Captions are not linked to the transcript, so they were left alone.']);
+          return false;
+        }
+        const words = await loadTranscriptWords();
+        if (words.length === 0) {
+          setNotes(['There is no transcript to generate captions from yet.']);
+          return false;
+        }
+        const segments = segmentTranscript(words);
+        return run(options?.force ? 'Regenerate all captions' : 'Regenerate captions', (s) => {
+          const trackId = captionTrackId(s.tracks);
+          if (!trackId) {
+            // A `null` command result is `run`'s "nothing changed", which would hide the
+            // reason; the panel needs the sentence, so it is queued as a note instead.
+            setNotes(['This project has no caption track to write to.']);
+            return null;
+          }
+          return regenerateCaptions(s, { trackId, segments, force: options?.force });
+        });
+      },
+      syncCaptionsToTranscript: async () => {
+        if (state?.toggles?.linkedToTranscript === false) {
+          setNotes(['Captions are not linked to the transcript, so they were left alone.']);
+          return false;
+        }
+        const words = await loadTranscriptWords();
+        if (words.length === 0) {
+          setNotes(['There is no transcript to align the captions to.']);
+          return false;
+        }
+        return run('Realign captions', (s) => {
+          const trackId = captionTrackId(s.tracks);
+          if (!trackId) {
+            setNotes(['This project has no caption track to align.']);
+            return null;
+          }
+          return syncCaptionsWithTranscript(s, { trackId, words });
+        });
+      },
       setWordEmphasis: (itemId, wordIndex, emphasis, color, scale) =>
         run(emphasis ? 'Emphasise word' : 'Remove emphasis', (s) =>
           setWordEmphasis(s, { itemId, wordIndex, emphasis, color, scale }),

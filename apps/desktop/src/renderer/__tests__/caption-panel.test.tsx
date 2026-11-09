@@ -66,6 +66,10 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     select: vi.fn(),
     applyCaptionStyle: vi.fn(() => true),
     editCaptionText: vi.fn(() => true),
+    linkedToTranscript: true,
+    toggleFlag: vi.fn(() => true),
+    regenerateCaptionsFromTranscript: vi.fn(async () => true),
+    syncCaptionsToTranscript: vi.fn(async () => true),
     setWordEmphasis: vi.fn(() => true),
     trimCaptionWordsToRange: vi.fn(() => true),
     ...overrides,
@@ -317,5 +321,63 @@ describe('project-local styles in the caption list', () => {
     const state = makeState();
     render(<CaptionPanel state={state} timeline={fakeTimeline(state)} />);
     expect(screen.queryByLabelText('Edit this caption style')).toBeNull();
+  });
+});
+
+describe('linked-to-transcript (SPEC 11 §9)', () => {
+  it('shows the control as on by default, as the schema does', () => {
+    // The flag had a default and no writer: every project was permanently linked and
+    // could not say otherwise, which is the same gap `coverLock` had.
+    const timeline = fakeTimeline(makeState());
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    const button = screen.getByRole('button', { name: /linked to transcript/i });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.textContent).toContain('Linked');
+  });
+
+  it('flips the flag through the document, not local state', () => {
+    // Document state: it has to survive a reload and undo like every other setting.
+    const timeline = fakeTimeline(makeState());
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: /linked to transcript/i }));
+    expect(timeline.toggleFlag).toHaveBeenCalledWith('linkedToTranscript');
+  });
+
+  it('disables both actions while unlinked', () => {
+    /*
+      The gate, visible: with linking off a caption track is independent text, so
+      regenerating or realigning it would be the one thing the setting promises will not
+      happen. Disabling is also what tells the user *why* nothing happened.
+    */
+    const timeline = fakeTimeline(makeState(), { linkedToTranscript: false });
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    expect((screen.getByRole('button', { name: /rebuild captions/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /realign captions/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('enables them while linked', () => {
+    // The other direction, so a permanently-disabled button cannot pass the test above.
+    const timeline = fakeTimeline(makeState());
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    expect((screen.getByRole('button', { name: /rebuild captions/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('calls the regenerate command when pressed', () => {
+    /*
+      The engine command existed with tests and no caller, so this is the assertion that
+      the feature is reachable at all rather than merely present.
+    */
+    const timeline = fakeTimeline(makeState());
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: /rebuild captions/i }));
+    expect(timeline.regenerateCaptionsFromTranscript).toHaveBeenCalled();
+  });
+
+  it('calls the realign command when pressed', () => {
+    // Same for the alignment path, which is a different command with different effects.
+    const timeline = fakeTimeline(makeState());
+    render(<CaptionPanel state={makeState()} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: /realign captions/i }));
+    expect(timeline.syncCaptionsToTranscript).toHaveBeenCalled();
   });
 });

@@ -28,6 +28,7 @@ vi.mock('../api.js', () => ({
     appendJournal: (...args: unknown[]) => appendJournal(...args),
     getProject: vi.fn(async () => ({ id: 'p1', settings: {} })),
     updateProject: vi.fn(async () => ({ id: 'p1', settings: {} })),
+    getTranscript: vi.fn(async () => null),
   },
 }));
 
@@ -131,5 +132,76 @@ describe('running a command', () => {
       { id: 'g1', axis: 'y', at: 0.25, locked: false },
     ]);
     expect(result.current.notes).toEqual([]);
+  });
+});
+
+describe('caption regeneration is gated by the document (SPEC 11 §9)', () => {
+  /*
+    The gate lives in the hook, not the panel, because it is a rule about the *document*:
+    with linking off, a caption track is independent text and nothing may overwrite it,
+    whatever opened the command. A panel that forgot the check would be a second place to
+    get it wrong — and the panel now has its own `disabled` for the affordance, so
+    removing this one would leave the rule enforced only by a disabled button.
+  */
+  const withLinked = (payload: unknown, linked: boolean) => ({
+    id: 'comp', projectId: 'p1', name: 'Clip',
+    version: 1, updatedAt: new Date().toISOString(),
+    payload: {
+      ...(payload as Record<string, unknown>),
+      toggles: {
+        ...((payload as { toggles: Record<string, unknown> }).toggles),
+        linkedToTranscript: linked,
+      },
+    },
+  });
+
+  it('does nothing when linking is off, and says so', async () => {
+    // The load must carry the flag: `createDefaultTimeline` ships it on, so a fixture that
+    // only overrode the *read* would test the reader rather than the document.
+    getComposition.mockResolvedValueOnce(withLinked(payload(), false));
+    const { result } = await loaded();
+    let answer: boolean | undefined;
+    await act(async () => {
+      answer = await result.current.regenerateCaptionsFromTranscript();
+    });
+    expect(answer).toBe(false);
+    expect(result.current.notes.join(' ')).toContain('not linked');
+    expect(result.current.canUndo).toBe(false);
+    expect(appendJournal).not.toHaveBeenCalled();
+  });
+
+  it('refuses when there is no transcript rather than erasing the captions', async () => {
+    /*
+      `regenerateCaptions` writes exactly the segments it is given — an empty list would
+      delete every untouched caption on the track. Refusing before the command is what
+      keeps a missing transcript from looking like a way to clear the track.
+    */
+    const { result } = await loaded();
+    let answer: boolean | undefined;
+    await act(async () => {
+      answer = await result.current.regenerateCaptionsFromTranscript();
+    });
+    expect(answer).toBe(false);
+    expect(result.current.notes.join(' ')).toContain('no transcript');
+  });
+
+  it('reports the transcript it could not read instead of throwing', async () => {
+    // The bridge mock has no `getTranscript`, so the call rejects. An `onClick` that threw
+    // would leave the panel looking as though the button did nothing.
+    const { result } = await loaded();
+    let answer: boolean | undefined;
+    await act(async () => {
+      answer = await result.current.regenerateCaptionsFromTranscript();
+    });
+    expect(answer).toBe(false);
+    expect(result.current.notes.length).toBeGreaterThan(0);
+  });
+
+  it('exposes the flag from the document', async () => {
+    // `!== false`, so a project saved before the field existed reads as on, which is the
+    // schema's default.
+    getComposition.mockResolvedValueOnce(withLinked(payload(), false));
+    const { result } = await loaded();
+    expect(result.current.linkedToTranscript).toBe(false);
   });
 });

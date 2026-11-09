@@ -512,3 +512,35 @@ written, so every project was permanently in whatever state the default named.
 The same lesson as §19, one field later: a schema field with a default and no reader is not a
 feature, it is a placeholder describing a feature. `coverLock` had a `Ctrl+L` in the spec, a chip
 in the toolbar specified, and no code at all.
+
+## 21. A command with tests and no caller is not a feature
+
+`regenerateCaptions` and `syncCaptionsWithTranscript` were both implemented, both covered by
+command tests, both imported into the editor hook — and neither was called by anything. The
+`linkedToTranscript` toggle that should gate them had a schema default and no reader. The result
+was a caption track that could only ever contain what the transcription job wrote: editing the
+transcript changed nothing, and the spec's "Regenerate" had no button.
+
+- **The missing piece was the grouping, not the wiring.** Both commands take pre-grouped
+  segments or words; neither knows which words belong on one card. `caption-segments.ts` is that
+  decision, out in a file with tests rather than inside an `onClick`, because it is editorial:
+  sentence boundaries win where the transcript supplies them, a duration cap and a word cap
+  carry the rest, and the packing is contiguous by construction so the output is legal on a
+  caption track (§11 §3 forbids overlap) without a repair pass.
+- **The gate lives in the hook, not in the button.** `linkedToTranscript` is a rule about the
+  document: with it off, a caption track is independent text and nothing may overwrite it,
+  whatever opened the command. A panel that forgot the check would be a second place to get the
+  rule wrong — so the button is the affordance (disabled, and visibly why) and the hook is the
+  rule.
+- **No transcript means no command.** `regenerateCaptions` faithfully writes the segments it is
+  given, so an empty list is not a no-op — it deletes every caption on the track. Refusing
+  before the command is what keeps a project with no transcript from looking like a way to clear
+  its captions.
+- **Bad input is repaired where it crosses the boundary.** A word whose `endUs` predates its
+  group, or a zero-width word, becomes a negative or empty duration, and the timeline refuses
+  those: one such word would fail an otherwise correct regeneration. Both helpers clamp as they
+  cross into command input, and both are tested for it rather than trusted.
+
+The general lesson, now three slices running: **count the callers, not the tests.** These two
+functions had tests that proved they worked and no code that proved anything used them. A grep
+for the import found nothing; a grep for the *call* found the gap.
