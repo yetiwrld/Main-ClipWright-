@@ -42,9 +42,10 @@ import {
   snapAxis,
   snapTargetsFor,
   snapThresholdPx,
+  snapGuideFor,
   snappingApplies,
   type ItemBounds,
-  type SnapTarget,
+  type SnapGuide,
 } from './snapping.js';
 
 export interface CanvasDragTarget {
@@ -125,7 +126,7 @@ interface Gesture {
   centre: { x: number; y: number };
   startCentreDistance: number;
   /** The guide lines this drag is currently snapped to, for drawing them. */
-  snapped: { x: SnapTarget | null; y: SnapTarget | null };
+  snapped: { x: SnapGuide | null; y: SnapGuide | null };
   /** The canvas's top-left in client coordinates, so pointer positions can be
    * converted back into the picture's own space. */
   boxLeft: number;
@@ -175,7 +176,7 @@ export interface CanvasDragApi {
    * *why* is indistinguishable from the clip jumping, and that is the one thing a guide
    * exists to prevent (SPEC 10 §8.8).
    */
-  guides: { x: SnapTarget | null; y: SnapTarget | null };
+  guides: { x: SnapGuide | null; y: SnapGuide | null };
   /**
    * @param forcedMode Starts a specific gesture regardless of hit testing — how the
    * rotate handle and the anchor crosshair begin, since they are not edges of the
@@ -216,7 +217,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     render — the guide would only appear on whichever pointer move happened to coincide
     with some other re-render, which is not an affordance but a flicker.
   */
-  const [guides, setGuides] = useState<{ x: SnapTarget | null; y: SnapTarget | null }>({
+  const [guides, setGuides] = useState<{ x: SnapGuide | null; y: SnapGuide | null }>({
     x: null,
     y: null,
   });
@@ -398,15 +399,35 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
             ),
           }
         : null;
-      const guide = { x: snapped?.x.target ?? null, y: snapped?.y.target ?? null };
+      /*
+        The guide carries how far the item moved, not just where it landed: a line with no
+        number says *something* lined up, which is most of the reassurance but not the
+        answer to "how much did it just jump?". Measured against the canvas size on each
+        axis separately, because eight pixels is eight pixels on a wide canvas and a tall
+        one alike.
+      */
+      const guide = {
+        x: snapped ? snapGuideFor(snapped.x, current.canvas.width) : null,
+        y: snapped ? snapGuideFor(snapped.y, current.canvas.height) : null,
+      };
       current.snapped = guide;
       /*
         Only set when it changed. A pointer move emits sixty of these a second and every
         one would otherwise re-render the preview, which the performance targets in
         SPEC 10 §12 explicitly rule out.
+
+        The comparison includes the delta and not just the position. A drag can hold one
+        line while sliding along it — the x guide stays on the canvas centre while the
+        item moves vertically — and comparing position alone would freeze the distance
+        label at whatever it read at that instant.
       */
       setGuides((previous) =>
-        previous.x?.at === guide.x?.at && previous.y?.at === guide.y?.at ? previous : guide,
+        previous.x?.target.at === guide.x?.target.at &&
+        previous.y?.target.at === guide.y?.target.at &&
+        previous.x?.deltaPx === guide.x?.deltaPx &&
+        previous.y?.deltaPx === guide.y?.deltaPx
+          ? previous
+          : guide,
       );
       current.to = { ...current.to, x: snapped?.x.position ?? moved.x, y: snapped?.y.position ?? moved.y };
     } else if (current.mode === 'anchor') {

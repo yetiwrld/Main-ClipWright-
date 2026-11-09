@@ -20,6 +20,24 @@ export interface SnapTarget {
   kind: 'canvas-centre' | 'canvas-edge' | 'item-edge' | 'item-centre';
 }
 
+/**
+ * A guide to draw, and the number that goes with it (SPEC 10 §8.8's "small distance
+ * label").
+ *
+ * The spec does not say *which* distance. This is the one the snap itself produced: how
+ * far the item was pulled to land on the line, measured in preview pixels because the
+ * threshold is in preview pixels — the user's question at the moment of a snap is "how
+ * much did it just move?", and that is the only distance the event itself defines. The
+ * gap to a neighbour would be a different number (zero for an edge-to-edge snap) and the
+ * equal-spacing hints the spec lists separately are a third.
+ */
+export interface SnapGuide {
+  /** The line that was landed on. */
+  target: SnapTarget;
+  /** How far the item moved to land on it, in preview pixels. */
+  deltaPx: number;
+}
+
 /** The edges and centre of an item, in canvas fractions from the canvas centre. */
 export interface ItemBounds {
   left: number;
@@ -131,6 +149,23 @@ export function snapAxis(
   }
   if (!best) return { position, target: null, delta: 0 };
   return { position: position + best.delta, target: best.target, delta: best.delta };
+}
+
+/**
+ * The guide for one axis of a snap, or `null` when nothing was hit.
+ *
+ * `canvasPixels` is the canvas's size on *this* axis, so the same fraction becomes a
+ * different number of pixels on a wide canvas and a tall one — which is correct, because
+ * eight pixels is eight pixels in both.
+ *
+ * A non-finite or zero canvas size yields a `deltaPx` of 0 rather than `NaN`/`Infinity`:
+ * the line is still worth drawing (it says what the item is aligned to) but a label
+ * reading `NaN px` is worse than no label, so the renderer drops a zero.
+ */
+export function snapGuideFor(result: SnapResult, canvasPixels: number): SnapGuide | null {
+  if (!result.target) return null;
+  const finite = Number.isFinite(canvasPixels) && canvasPixels > 0;
+  return { target: result.target, deltaPx: finite ? result.delta * canvasPixels : 0 };
 }
 
 /**

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewPane } from '../features/editor/PreviewPane.js';
-import { SnapGuides, guidePercent } from '../features/editor/SnapGuides.js';
+import { SnapGuides, guideLabel, guidePercent } from '../features/editor/SnapGuides.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
 import { createDefaultTimeline, type TimelineState } from '@clipwright/timeline-engine';
 import type { TimelineApi } from '../features/editor/use-timeline.js';
@@ -83,14 +83,14 @@ describe('drawing a snap guide', () => {
   });
 
   it('draws one line per snapped axis', () => {
-    render(<SnapGuides guides={{ x: { at: 0, kind: 'canvas-centre' }, y: null }} />);
+    render(<SnapGuides guides={{ x: { target: { at: 0, kind: 'canvas-centre' }, deltaPx: 3 }, y: null }} />);
     expect(screen.getByTestId('snap-guide-x')).toBeTruthy();
     expect(screen.queryByTestId('snap-guide-y')).toBeNull();
   });
 
   it('puts the line on the target it names', () => {
     // A canvas-centre target is at fraction 0, which is 50% across.
-    render(<SnapGuides guides={{ x: { at: 0, kind: 'canvas-centre' }, y: null }} />);
+    render(<SnapGuides guides={{ x: { target: { at: 0, kind: 'canvas-centre' }, deltaPx: 3 }, y: null }} />);
     expect(screen.getByTestId('snap-guide-x').style.left).toBe('50%');
   });
 
@@ -111,6 +111,46 @@ describe('drawing a snap guide', () => {
 
     fireEvent(layer, pointer('pointerup', 162, 200));
     expect(screen.queryByTestId('snap-guides')).toBeNull();
+  });
+
+  it('labels a snapped drag with how far it was pulled', () => {
+    /*
+      End to end through the hook: the number has to come from the *snap's* own delta,
+      measured against the canvas size. Hard-coding a distance, or measuring the pointer
+      movement instead, would both produce a plausible label that is not this one.
+    */
+    stubLayout();
+    render(<PreviewPane state={makeState({ x: 0.1 })} fps={30} timeline={fakeTimeline()} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 162, 200));
+    // 0.1 − 0.095 = 0.005 of a 400 px canvas = 2 px.
+    expect(screen.getByTestId('snap-guide-label').textContent).toBe('2 px');
+  });
+
+  it('updates the label when the distance changes but the line does not', () => {
+    /*
+      The line stays on the canvas centre while the item is dragged toward it, so the
+      target is unchanged and only the distance shrinks. A change-detector that compared
+      the target alone would freeze the label at its first reading — and this is the
+      common shape of a drag, not an edge case: once a snap is caught, the line is
+      pinned for the rest of the approach.
+
+      0.1 → x=152 puts the centre 0.02 off the line (8 px on a 400 px canvas); x=160 puts
+      it exactly on it, where the label has nothing left to say.
+    */
+    stubLayout();
+    render(<PreviewPane state={makeState({ x: 0.1 })} fps={30} timeline={fakeTimeline()} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 152, 200));
+    expect(screen.getByTestId('snap-guide-label').textContent).toBe('8 px');
+
+    fireEvent(layer, pointer('pointermove', 160, 200));
+    expect(screen.getByTestId('snap-guide-x')).toBeTruthy();
+    expect(screen.queryByTestId('snap-guide-label')).toBeNull();
   });
 
   it('shows no guide while Alt bypasses snapping', () => {
@@ -139,5 +179,58 @@ describe('drawing a snap guide', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('snap-guides')).toBeNull();
+  });
+});
+
+describe('the distance label', () => {
+  const guide = (at: number, deltaPx: number) => ({
+    target: { at, kind: 'canvas-centre' as const },
+    deltaPx,
+  });
+
+  it('rounds to whole pixels', () => {
+    // Sub-pixel precision is not information anyone acts on mid-drag.
+    expect(guideLabel(2.3899)).toBe('2 px');
+    expect(guideLabel(2.5)).toBe('3 px');
+  });
+
+  it('drops a zero rather than pinning a label at nought', () => {
+    /*
+      Sliding along a line re-snaps to it at zero distance every time. A label reading
+      "0 px" there would look like a stuck overlay rather than like alignment — and it is
+      the state a drag is in for most of its life once it has caught a line.
+    */
+    expect(guideLabel(0)).toBeNull();
+    expect(guideLabel(0.4)).toBeNull();
+  });
+
+  it('reports the distance as unsigned', () => {
+    // The line already says which direction the item came from.
+    expect(guideLabel(-4)).toBe('4 px');
+  });
+
+  it('declines to label a non-finite distance', () => {
+    // A canvas with no measured size yields zero, but a `NaN` reaching here must not
+    // print "NaN px" over the picture.
+    expect(guideLabel(Number.NaN)).toBeNull();
+    expect(guideLabel(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it('shows the number on screen', () => {
+    render(<SnapGuides guides={{ x: guide(0, 5), y: null }} />);
+    expect(screen.getByTestId('snap-guide-label').textContent).toBe('5 px');
+  });
+
+  it('shows one number per axis that bit', () => {
+    // A drag into a corner snaps on two lines at once; one number would understate it.
+    render(<SnapGuides guides={{ x: guide(0, 5), y: guide(-0.25, 2) }} />);
+    expect(screen.getByTestId('snap-guide-label').textContent).toBe('5 px · 2 px');
+  });
+
+  it('draws no label when neither axis moved anything', () => {
+    // Lines with nothing to say still draw; the label is what goes.
+    render(<SnapGuides guides={{ x: guide(0, 0), y: null }} />);
+    expect(screen.getByTestId('snap-guide-x')).toBeTruthy();
+    expect(screen.queryByTestId('snap-guide-label')).toBeNull();
   });
 });

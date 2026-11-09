@@ -101,12 +101,12 @@ This document tracks architectural scope boundaries and honest limitations per `
 
    A snapped drag draws a `--brand` hairline on each axis it caught, and the line goes
    when the drag ends or is abandoned, so a line never outlives the gesture that explains
-   it. A line with no label only says *something* lined up, though, so still missing from
-   §8.8: the **distance label**, the **cap of four lines** (a busy frame can draw more
-   than that; it is not limited yet because only one clip is dragged at a time and two
-   axes is the ceiling per gesture), **equal-spacing hints**, **user guides**
-   (`Ctrl`-drag from the viewport edge, saved with the project) and the **3×3 grid
-   overlay**, as is snapping to safe-area edges. The pivot crosshair sits behind §8.2's
+   it, labelled with how far the snap pulled the clip in preview pixels. Still missing
+   from §8.8: **equal-spacing hints**, **user guides**
+   (`Ctrl`-drag from the viewport edge, saved with the project) and the **custom N×M
+   grid** (the 3×3 thirds toggle exists), as is snapping to safe-area edges and to the
+   grid. The **cap of four lines** is met by construction rather than by a limit: one
+   target is chosen per axis, so a dragged clip can draw two at most. The pivot crosshair sits behind §8.2's
    *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles
    here: there is no **Handles** toggle (`H`), no zoom dropdown and no preview-quality
    control. And the **four edge handles still crop rather than scaling one axis each**:
