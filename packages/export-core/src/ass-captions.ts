@@ -16,6 +16,8 @@
  * ffmpeg and diffable when a style changes.
  */
 import type { CaptionStyle } from '@clipwright/caption-styles';
+import { shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
+import { assShapeDrawing, assShapeOverride } from './ass-shapes.js';
 
 /** One word with its timing, as ASS karaoke needs it. */
 export interface AssWord {
@@ -30,6 +32,18 @@ export interface AssCue {
   endUs: number;
   /** The text to display. May contain line breaks from the caption's own wrapping. */
   text: string;
+  /**
+   * A shape drawn in ASS drawing mode instead of text (SPEC 11 §12).
+   *
+   * Present only on a `shape` cue. `text` is then a placeholder that must not be
+   * escaped into the dialogue body — drawing mode interprets digits as coordinates, so
+   * a stray label would render as a scribble.
+   */
+  shape?: {
+    kind: string;
+    /** Box in percent of frame, from the item's transform. */
+    box: { x: number; y: number; width: number; height: number };
+  };
   words?: AssWord[];
   styleId?: string;
   speaker?: string;
@@ -247,6 +261,40 @@ export function assHeader(options: AssScriptOptions): string {
  */
 export function assDialogue(cue: AssCue, options: AssScriptOptions): string {
   const style = options.styles[cue.styleId ?? options.defaultStyleId] ?? options.styles[options.defaultStyleId]!;
+
+  /*
+    A shape cue is a drawing, not text. It returns before the text path for a reason
+    that is easy to miss: everything below this point escapes the body and prefixes the
+    style's `\an`/`\pos`, and both are wrong for a drawing. Escaping would mangle the
+    drawing commands, and the style's position would move a shape that already carries
+    absolute coordinates.
+  */
+  if (cue.shape) {
+    const geometry = shapeGeometry(cue.shape.kind);
+    // An unknown kind draws nothing rather than a rectangle: the file says something
+    // this build cannot draw, and a substitute would be a lie about its content.
+    if (!geometry) return '';
+    const box = {
+      x: (cue.shape.box.x / 100) * options.width,
+      y: (cue.shape.box.y / 100) * options.height,
+      width: (cue.shape.box.width / 100) * options.width,
+      height: (cue.shape.box.height / 100) * options.height,
+    };
+    const override = assShapeOverride(box, assColour(style.fill.color));
+    return [
+      'Dialogue: ' + '0',
+      assTimestamp(cue.startUs),
+      assTimestamp(cue.endUs),
+      assStyleName(style.id),
+      '',
+      '0',
+      '0',
+      '0',
+      '',
+      `${override}${assShapeDrawing(geometry, box)}`,
+    ].join(',');
+  }
+
   const holdUs = (options.holdMs ?? style.timing.holdAfterLastWordMs) * 1000;
   // The style's own lead and lag shift when a word is considered current, so the
   // karaoke clocks have to start from the shifted word starts; otherwise the
@@ -347,6 +395,12 @@ export function assCuesFromPlan(
       captionStyleId?: string;
       /** Set on a `text` item: the whole string, with no word timings. */
       textContent?: string;
+      /** Set on a `shape` item: which geometry to draw (SPEC 11 §12). */
+      shapeKind?: string;
+      /** The item's resolved geometry, for a shape's box. */
+      geometry?: {
+        transform?: { x?: number; y?: number; scaleX?: number; scaleY?: number };
+      };
     }>;
   },
   /** Words for each caption, from the transcript, keyed by word id. */
@@ -371,6 +425,26 @@ export function assCuesFromPlan(
         endUs: item.startUs - plan.rangeStartUs + item.durationUs,
         text,
         styleId: item.captionStyleId,
+      });
+      continue;
+    }
+    /*
+      A shape burns in as an ASS drawing (SPEC 11 §12). Without this a rectangle over a
+      clip existed in the editor and not in the file, and nothing said so.
+
+      A shape has no colour of its own, so it borrows its style's fill — the same style a
+      text item would use, which keeps one answer to "what colour is this" instead of a
+      field the style editor does not know about.
+    */
+    if (item.type === 'shape') {
+      if (!item.shapeKind) continue;
+      cues.push({
+        startUs: item.startUs - plan.rangeStartUs,
+        endUs: item.startUs - plan.rangeStartUs + item.durationUs,
+        // Drawing mode treats every character as geometry, so the body is empty.
+        text: '',
+        styleId: item.captionStyleId,
+        shape: { kind: item.shapeKind, box: shapeBoxAt(item.geometry?.transform) },
       });
       continue;
     }

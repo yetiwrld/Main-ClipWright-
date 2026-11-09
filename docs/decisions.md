@@ -413,3 +413,35 @@ transcript, and that is the decision worth recording.
 - **They are created from the timeline's context menu, not a media browser.** Neither has a file to
   drag in. The alternative — a Text/Graphics panel tab — is a larger surface for the same command,
   and the panel tab is still listed as missing rather than pretended.
+
+## 18. One shape geometry, two serialisers
+
+A shape has to be drawn twice — on a canvas in the preview, and inside an ASS script in the
+file — and those are different languages. The first attempt at this gave the exporter its own
+translator, which was both a large amount of code (an SVG path parser, arc-to-cubic conversion,
+a command-type union) and wrong on the first draft. It was deleted.
+
+- **The geometry lives in `compositor`, not the renderer.** It has two consumers on opposite
+  sides of the dependency graph: the preview is in `apps/desktop`, and the exporter is in
+  `export-core`, which depends on `compositor` and not the other way round. A geometry defined in
+  the renderer could not be reached from the exporter at all — which is precisely how a shape came
+  to be drawn by *neither* renderer while the docs claimed it was previewed.
+- **`shapeGeometry` returns subpaths of lines and cubics in a 100×100 box.** Not an SVG string:
+  a string is one serialiser's output, and the second consumer would have to parse it back. The
+  renderer writes SVG or draws canvas paths from the subpaths; the exporter writes ASS `m`/`l`/`b`.
+- **Curves are cubics everywhere, which removes the hard part.** Shape arcs are all quarter or
+  half circles, and kappa makes one cubic match a quarter circle to within a rounding error. There
+  is no arc flattening, no approximation to document, and no ASS arc command to emulate.
+- **A shape borrows its caption style's fill.** The schema has no shape colour, and adding one
+  would be a field the style editor does not know about and the user cannot set. Borrowing means
+  one answer to "what colour is this", shared with the captions beside it. The ASS override
+  suppresses that style's outline and shadow, because a preset's outline on a filled rectangle is
+  a border the preview never draws.
+- **An unknown `shapeKind` draws nothing on both sides.** A rectangle substitute would be a claim
+  about content the file does not have. Asserted separately in each renderer, because "both
+  renderers refuse" is only true if both are actually tested for it.
+- **The process lesson.** The previous commit's message and docs said shapes were previewed. They
+  were not: `shapePath` returned a string, the tests checked the string, and no element ever
+  called the function. A function with tests and no caller is indistinguishable from a working
+  feature in every artifact except a running app. The check that finds it is asking "who calls
+  this?" — which is the same question that caught `proxyPending` (decisions §15).

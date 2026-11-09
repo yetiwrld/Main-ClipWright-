@@ -181,3 +181,18 @@ export {
   type AdjustmentItem,
   type AdjustmentLayer,
 } from './adjustment-layers.js';
+
+/**
+ * SPEC 11 §12 — shape geometry, shared by the preview's SVG serialiser and the
+ * export's ASS drawing serialiser.
+ */
+export {
+  SHAPE_KINDS,
+  shapeBoxAt,
+  shapeGeometry,
+  shapePath,
+  type ShapeBoxPercent,
+  type ShapeKind,
+  type ShapeSegment,
+  type ShapeSubpath,
+} from './shapes';

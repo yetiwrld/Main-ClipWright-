@@ -17,9 +17,12 @@ This document tracks architectural scope boundaries and honest limitations per `
    presets (lower third, callout, bullet list), and per-item animation beyond the
    style's own in/out. Shapes are SVG paths for all nine kinds (rectangle, rounded
    rectangle, ellipse, triangle, polygon, star, line, arrow, speech bubble) and are
-   **previewed but not yet composited into the export**: the burn-in carries text and
-   captions, and a shape would need the rasteriser that the WebGL2 renderer brings.
-   Icons and stickers are not built. Text on a path, 3D extrusion, gradient fills and
+   drawn in both the preview and the export — one geometry in `compositor`, an SVG
+   serialiser for the canvas and an ASS drawing (`\p1`) serialiser for the burn-in —
+   from the style's fill colour. A shape has no colour of its own and no shape-specific
+   inspector controls yet; its size and position come from the item transform, so it is
+   moved and scaled with the ordinary canvas gestures. **Icons and stickers are not
+   built**, and the shape kinds are the nine the schema declares. Text on a path, 3D extrusion, gradient fills and
    `rotationJitterDeg` on a title remain out of scope for v1.
 5. **Animated GIF imports (`specs/04` §2, `specs/11` §12):** Imported `.gif` files render their first frame statically; use `.mp4` or `.webm` for animated overlays.
 6. **Audio-only composition export (`specs/12` §6.9):** v1 exports video containers (`.mp4`, `.webm`); an audio-only timeline exports as a video with the composition's canvas background colour.

@@ -13,6 +13,7 @@ import { captionItemAt, captionFrameAt, type CaptionWordTiming } from '@clipwrig
 import type { TimelineState } from '@clipwright/timeline-engine';
 import { canvasMeasure, paintCaptionFrame } from './caption-painter.js';
 import { textFrameAt, type GraphicItemLike } from './graphics.js';
+import { shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
 import { usePlayheadUs } from './playhead-store.js';
 
 /** The words of a caption that are actually visible, with their timings. */
@@ -96,6 +97,16 @@ export function captionStyleFor(
  * one extra frame, and the export would not, which is a one-frame difference nobody
  * would ever diagnose.
  */
+export function shapeItemsAt(state: TimelineState, timeUs: number): GraphicItemLike[] {
+  return Object.values(state.items).filter(
+    (entry) =>
+      entry.type === 'shape' &&
+      !entry.disabled &&
+      timeUs >= entry.startUs &&
+      timeUs < entry.startUs + entry.durationUs
+  ) as unknown as GraphicItemLike[];
+}
+
 export function textItemsAt(state: TimelineState, timeUs: number): GraphicItemLike[] {
   return Object.values(state.items).filter(
     (entry) =>
@@ -104,6 +115,55 @@ export function textItemsAt(state: TimelineState, timeUs: number): GraphicItemLi
       timeUs >= entry.startUs &&
       timeUs < entry.startUs + entry.durationUs
   ) as unknown as GraphicItemLike[];
+}
+
+/**
+ * Draws one shape as a filled path — the preview's serialiser.
+ *
+ * Exported and taking an explicit context so it can be driven by a recording stand-in,
+ * the way `paintCaptionFrame` is: the assertion is the sequence of canvas calls, which
+ * is what the drawing order actually is. A shape filled before its path is complete
+ * draws nothing, and that looks identical to a missing shape in a screenshot.
+ *
+ * Returns false for a kind this build cannot draw, so the caller knows nothing happened
+ * — the same answer the exporter gives, rather than a rectangle substitute.
+ */
+export function paintShape(
+  ctx: CanvasRenderingContext2D,
+  shape: GraphicItemLike,
+  colour: string,
+  width: number,
+  height: number
+): boolean {
+  const geometry = shapeGeometry(shape.shapeKind);
+  if (!geometry) return false;
+  const box = shapeBoxAt((shape as { transform?: { x?: number; y?: number; scaleX?: number; scaleY?: number } }).transform);
+  const toPx = (x: number, y: number): [number, number] => [
+    ((box.x + (x / 100) * box.width) / 100) * width,
+    ((box.y + (y / 100) * box.height) / 100) * height,
+  ];
+
+  ctx.save();
+  ctx.beginPath();
+  for (const subpath of geometry) {
+    const start = toPx(subpath.x, subpath.y);
+    ctx.moveTo(start[0], start[1]);
+    for (const segment of subpath.segments) {
+      const end = toPx(segment.x, segment.y);
+      if (segment.op === 'line') {
+        ctx.lineTo(end[0], end[1]);
+      } else {
+        const c1 = toPx(segment.c1x, segment.c1y);
+        const c2 = toPx(segment.c2x, segment.c2y);
+        ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], end[0], end[1]);
+      }
+    }
+    if (subpath.closed) ctx.closePath();
+  }
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.restore();
+  return true;
 }
 
 export function CaptionOverlay({
@@ -143,6 +203,12 @@ export function CaptionOverlay({
     [state, playheadUs]
   );
 
+  /*
+    Shapes, drawn before the text: a shape is usually a plate or a callout behind a
+    title, and one drawn on top of the words would hide them.
+  */
+  const shapeItems = useMemo(() => shapeItemsAt(state, playheadUs), [state, playheadUs]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -152,8 +218,17 @@ export function CaptionOverlay({
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    for (const shape of shapeItems) {
+      const style = captionStyleFor(
+        (shape as { captionStyleId?: string }).captionStyleId,
+        undefined,
+        projectCopies
+      );
+      paintShape(ctx, shape, style.fill.color, width, height);
+    }
+
     /*
-      Text items first, each measuring with the style it actually draws with. The
+      Text items next, each measuring with the style it actually draws with. The
       measure cache is keyed by font, so a title in a different family than the caption
       below it must not reuse the caption's metrics — that would wrap the title at the
       wrong widths, which is invisible in a test and obvious on screen.
@@ -211,7 +286,7 @@ export function CaptionOverlay({
     });
 
     paintCaptionFrame(ctx, frame, style, { canvasShortSide: Math.min(width, height) });
-  }, [caption, item, graphicItems, playheadUs, width, height, projectCopies]);
+  }, [caption, item, graphicItems, shapeItems, playheadUs, width, height, projectCopies]);
 
   return (
     <canvas

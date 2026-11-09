@@ -498,8 +498,12 @@ describe('text items burn in (SPEC 11 §7)', () => {
     expect(assCuesFromPlan(plan([title({ textContent: undefined })]))).toHaveLength(0);
   });
 
-  it('keeps captions and titles in the same script, in item order', () => {
-    // One burn-in draws both, so a title above a caption must not displace it.
+  it('keeps captions, titles and shapes in the same script, in item order', () => {
+    /*
+      One burn-in draws all three, so a title above a caption must not displace it. The
+      shape is the odd one out: it is a cue with empty text and a `shape` payload, which
+      `assDialogue` renders as a drawing rather than as escaped text.
+    */
     const cues = assCuesFromPlan(
       plan([
         { type: 'caption', startUs: 0, durationUs: 1_000_000, captionText: 'a caption', captionSegment: { text: 'a caption' } },
@@ -507,7 +511,8 @@ describe('text items burn in (SPEC 11 §7)', () => {
         { type: 'shape', startUs: 0, durationUs: 1_000_000, shapeKind: 'rect' },
       ])
     );
-    expect(cues.map((cue) => cue.text)).toEqual(['a caption', 'Chapter One']);
+    expect(cues.map((cue) => cue.text)).toEqual(['a caption', 'Chapter One', '']);
+    expect(cues[2]!.shape?.kind).toBe('rect');
   });
 
   it('does not read caption text off a title, or the reverse', () => {
@@ -522,5 +527,121 @@ describe('text items burn in (SPEC 11 §7)', () => {
 
     const captionWithTextContent = { type: 'caption', startUs: 0, durationUs: 1_000_000, textContent: 'wrong', captionSegment: {} };
     expect(assCuesFromPlan(plan([captionWithTextContent]))).toHaveLength(0);
+  });
+});
+
+describe('a shape becomes a drawing, not text (SPEC 11 §12)', () => {
+  /*
+    The gap this closes was silent: a shape produced no cue, so a rectangle over a clip
+    was in the editor and not in the file. The failure mode now available is subtler —
+    a shape cue that went down the *text* path would have its drawing commands escaped
+    and the style's position applied to absolute coordinates, producing a plausible but
+    wrong picture. Both halves are pinned below.
+  */
+  const plan = (items: unknown[]) => ({ rangeStartUs: 0, items }) as never;
+  const options = {
+    width: 1920,
+    height: 1080,
+    styles: { 'bold-creator': builtInStyle('bold-creator')! },
+    defaultStyleId: 'bold-creator',
+  };
+
+  const shape = (overrides: Record<string, unknown> = {}) => ({
+    type: 'shape',
+    startUs: 0,
+    durationUs: 1_000_000,
+    shapeKind: 'rect',
+    captionStyleId: 'bold-creator',
+    geometry: { transform: { scaleX: 2, scaleY: 1, x: 0, y: 0 } },
+    ...overrides,
+  });
+
+  it('emits a cue for a shape', () => {
+    const cues = assCuesFromPlan(plan([shape()]));
+    expect(cues).toHaveLength(1);
+    expect(cues[0]!.shape?.kind).toBe('rect');
+  });
+
+  it('carries the box from the item\'s transform', () => {
+    // The default box is half the frame, centred; a 2× scale makes it the full width.
+    const cues = assCuesFromPlan(plan([shape()]));
+    expect(cues[0]!.shape?.box).toEqual({ x: 0, y: 25, width: 100, height: 50 });
+  });
+
+  it('renders a dialogue line containing drawing commands', () => {
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    const line = assDialogue(cue!, options);
+    // `\p1` enters drawing mode and a `m`/`l` body follows it.
+    expect(line).toContain('\\p1');
+    expect(line).toMatch(/\bm\d+/);
+    // And it is a real Dialogue line, so libass will draw it.
+    expect(line.startsWith('Dialogue: 0,')).toBe(true);
+  });
+
+  it('scales the drawing to the output resolution', () => {
+    /*
+      The box is a percentage of the frame, so at 1920×1080 a full-width rectangle is
+      1920 wide. Drawing it at its percent value would produce a shape the size of a
+      postage stamp in the corner of a 1080p export.
+    */
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    const line = assDialogue(cue!, options);
+    expect(line).toContain('1920');
+    expect(line).not.toContain('100 0 l100 1080');
+  });
+
+  it('does not put text into a drawing body', () => {
+    /*
+      Drawing mode reads digits as coordinates. A shape cue that also carried a label
+      would render the label's characters as a scribble — and an escaped `\N` would end
+      the drawing early.
+    */
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    const line = assDialogue(cue!, options);
+    expect(line).not.toContain('\\N');
+    /*
+      Exactly one override block, at the start of the body. That single brace is the real
+      assertion: a second one would be a karaoke or per-word block leaked in from the
+      text path, and the drawing commands would be inside it.
+    */
+    expect(line.split('{').length).toBe(2);
+    expect(line.split('}').length).toBe(2);
+  });
+
+  it('uses the style fill for the shape\'s colour', () => {
+    // A shape has no colour of its own; it borrows the caption style's, so there is one
+    // answer to "what colour is this" rather than a field the editor cannot set.
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    const line = assDialogue(cue!, options);
+    const fill = builtInStyle('bold-creator')!.fill.color;
+    expect(line).toContain(assColour(fill));
+  });
+
+  it('draws nothing for a shape kind this build cannot render', () => {
+    // A newer file. A rectangle would be a claim about content the file does not have.
+    const [cue] = assCuesFromPlan(plan([shape({ shapeKind: 'hexagon-hollow' })]));
+    expect(assDialogue(cue!, options)).toBe('');
+  });
+
+  it('skips a shape with no kind at all', () => {
+    expect(assCuesFromPlan(plan([shape({ shapeKind: undefined })]))).toHaveLength(0);
+  });
+
+  it('suppresses the caption style\'s outline on the drawing', () => {
+    /*
+      The borrowed style almost certainly has an outline — every preset does, because
+      captions need one to read over footage. Applying it to a filled rectangle draws a
+      border the preview never shows.
+    */
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    const line = assDialogue(cue!, options);
+    expect(line).toContain('\\bord0');
+  });
+
+  it('anchors at the top-left so absolute coordinates are not shifted', () => {
+    // `\an5` would move every shape by half the frame, since the coordinates are already
+    // absolute within it.
+    const [cue] = assCuesFromPlan(plan([shape()]));
+    expect(assDialogue(cue!, options)).toContain('\\an7');
   });
 });

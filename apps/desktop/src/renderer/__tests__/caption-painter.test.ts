@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { builtInStyle, type CaptionStyle } from '@clipwright/caption-styles';
 import { captionFrameAt, type CaptionFrame } from '@clipwright/compositor';
 import { canvasMeasure, fontString, hexToRgba, paintCaptionFrame } from '../features/editor/caption-painter.js';
-import { textItemsAt } from '../features/editor/CaptionOverlay.js';
+import { paintShape, shapeItemsAt, textItemsAt } from '../features/editor/CaptionOverlay.js';
 
 interface Call {
   op: string;
@@ -54,6 +54,9 @@ function recordingContext(): { ctx: CanvasRenderingContext2D; calls: Call[] } {
       moveTo: record('moveTo'),
       lineTo: record('lineTo'),
       quadraticCurveTo: record('quadraticCurveTo'),
+      // Shapes are cubics (SPEC 11 §12); the context predates them because captions
+      // are drawn with quadratic curves only.
+      bezierCurveTo: record('bezierCurveTo'),
       rect: record('rect'),
       clip: record('clip'),
       fill: record('fill'),
@@ -399,5 +402,154 @@ describe('which text items the overlay paints (SPEC 11 §7)', () => {
 
   it('finds nothing before the item starts', () => {
     expect(textItemsAt(stateWith([textItem()]), 0)).toHaveLength(0);
+  });
+});
+
+describe('painting a shape (SPEC 11 §12)', () => {
+  /*
+    Shapes are drawn as filled canvas paths — the preview's serialiser over the same
+    `shapeGeometry` the exporter turns into ASS drawing commands. Before this, a shape
+    was drawn by *neither*: `shapePath` was tested but no element called it, so a
+    rectangle added from the menu was a completely invisible item.
+
+    The recording context is what makes the order assertable: a `fill` before the path
+    is complete draws nothing, which in a screenshot is indistinguishable from a shape
+    that was never drawn.
+  */
+  const shapeItem = (overrides: Record<string, unknown> = {}) => ({
+    type: 'shape',
+    shapeKind: 'rect',
+    startUs: 0,
+    durationUs: 1_000_000,
+    transform: { scaleX: 2, scaleY: 1, x: 0, y: 0 },
+    ...overrides,
+  });
+
+  it('draws a shape as a filled path', () => {
+    const { ctx, calls } = recordingContext();
+    const painted = paintShape(ctx, shapeItem() as never, '#FF8800', 1920, 1080);
+    expect(painted).toBe(true);
+    const ops = calls.map((call) => call.op);
+    expect(ops).toContain('beginPath');
+    expect(ops).toContain('fill');
+    // The fill comes after the path, never before.
+    expect(ops.indexOf('fill')).toBeGreaterThan(ops.indexOf('beginPath'));
+  });
+
+  it('fills with the colour it was given', () => {
+    // The same colour the burn-in writes, because both read the style's fill.
+    const { ctx } = recordingContext();
+    paintShape(ctx, shapeItem() as never, '#123456', 1920, 1080);
+    expect(ctx.fillStyle).toBe('#123456');
+  });
+
+  it('scales the 100-box onto the canvas', () => {
+    /*
+      A 2×-wide shape is the full frame width, so its right edge is at 1920 and its left
+      at 0. Drawing the raw 0–100 box would put a postage stamp in the corner.
+    */
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, shapeItem() as never, '#FFF', 1920, 1080);
+    const points = calls
+      .filter((call) => call.op === 'moveTo' || call.op === 'lineTo')
+      .map((call) => call.args as [number, number]);
+    expect(Math.max(...points.map(([x]) => x))).toBeCloseTo(1920, 5);
+    expect(Math.min(...points.map(([x]) => x))).toBeCloseTo(0, 5);
+  });
+
+  it('adds the shape\'s own position, not only its size', () => {
+    /*
+      A mutation that dropped `box.x`/`box.y` from the coordinate mapping survived every
+      test above, because the fixtures all happened to sit at the origin (a 2× scale on a
+      centred half-frame shape starts at 0). This is the case that pins it: an unmoved
+      shape is a quarter in from each edge, so its left edge must be 25% of the canvas —
+      and if the origin were dropped every shape would draw in the top-left corner.
+    */
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, shapeItem({ transform: {} }) as never, '#FFF', 1000, 1000);
+    const points = calls
+      .filter((call) => call.op === 'moveTo' || call.op === 'lineTo')
+      .map((call) => call.args as [number, number]);
+    // Default box: x 25%, width 50%.
+    expect(Math.min(...points.map(([x]) => x))).toBeCloseTo(250, 5);
+    expect(Math.min(...points.map(([, y]) => y))).toBeCloseTo(250, 5);
+    expect(Math.max(...points.map(([x]) => x))).toBeCloseTo(750, 5);
+  });
+
+  it('draws curves for a rounded shape rather than straight edges', () => {
+    // A "rounded rectangle" made of lines is a rectangle, which is a different icon.
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, shapeItem({ shapeKind: 'round-rect' }) as never, '#FFF', 1920, 1080);
+    expect(calls.filter((call) => call.op === 'bezierCurveTo')).toHaveLength(4);
+  });
+
+  it('closes a closed path and leaves a line open', () => {
+    const closed = recordingContext();
+    paintShape(closed.ctx, shapeItem() as never, '#FFF', 1920, 1080);
+    expect(closed.calls.some((call) => call.op === 'closePath')).toBe(true);
+
+    // A closed line is a zero-area sliver that fills to nothing.
+    const open = recordingContext();
+    paintShape(open.ctx, shapeItem({ shapeKind: 'line' }) as never, '#FFF', 1920, 1080);
+    expect(open.calls.some((call) => call.op === 'closePath')).toBe(false);
+  });
+
+  it('draws nothing for a kind this build cannot render', () => {
+    /*
+      The exporter makes the same choice, which is the point: a rectangle substitute
+      would be a claim about content the file does not have, and the two renderers
+      disagreeing about that is how a preview stops predicting the export.
+    */
+    const { ctx, calls } = recordingContext();
+    const painted = paintShape(ctx, shapeItem({ shapeKind: 'hexagon-hollow' }) as never, '#FFF', 1920, 1080);
+    expect(painted).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('restores the context even though it changed the fill', () => {
+    // Leaking a fill colour into the text pass would paint every caption in the shape's
+    // colour — a bug that reads as a styling problem, not a drawing-order one.
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, shapeItem() as never, '#FF0000', 1920, 1080);
+    const ops = calls.map((call) => call.op);
+    expect(ops.filter((op) => op === 'save')).toHaveLength(1);
+    expect(ops.filter((op) => op === 'restore')).toHaveLength(1);
+    expect(ops.lastIndexOf('restore')).toBeGreaterThan(ops.indexOf('fill'));
+  });
+});
+
+describe('which shapes the overlay paints', () => {
+  const stateWith = (items: unknown[]) =>
+    ({ items: Object.fromEntries((items as Array<{ id: string }>).map((item) => [item.id, item])) }) as never;
+
+  const shape = (overrides: Record<string, unknown> = {}) => ({
+    id: 's1',
+    type: 'shape',
+    shapeKind: 'rect',
+    startUs: 1_000_000,
+    durationUs: 2_000_000,
+    disabled: false,
+    ...overrides,
+  });
+
+  it('finds a shape while the playhead is inside it', () => {
+    expect(shapeItemsAt(stateWith([shape()]), 1_500_000)).toHaveLength(1);
+  });
+
+  it('uses the same half-open range as text and every other item', () => {
+    expect(shapeItemsAt(stateWith([shape()]), 1_000_000)).toHaveLength(1);
+    expect(shapeItemsAt(stateWith([shape()]), 3_000_000)).toHaveLength(0);
+  });
+
+  it('skips a disabled shape', () => {
+    expect(shapeItemsAt(stateWith([shape({ disabled: true })]), 1_500_000)).toHaveLength(0);
+  });
+
+  it('does not claim text items, which are painted separately', () => {
+    // Both go on one canvas, and drawing a text item through the shape path would fill
+    // a rectangle where the words should be.
+    const state = stateWith([shape(), { ...shape({ id: 't1' }), type: 'text', textContent: 'Hi' }]);
+    expect(shapeItemsAt(state, 1_500_000)).toHaveLength(1);
+    expect(textItemsAt(state, 1_500_000)).toHaveLength(1);
   });
 });

@@ -254,33 +254,33 @@ describe('where a shape sits', () => {
   it('defaults to a centred block rather than the whole frame', () => {
     // A full-frame rectangle would hide the footage the user is annotating.
     const box = shapeBox({});
-    expect(box.left).toBe('25%');
-    expect(box.top).toBe('25%');
-    expect(box.width).toBe('50%');
-    expect(box.height).toBe('50%');
+    expect(box.x).toBe(25);
+    expect(box.y).toBe(25);
+    expect(box.width).toBe(50);
+    expect(box.height).toBe(50);
   });
 
   it('moves with the item\'s transform', () => {
     // `transform.x`/`.y` are fractions of the canvas, so 0.1 is ten percent across.
     const box = shapeBox({ transform: { x: 0.1, y: -0.2 } });
-    expect(box.left).toBe('35%');
-    expect(box.top).toBe('5%');
+    expect(box.x).toBe(35);
+    expect(box.y).toBe(5);
   });
 
   it('scales with the item, keeping the centre fixed', () => {
     // Scaling a centred shape must grow it about the middle; growing from the top-left
     // is the bug that makes "make it bigger" also move the shape.
     const box = shapeBox({ transform: { scaleX: 2, scaleY: 2 } });
-    expect(box.width).toBe('100%');
-    expect(box.left).toBe('0%');
-    expect(box.top).toBe('0%');
-    expect(box.height).toBe('100%');
+    expect(box.width).toBe(100);
+    expect(box.x).toBe(0);
+    expect(box.y).toBe(0);
+    expect(box.height).toBe(100);
   });
 
   it('scales each axis independently', () => {
     const box = shapeBox({ transform: { scaleX: 2, scaleY: 0.5 } });
-    expect(box.width).toBe('100%');
-    expect(box.height).toBe('25%');
+    expect(box.width).toBe(100);
+    expect(box.height).toBe(25);
   });
 
   it('refuses a zero or negative scale rather than producing a NaN box', () => {
@@ -288,8 +288,8 @@ describe('where a shape sits', () => {
     // look like a missing shape rather than a broken one.
     for (const scaleX of [0, -1]) {
       const box = shapeBox({ transform: { scaleX } });
-      expect(Number.isFinite(Number.parseFloat(box.width))).toBe(true);
-      expect(Number.parseFloat(box.width)).toBeGreaterThan(0);
+      expect(Number.isFinite(box.width)).toBe(true);
+      expect(box.width).toBeGreaterThan(0);
     }
   });
 });
