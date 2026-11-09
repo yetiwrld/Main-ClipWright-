@@ -287,3 +287,65 @@ shaped is not flattened by re-framing its own moment.
   at 0.5×.
 - Neither mode writes during the drag. Both are drafts, and both refuse to commit a gesture
   that ended where it started — an empty undo entry makes the next `Ctrl+Z` look broken.
+
+## 15. "Never silent" without a render scale: report, do not fake a ladder
+
+**Decision:** of SPEC 10 §5.1's three parts, the preview implements the one §5.1 states as a
+rule — *"a small chip … appears in the toolbar (never silent)"* — and does not implement the
+Auto render scale. The chip describes which file is playing; the ladder that would step a
+render resolution between 1, 0.5 and 0.25 is recorded as a limitation.
+
+**Reasoning:** the ladder is a control over an *internal render scale*, and this preview has
+none. It draws the DOM layer stack with each element at its own resolution, so there is no
+number to halve and no frame to upload; a "Preview ½" chip would report a resolution nothing is
+rendered at, and the 30-frame moving average behind it would measure DOM compositing rather
+than the GPU work the thresholds were chosen for. §5.1's other rule — the paused frame redraws
+at Full after 150 ms — is vacuous here for the same reason: there is no reduced scale to
+restore from.
+
+The chip, by contrast, is exactly as applicable as it was when the spec was written, because it
+describes something the DOM path has too: **which file is being decoded**. Proxies exist
+(`04 §6.3`), the media pipeline creates them, and main's protocol handler picks between the
+proxy and the original — so the preview genuinely can be playing something other than the real
+image, and the spec's rule that it say so is fully satisfiable.
+
+**Consequences:**
+- Silence is the default and has to be *earned*: a proxied clip, a source `needsProxy`
+  declined, and a still image all report nothing. A chip that is on screen for every ordinary
+  project is a chip nobody reads.
+- Two chips remain, and they read differently by design: "Preparing smoother preview…" is a
+  promise about shortly, and the proxies-off notice is a statement about now. That is why the
+  chip carries a `tone` rather than only a string.
+- The chip names the *selected* clip's file, not every visible layer's. A stack of one chip per
+  layer would be unreadable and would report on files the user is not looking at.
+- Wiring it found a contract gap rather than a bug: main has always returned the whole media
+  record, but the renderer's declared `listMedia` shape omitted `proxyPath`, so the preview
+  could not have known what it was playing. The fix was to declare the field, and the comment
+  there records why the renderer's type had been narrowing a record it already received.
+- The setting reaches the preview as a **prop** defaulting to on, matching main's own default.
+  Reading it in the component would make the preview reach for global state and default to
+  *off* before the settings arrive — a lie in the direction that matters, telling the user they
+  asked for something they did not.
+- "A proxy is being made" is read from a live **`proxy` job record** — `type: 'proxy'`, a matching
+  `mediaId`, and a status of `queued`, `running` or `paused` — not from a flag on the media
+  record. The media record has no such flag. The first version of this shipped one anyway
+  (`proxyPending`), which read correctly in the policy, passed fourteen tests, and was
+  unreachable in the running app: nothing produced it. A unit test can only prove a rule is
+  self-consistent, so the question "who sets this?" has to be answered outside the test file.
+  The signal that does exist is the job record the pipeline already writes, and `media-pipeline`
+  already reports "Preparing preview" at 86% of an import.
+- `failed` and `cancelled` proxy jobs are **not** live. This is the case an obvious
+  "is there a proxy job?" test gets wrong: a failed transcode leaves `proxyPath` null
+  indefinitely, so "Preparing smoother preview…" would promise a file that is never coming, and
+  the user would watch it forever. Silence is the honest answer there, the same as for a file
+  that needs no proxy.
+- The job list is **polled, while something is waiting**. `mediaAwaitingProxy` is true only while
+  some media has `needsProxy` and no `proxyPath`, so the interval exists for a few seconds on a
+  cold import and stops for good once the transcode lands. A push channel would be better and
+  would need main to emit one; a poll for the life of the editor would be a timer answering a
+  question nobody asked. The predicate's `proxyPath` clause is its termination condition — drop
+  it and every project polls forever.
+- The preview degrades to **silence** when it has no job list (`jobs` is optional, default
+  empty). A chip that cannot be computed is not drawn, rather than being drawn from a guess:
+  "Preparing…" invented for a file that is not transcoding would send a user looking for a
+  progress bar that does not exist.

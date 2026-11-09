@@ -14,6 +14,7 @@ import { ExportDialog } from '../export/ExportDialog.js';
 import { CaptionStyleEditor } from './CaptionStyleEditor.js';
 import { playheadStore } from './playhead-store.js';
 import { useCaptionStyles } from './use-caption-styles.js';
+import { mediaAwaitingProxy, type PreviewJobLike } from './preview-quality.js';
 import { DEFAULT_STYLE_ID } from '@clipwright/caption-styles';
 
 export function EditorPage({
@@ -38,6 +39,24 @@ export function EditorPage({
   const [leftTab, setLeftTab] = useState<'media' | 'captions'>('media');
   const captionStyles = useCaptionStyles(projectId);
   const [styleEditorOpen, setStyleEditorOpen] = useState(false);
+  /*
+    The `useProxyPreview` setting, for the preview's quality chip (SPEC 10 §5.1, SPEC 04 §6.3).
+
+    Read here rather than in the preview so the preview stays a pure function of its props, and
+    defaulted to `true` — main's own default — so the chip cannot claim proxies were switched off
+    before the settings have arrived.
+  */
+  const [useProxyPreview, setUseProxyPreview] = useState(true);
+  /*
+    The background jobs, for the same chip: a `proxy` job for a clip is what makes
+    "Preparing smoother preview…" true, and nothing else in the renderer can see one (SPEC 04
+    §6.2). An import is the only thing that creates them, so this polls — but only while some
+    media still needs a proxy and has none, which is a few seconds on a cold import and never
+    again after the file exists. Polling wholesale would be a timer running for the life of the
+    editor to answer a question nobody is asking.
+  */
+  const [jobs, setJobs] = useState<PreviewJobLike[]>([]);
+  const awaitingProxy = mediaAwaitingProxy(media);
 
   useEffect(() => {
     if (!isDesktop()) {
@@ -62,6 +81,45 @@ export function EditorPage({
       cancelled = true;
     };
   }, []);
+
+  /*
+    Settings load separately from the media list, and a failure here is not worth surfacing: the
+    only consumer is a chip, and a chip that cannot be computed is simply not drawn.
+  */
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let cancelled = false;
+    void api
+      .getSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        const record = settings as { useProxyPreview?: boolean } | null;
+        setUseProxyPreview(record?.useProxyPreview !== false);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktop() || !awaitingProxy) return;
+    let cancelled = false;
+    const load = () =>
+      void api
+        .listJobs()
+        .then((list) => {
+          if (cancelled) return;
+          setJobs(list as unknown as PreviewJobLike[]);
+        })
+        .catch(() => undefined);
+    load();
+    const timer = setInterval(load, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [awaitingProxy]);
 
   useEffect(() => {
     if (!resizing) return;
@@ -270,7 +328,15 @@ export function EditorPage({
             }}
           >
             {state ? (
-              <PreviewPane state={state} fps={timeline.fps} captionStyles={captionStyles.styles} timeline={timeline} />
+              <PreviewPane
+                state={state}
+                fps={timeline.fps}
+                captionStyles={captionStyles.styles}
+                timeline={timeline}
+                media={media}
+                jobs={jobs}
+                useProxyPreview={useProxyPreview}
+              />
             ) : (
               <div style={{ padding: 'var(--space-3)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 {timeline.loadError || 'Loading the preview…'}

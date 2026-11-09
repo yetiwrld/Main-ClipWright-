@@ -25,6 +25,13 @@ export interface MediaAsset {
   kind: 'video' | 'audio' | 'image';
   status: 'ok' | 'missing' | 'changed';
   sizeBytes: number;
+  /** The preview proxy, when one exists (SPEC 04 §6.3). See `preview-quality.ts`. */
+  proxyPath?: string | null;
+  /**
+   * Whether the pipeline intends to make one. Read by `EditorPage` to decide whether to watch the
+   * job list at all; a file that needs no proxy is never going to produce a `proxy` job.
+   */
+  needsProxy?: boolean;
   info?: { durationUs?: number };
 }
 

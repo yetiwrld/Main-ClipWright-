@@ -142,8 +142,17 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — what is left is the **preview-quality** control (SPEC 10
-§5.1) and the frame-accurate transport it belongs to. The Crop tool now has its own frame,
+**1. Finish Phase 4 ⚠️** — what is left is §5.1's **Auto render scale** and the
+frame-accurate transport it would be measured against. The *reporting* half of preview quality
+is in: the preview says what it is playing ("Preparing smoother preview…" while a proxy is
+being made — read from a live `proxy` job, so the chip is reachable rather than an aspiration,
+and the job list is polled only while an import is still waiting on one — an admission when
+proxy preview is switched off, silence when the file in use is the right one), and proxy
+selection itself has lived in main's `preview-source.ts` since the
+media pipeline landed, so an export can never be built from a transcode. The Auto ladder —
+1 / 0.5 / 0.25 with a 30-frame moving average and a "Preview ½" chip — is not buildable on a
+DOM layer stack that has no internal render scale to step down; it belongs with the WebGL2
+renderer. The Crop tool now has its own frame,
 including **"Set framing…"** — a fixed canvas window with the picture dragged under it and a
 wheel to zoom, written as four keyframes in one undo step (what `13`'s auto-reframe will
 automate): a rectangle

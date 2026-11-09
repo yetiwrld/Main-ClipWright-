@@ -101,6 +101,17 @@ export const api = {
         status: 'ok' | 'missing' | 'changed';
         originalName: string;
         sizeBytes: number;
+        /**
+         * The preview proxy, when one exists (SPEC 04 §6.3, §7).
+         *
+         * Main has always returned the whole record, so this was on the wire already — it was
+         * only the renderer's declared shape that hid it, which meant the preview could not
+         * know it was playing a proxy and so could not say so (§5.1's "never silent").
+         *
+         * `null` and absent are different in the record (declined vs. predates proxies) and the
+         * same to the preview; see `preview-quality.ts`.
+         */
+        proxyPath?: string | null;
         info?: { durationUs?: number; video?: { width?: number; height?: number } };
       }>
     >;

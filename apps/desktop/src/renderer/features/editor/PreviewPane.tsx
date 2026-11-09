@@ -97,6 +97,7 @@ import { CaptionOverlay } from './CaptionOverlay.js';
 import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
 import { CropFrame } from './CropFrame.js';
 import { ReframeFrame } from './ReframeFrame.js';
+import { previewQualityChip, type PreviewMediaLike } from './preview-quality.js';
 import {
   framingChanged,
   framingPaths,
@@ -359,9 +360,34 @@ export function PreviewPane({
   fps,
   captionStyles = {},
   timeline,
+  media = [],
+  jobs = [],
+  useProxyPreview = true,
 }: {
   state: TimelineState;
   fps: 30 | 60;
+  /**
+   * The project's media records, so the preview can say whether it is playing a proxy
+   * (SPEC 10 §5.1's "never silent").
+   *
+   * Optional, and empty by default: the preview is also rendered on its own, and a picture with
+   * no media list is still a valid picture — the chip simply has nothing to report.
+   */
+  media?: readonly PreviewMediaLike[];
+  /**
+   * The user's `useProxyPreview` setting (SPEC 04 §6.3).
+   *
+   * Defaults to **on**, matching main's own default at the protocol handler. Defaulting to off
+   * would make the chip claim proxies were switched off on every project until the settings
+   * arrived, which is a lie in the direction that matters — it tells the user they asked for
+   * something they did not.
+   */
+  useProxyPreview?: boolean;
+  /**
+   * The project's background jobs, so "a proxy is being made" is a fact rather than a guess
+   * (SPEC 04 §6.2). Empty by default: without a job list the chip degrades to silence.
+   */
+  jobs?: readonly { type?: string; mediaId?: string; status?: string }[];
   /** Project-local caption styles, so the preview shows what the export will. */
   captionStyles?: Readonly<Record<string, CaptionStyle>>;
   /**
@@ -901,6 +927,26 @@ export function PreviewPane({
    * guess the preview itself makes before the first frame.
    */
   const cropSource = { width: sourceAspect ?? canvas.width / Math.max(1, canvas.height), height: 1 };
+  /*
+    What the preview is playing, and whether it has to say so (SPEC 10 §5.1).
+
+    `never silent` is the rule: a preview showing anything other than the real image reports it.
+    The chip comes from the *selected* clip's media, because that is the file whose speed the user
+    is judging — a stack of one chip per visible layer would be unreadable and would name files
+    the user is not looking at.
+
+    `useProxies` has a safe default of `true` when no setting has arrived: main's own default is
+    the same, and defaulting to `false` here would make the chip claim proxies are switched off on
+    every project where the settings have not loaded yet.
+  */
+  const qualityChip = (() => {
+    if (!selectedId) return null;
+    const item = state.items[selectedId];
+    if (!item?.mediaId) return null;
+    const record = media.find((candidate) => candidate.id === item.mediaId);
+    if (!record) return null;
+    return previewQualityChip(record, { useProxies: useProxyPreview, jobs });
+  })();
   const cropSessionKey = cropTarget ? `${cropTarget.itemId}:${String(tool === 'crop')}` : null;
   const sessionKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -2151,6 +2197,29 @@ export function PreviewPane({
             difference between a preview that is approximate and a preview that
             lies; the export applies the full chain either way.
           */}
+          {qualityChip && (
+            <div
+              data-testid="preview-quality-chip"
+              data-tone={qualityChip.tone}
+              title={qualityChip.detail}
+              style={{
+                position: 'absolute',
+                top: 'var(--space-2)',
+                right: 'var(--space-2)',
+                padding: '2px var(--space-2)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'rgba(0,0,0,0.6)',
+                color: 'var(--text-primary)',
+                fontSize: 'var(--fs-xs)',
+                // Never takes the pointer: the chip reports, it does not act, and a badge that
+                // swallowed a click would make the corner of the picture unselectable.
+                pointerEvents: 'none',
+                zIndex: 3,
+              }}
+            >
+              {qualityChip.label}
+            </div>
+          )}
           {unpreviewable.length > 0 && (
             <div
               data-testid="preview-effect-banner"

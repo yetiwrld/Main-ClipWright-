@@ -639,6 +639,135 @@ describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
   });
 });
 
+describe('the preview-quality chip (SPEC 10 §5.1)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      setKeyframesAt: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  it('says nothing while the clip needs no proxy', () => {
+    /*
+      §5.1's chip reports a degraded or pending preview. On the ordinary path there is nothing to
+      report, and a permanent badge would be noise on every project.
+    */
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'm1' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[{ id: 'm1', kind: 'video' }]}
+      />,
+    );
+    expect(screen.queryByTestId('preview-quality-chip')).toBeNull();
+  });
+
+  it('says nothing while a proxy is actually playing', () => {
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'm1' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[{ id: 'm1', kind: 'video', proxyPath: '/derived/p.mp4' }]}
+      />,
+    );
+    expect(screen.queryByTestId('preview-quality-chip')).toBeNull();
+  });
+
+  it('admits it is preparing a proxy, and admits it in the spec\'s words', () => {
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'm1' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[{ id: 'm1', kind: 'video' }]}
+        jobs={[{ type: 'proxy', mediaId: 'm1', status: 'running' }]}
+      />,
+    );
+    const chip = screen.getByTestId('preview-quality-chip');
+    expect(chip.textContent).toBe('Preparing smoother preview…');
+    expect(chip.getAttribute('data-tone')).toBe('info');
+  });
+
+  it('admits when the user has switched proxies off', () => {
+    /*
+      The half a silent implementation gets wrong. Nothing is broken — the setting was deliberate
+      — but a slow scrub over a 4K original now looks like a bug rather than a choice.
+    */
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'm1' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[{ id: 'm1', kind: 'video', proxyPath: '/derived/p.mp4' }]}
+        useProxyPreview={false}
+      />,
+    );
+    const chip = screen.getByTestId('preview-quality-chip');
+    expect(chip.getAttribute('data-tone')).toBe('quality');
+    expect(chip.textContent).toContain('original');
+  });
+
+  it('reads the chip from the selected clip, not from whatever is on top', () => {
+    /*
+      Two clips, two different media, one of them with a pending proxy. The chip has to describe
+      the clip the user is *editing* — a chip naming a background layer's file would be reporting
+      on something they are not looking at.
+    */
+    const state = makeState([
+      { id: 'a', mediaId: 'm1' },
+      { id: 'b', mediaId: 'm2', trackRole: 'overlay' },
+    ]);
+    render(
+      <PreviewPane
+        state={state}
+        fps={30}
+        timeline={fakeTimeline(['b'])}
+        media={[
+          { id: 'm1', kind: 'video' },
+          { id: 'm2', kind: 'video', proxyPath: '/p.mp4' },
+        ]}
+        jobs={[{ type: 'proxy', mediaId: 'm1', status: 'running' }]}
+      />,
+    );
+    // `b` is selected and has a real proxy, so nothing is reported even though `a` is pending.
+    expect(screen.queryByTestId('preview-quality-chip')).toBeNull();
+  });
+
+  it('says nothing when the selected clip has no media record', () => {
+    // A stale selection or a record that has not loaded; a chip would be a guess.
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'gone' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[]}
+      />,
+    );
+    expect(screen.queryByTestId('preview-quality-chip')).toBeNull();
+  });
+
+  it('does not take the pointer, so the corner of the picture stays clickable', () => {
+    // A badge that swallowed a press would make the top-right of the frame unselectable.
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', mediaId: 'm1' }])}
+        fps={30}
+        timeline={fakeTimeline()}
+        media={[{ id: 'm1', kind: 'video' }]}
+        jobs={[{ type: 'proxy', mediaId: 'm1', status: 'running' }]}
+      />,
+    );
+    expect(screen.getByTestId('preview-quality-chip').style.pointerEvents).toBe('none');
+  });
+});
+
 describe('the reframe gesture (SPEC 10 §8.6 "Set framing…")', () => {
   function fakeTimeline(selection: string[] = ['a']) {
     return {

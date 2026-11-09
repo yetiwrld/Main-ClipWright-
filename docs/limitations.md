@@ -155,12 +155,24 @@ This document tracks architectural scope boundaries and honest limitations per `
    `Ctrl`+wheel about the cursor up to 1600% — with §4's remaining view controls: the
    **Handles** toggle (`H`) hides the transform grips without deselecting, and the
    **Pan view** tool and **Space+drag** pan the view (Space still plays, because the
-   pan listener never claims the key — see `docs/decisions.md` §10). What is *not* in
-   is the **preview-quality** control (§5.1): there is no Auto/Full/Half/Quarter
+   pan listener never claims the key — see `docs/decisions.md` §10). Of §5.1's
+   **preview quality**, what is in is the part the spec insists on most — *never
+   silent*: the preview reports what it is playing. A clip whose proxy is still being
+   made — a live `proxy` job for that media, which is what the pipeline actually
+   publishes — carries the "Preparing smoother preview…" chip, and the job list is
+   watched only while some import is still waiting on one, so the report costs no
+   timer once a project has settled; a project with **proxy
+   preview** switched off says so, because a slow scrub over a 4K original then looks
+   like a bug rather than a setting; and a proxied clip or one that needs no proxy says
+   nothing, because a chip that is always on is a chip nobody reads. Proxy selection
+   itself is main's (`preview-source.ts`), so an export can never be built from a
+   transcode. What is **not** in is the **Auto** render scale: no Auto/Full/Half/Quarter
    chooser and no "Preview ½" chip. The preview draws the DOM layer stack at each
-   element's own resolution, so it has no render scale to change — the spec's quality
-   levels describe the WebGL renderer, and a control that scaled a resolution nothing
-   is rendered at would be a switch that does nothing. The four **edge handles** now
+   element's own resolution, so it has no internal render scale to step down — those
+   levels, and the 30-frame moving average that picks between them, describe the WebGL
+   renderer, and a control that scaled a resolution nothing is rendered at would be a
+   switch that does nothing. The paused-frame-at-Full rule is vacuous for the same
+   reason: there is no reduced scale to restore from. The four **edge handles** now
    scale the one axis each governs, as §8.2 asks, with `Shift` giving them the uniform
    corner behaviour; cropping moved onto the **Crop tool** (`C`), which is where §8.6 puts
    it, and the tool now owns a *frame*: a rectangle over the **uncropped** source with eight
