@@ -18,6 +18,7 @@ import {
   type DissolveShape,
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { CaptionOverlay } from './CaptionOverlay.js';
 import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
 import type { TimelineApi } from './use-timeline.js';
@@ -629,6 +630,7 @@ export function PreviewPane({
                 geometry={geometry}
                 editable={editable}
                 dragging={drag.dragging}
+                fps={fps}
                 onPointerDown={(event) => {
                   if (!editable) return;
                   // The drag surface is the layer's own wrapper: the clamp inside
@@ -993,6 +995,7 @@ const PreviewLayer = memo(function PreviewLayer({
   onPointerMove,
   onPointerUp,
   onRotateStart,
+  fps,
   onAnchorStart,
 }: {
   item: TimelineState['items'][string];
@@ -1006,6 +1009,11 @@ const PreviewLayer = memo(function PreviewLayer({
   onRotateStart?: (event: React.PointerEvent) => void;
   /** Starts an anchor drag from the crosshair. */
   onAnchorStart?: (event: React.PointerEvent) => void;
+  /**
+   * The project's frame rate, for the seek threshold: "close enough" is measured in
+   * frames, so half a frame at 60 fps is half the time it is at 30.
+   */
+  fps: number;
   onPointerMove?: (event: React.PointerEvent) => void;
   onPointerUp?: (event: React.PointerEvent) => void;
   opacity: number;
@@ -1044,18 +1052,46 @@ const PreviewLayer = memo(function PreviewLayer({
   useEffect(() => {
     const video = fitRef.current?.querySelector('video');
     if (!video) return;
+    /*
+      Seeks are coalesced rather than issued per event. Assigning `currentTime` starts a
+      seek and assigning it again *aborts* that seek, so a scrub that assigned for every
+      pointer move spent the whole drag abandoning decodes and showing none of them.
+
+      The coalescer keeps one seek in flight and holds only the newest target, so the
+      picture lands where the pointer is with at most one seek of lag, however fast the
+      drag.
+    */
+    const coalescer = createSeekCoalescer({
+      seek: (seconds) => {
+        video.currentTime = seconds;
+      },
+    });
+    // The element's own answer that a seek is over. Without this the coalescer would
+    // believe a seek was forever in flight and never issue another.
+    const onSeeked = () => coalescer.settled();
+    video.addEventListener('seeked', onSeeked);
+
     const sync = () => {
       const us = playheadStore.get();
       const sourceUs = item.sourceInUs + (us - item.startUs) * (item.speed ?? 1);
       const target = sourceUs / 1_000_000;
-      if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.08) {
-        video.currentTime = target;
+      /*
+        The threshold depends on whether the element is running: while playing, the
+        element closes drift on its own and a correction is a visible hitch, so only a
+        real drift is worth one. Paused or scrubbing, the element is the only thing that
+        can show the frame under the playhead, so half a frame already matters.
+      */
+      if (shouldSeek(video.currentTime, target, { playing: !video.paused, fps })) {
+        coalescer.request(target);
       }
     };
     const unsubscribe = playheadStore.subscribe(sync);
     sync();
-    return unsubscribe;
-  }, [item.sourceInUs, item.startUs, item.speed]);
+    return () => {
+      unsubscribe();
+      video.removeEventListener('seeked', onSeeked);
+    };
+  }, [item.sourceInUs, item.startUs, item.speed, fps]);
 
   // Every layer plays its own element: the parent used to call `play()` on the
   // single <video>, and with a stack the overlays would sit frozen on their first

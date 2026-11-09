@@ -42,10 +42,17 @@ This document tracks architectural scope boundaries and honest limitations per `
    original path from storage directly. Proxies can be switched off in Settings for a
    transcode that got a clip wrong.
 
-   What has *not* changed is the transport: each layer still seeks its own `<video>`
-   for every playhead move, so a long scrub is bounded by seek latency rather than by
-   decode cost. The proxy removes the decode half of that; a frame-accurate scrub
-   driven by decoded frames rather than seeks is the remaining half.
+   Seeks are coalesced rather than issued per playhead move: at most one seek is in
+   flight per layer, the newest target replaces the one waiting, and the element's own
+   `seeked` event releases it. A hundred-event scrub that used to assign `currentTime`
+   a hundred times — aborting each decode before it finished — now costs a handful,
+   ending on the frame under the playhead.
+
+   What remains is the transport itself. The preview still *seeks* to show a frame
+   rather than compositing decoded frames, so scrub responsiveness is bounded by how
+   fast the element can seek, not by how fast frames can be decoded. A true scrubbing
+   cache — decoded frames held in memory and drawn to a canvas — is the remaining
+   idea, and it is a different design rather than a tuning pass.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
