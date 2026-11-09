@@ -21,12 +21,16 @@ import { useCallback, useRef, useState } from 'react';
 import {
   angleAbout,
   angleDelta,
+  cornerAt,
+  cornerScaleFactor,
   croppedEdge,
   handleAt,
   movedOffset,
   pixelsToFraction,
   pointerToPictureFraction,
   rotatedBy,
+  scaleAboutCorner,
+  type Corner,
   type CropEdge,
   type CropEdges,
 } from './canvas-drag.js';
@@ -63,12 +67,18 @@ interface State {
   rotation: number;
   anchorX: number;
   anchorY: number;
+  /** Per-axis scale. A corner drag moves both, evenly. */
+  scaleX: number;
+  scaleY: number;
   crop: CropEdges;
 }
 
+/** The gestures that are not one of the picture's eight edges. */
+export type GestureMode = 'move' | 'rotate' | 'anchor' | 'scale';
+
 interface Gesture {
   target: CanvasDragTarget;
-  mode: 'move' | 'rotate' | 'anchor' | CropEdge;
+  mode: GestureMode | CropEdge;
   startX: number;
   startY: number;
   canvas: { width: number; height: number };
@@ -78,6 +88,14 @@ interface Gesture {
   startAngle: number;
   /** For a rotate, the pivot in client coordinates. */
   pivot: { x: number; y: number };
+  /**
+   * For a scale: which corner was grabbed, the corner that stays put (in client
+   * coordinates), and how far apart they were when the drag began — the ratio of the
+   * current distance to that one is the scale factor.
+   */
+  corner: Corner | null;
+  fixedCorner: { x: number; y: number } | null;
+  startDistance: number;
   /** The canvas's top-left in client coordinates, so pointer positions can be
    * converted back into the picture's own space. */
   boxLeft: number;
@@ -106,6 +124,8 @@ export interface CanvasDragCommit {
     rotation?: number;
     anchorX?: number;
     anchorY?: number;
+    scaleX?: number;
+    scaleY?: number;
   };
   /** Present for a crop: only the edge that was dragged. */
   crop?: { edge: CropEdge; value: number };
@@ -117,7 +137,7 @@ export interface CanvasDragApi {
   /** Whether a gesture is in progress, so the outline can stay visible. */
   dragging: boolean;
   /** Which gesture is running, for the cursor and the outline. */
-  mode: 'move' | 'rotate' | 'anchor' | CropEdge | null;
+  mode: GestureMode | CropEdge | null;
   /**
    * @param forcedMode Starts a specific gesture regardless of hit testing — how the
    * rotate handle and the anchor crosshair begin, since they are not edges of the
@@ -127,7 +147,7 @@ export interface CanvasDragApi {
     event: React.PointerEvent,
     target: CanvasDragTarget,
     canvas: HTMLDivElement | null,
-    forcedMode?: 'rotate' | 'anchor',
+    forcedMode?: 'rotate' | 'anchor' | 'scale' | 'scale',
   ) => void;
   move: (event: React.PointerEvent) => void;
   end: (event: React.PointerEvent) => void;
@@ -159,16 +179,26 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
       event: React.PointerEvent,
       target: CanvasDragTarget,
       canvas: HTMLDivElement | null,
-      forcedMode?: 'rotate' | 'anchor',
+      forcedMode?: 'rotate' | 'anchor' | 'scale' | 'scale',
     ) => {
       if (!canvas) return;
       const box = canvas.getBoundingClientRect();
       if (box.width <= 0 || box.height <= 0) return;
       // Which part of the picture the pointer went down on decides the gesture:
       // an edge crops, anywhere else moves.
+      /*
+        Corners are tested before edges, because a corner sits at the end of two edges
+        and scaling is the more specific gesture. Within `reach` of a corner the drag
+        scales; along the rest of an edge it crops, which is what this surface already
+        did and keeps every crop reachable by dragging a little past the corner.
+      */
+      const localPoint = { x: event.clientX - box.left, y: event.clientY - box.top };
+      const corner = cornerAt(localPoint, target.rect, target.rotation);
       const handle = forcedMode
         ? null
-        : handleAt({ x: event.clientX - box.left, y: event.clientY - box.top }, target.rect);
+        : corner
+          ? null
+          : handleAt(localPoint, target.rect);
       /*
         The pivot in client coordinates. `rect` is the picture's drawn box in canvas
         space and the anchor is a fraction of the picture, so the pivot is inside that
@@ -191,9 +221,32 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         x: box.left + target.rect.x + anchorX * target.rect.width,
         y: box.top + target.rect.y + anchorY * target.rect.height,
       };
+      /*
+        Where the fixed corner sits, in client coordinates. Derived from the same drawn
+        rectangle the hit test used, so the corner the user sees is the corner the
+        maths holds still.
+      */
+      const fixedSign = corner
+        ? { x: corner === 'nw' || corner === 'sw' ? 1 : -1, y: corner === 'nw' || corner === 'ne' ? 1 : -1 }
+        : { x: 0, y: 0 };
+      const fixedCorner = corner
+        ? (() => {
+            const centreX = box.left + target.rect.x + target.rect.width / 2;
+            const centreY = box.top + target.rect.y + target.rect.height / 2;
+            const radians = (target.rotation * Math.PI) / 180;
+            const cos = Math.cos(radians);
+            const sin = Math.sin(radians);
+            const localX = (fixedSign.x * target.rect.width) / 2;
+            const localY = (fixedSign.y * target.rect.height) / 2;
+            return {
+              x: centreX + cos * localX - sin * localY,
+              y: centreY + sin * localX + cos * localY,
+            };
+          })()
+        : null;
       gesture.current = {
         target,
-        mode: forcedMode ?? handle ?? 'move',
+        mode: forcedMode ?? (corner ? 'scale' : handle) ?? 'move',
         startX: event.clientX,
         startY: event.clientY,
         canvas: { width: box.width, height: box.height },
@@ -203,6 +256,8 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
           rotation: target.rotation,
           anchorX: target.anchorX,
           anchorY: target.anchorY,
+          scaleX: target.scaleX,
+          scaleY: target.scaleY,
           crop: target.crop,
         },
         to: {
@@ -211,15 +266,22 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
           rotation: target.rotation,
           anchorX: target.anchorX,
           anchorY: target.anchorY,
+          scaleX: target.scaleX,
+          scaleY: target.scaleY,
           crop: target.crop,
         },
         startAngle: angleAbout(pivot, { x: event.clientX, y: event.clientY }),
         pivot,
+        corner,
+        fixedCorner,
+        startDistance: fixedCorner
+          ? Math.hypot(event.clientX - fixedCorner.x, event.clientY - fixedCorner.y)
+          : 0,
         boxLeft: box.left,
         boxTop: box.top,
       };
       setDragging(true);
-      setMode(forcedMode ?? handle ?? 'move');
+      setMode(forcedMode ?? (corner ? 'scale' : handle) ?? 'move');
       setPreviewed({
         itemId: target.itemId,
         x: target.x,
@@ -227,6 +289,8 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         rotation: target.rotation,
         anchorX: target.anchorX,
         anchorY: target.anchorY,
+        scaleX: target.scaleX,
+        scaleY: target.scaleY,
         crop: target.crop,
       });
       // Capture so a fast drag that leaves the element still tracks; without it the
@@ -289,6 +353,43 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         ...current.to,
         rotation: rotatedBy(current.from.rotation, angleDelta(current.startAngle, now)),
       };
+    } else if (current.mode === 'scale') {
+      /*
+        Uniform scale, measured as the ratio of the pointer's distance from the fixed
+        corner to what that distance was at pointer-down. Radial rather than per-axis,
+        so the gesture feels the same however the picture is rotated — the user is
+        pulling one corner away from the one that stays put.
+
+        The position compensation is not optional. Scaling happens about the anchor
+        (SPEC 10 §4), so the arm from the anchor to the content grows with the scale;
+        without the compensating move the picture would expand away from its own centre
+        and the corner the user is *not* holding would slide, which is the single thing
+        a corner handle promises it will not do.
+      */
+      const factor = cornerScaleFactor(
+        { x: event.clientX, y: event.clientY },
+        current.fixedCorner ?? { x: current.startX, y: current.startY },
+        current.startDistance,
+      );
+      const toScale = {
+        x: current.from.scaleX * factor,
+        y: current.from.scaleY * factor,
+      };
+      const position = scaleAboutCorner(
+        {
+          corner: current.corner ?? 'se',
+          fromScale: { x: current.from.scaleX, y: current.from.scaleY },
+          toScale,
+          anchorX: current.from.anchorX,
+          anchorY: current.from.anchorY,
+          width: current.target.size.width,
+          height: current.target.size.height,
+          rotation: current.from.rotation,
+        },
+        { x: current.from.x, y: current.from.y },
+        current.canvas,
+      );
+      current.to = { ...current.to, scaleX: toScale.x, scaleY: toScale.y, ...position };
     } else {
       const edge = current.mode;
       // A crop edge moves along one axis only: the horizontal edges are measured
@@ -343,6 +444,29 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         commit({
           itemId: current.target.itemId,
           transform: { anchorX: current.to.anchorX, anchorY: current.to.anchorY },
+        });
+        return;
+      }
+      if (current.mode === 'scale') {
+        if (
+          current.to.scaleX === current.from.scaleX &&
+          current.to.scaleY === current.from.scaleY
+        ) {
+          return;
+        }
+        /*
+          Both axes and the position go in one commit. A scale that wrote the axes but
+          not the compensation would move the picture's centre, and a half-written pair
+          would leave the corner the user was holding drifting from under the pointer.
+        */
+        commit({
+          itemId: current.target.itemId,
+          transform: {
+            scaleX: current.to.scaleX,
+            scaleY: current.to.scaleY,
+            x: current.to.x,
+            y: current.to.y,
+          },
         });
         return;
       }

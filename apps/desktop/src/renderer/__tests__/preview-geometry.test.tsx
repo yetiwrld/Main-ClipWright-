@@ -78,6 +78,32 @@ describe('PreviewPane geometry', () => {
     expect(transformOf('preview-item-fit')).toContain('rotate(30deg)');
   });
 
+  it('rotates before it scales, so scale follows the picture axes', () => {
+    /*
+      SPEC 10 §4's matrix is `translate · rotate · scale`, rightmost-applied-first: the
+      picture is scaled in its own frame and then turned. CSS lists are applied
+      right-to-left, so that is `rotate(...) scale(...)` — writing
+      `scale(...) rotate(...)` instead scales along the *screen* axes.
+
+      The two only agree when the scale is uniform, because uniform scale commutes with
+      rotation. So no test that checks one function at a time can tell them apart, and
+      this one checks the order: a 90° clip stretched 2× across previewed as a wide bar
+      while the exporter drew a tall one, because ffmpeg applies `scale` before
+      `rotate`.
+    */
+    render(
+      <PreviewPane
+        state={makeState({ transform: { scaleX: 2, scaleY: 1, rotation: 90 } })}
+        fps={30}
+      />,
+    );
+    const transform = transformOf('preview-item-fit');
+    expect(transform.indexOf('rotate(90deg)')).toBeGreaterThanOrEqual(0);
+    expect(transform.indexOf('scale(2, 1)')).toBeGreaterThan(
+      transform.indexOf('rotate(90deg)'),
+    );
+  });
+
   it('mirrors a flipped item', () => {
     // A flip is a negative scale on its axis; drawing it as a separate CSS
     // `scaleX(-1)` would be a second transform that the next style write drops.

@@ -28,6 +28,9 @@ interface Overrides {
   blendMode?: string;
   keyframes?: Record<string, unknown>;
   trackRole?: 'main' | 'overlay';
+  /** The stored transform, so a fixture can start from a scaled or turned clip. */
+  transform?: Record<string, number | boolean>;
+  crop?: Record<string, number>;
 }
 
 /**
@@ -51,8 +54,8 @@ function makeState(layers: Overrides[] = [{}]): TimelineState {
       startUs: layer.startUs ?? 0,
       durationUs: layer.durationUs ?? 5_000_000,
       sourceInUs: 0,
-      transform: {},
-      crop: {},
+      transform: layer.transform ?? {},
+      crop: layer.crop ?? {},
       opacity: layer.opacity,
       blendMode: layer.blendMode,
       keyframes: layer.keyframes,
@@ -933,5 +936,214 @@ describe('the anchor crosshair (SPEC 10 §8.2)', () => {
     fireEvent(crosshair, pointer('pointerdown', 200, 300));
     fireEvent(layer, pointer('pointermove', 100, 150));
     expect(layer.style.transform).not.toMatch(/translate\((?!0%, 0%)/);
+  });
+});
+
+describe('the corner grips (SPEC 10 §8.2)', () => {
+  function fakeTimeline(selection: string[] = ['a']) {
+    return {
+      fps: 30,
+      selection,
+      setItemProperties: vi.fn(() => true),
+      addKeyframe: vi.fn(() => true),
+      updateKeyframe: vi.fn(() => true),
+    } as unknown as import('../features/editor/use-timeline.js').TimelineApi;
+  }
+
+  function stubLayout() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 400, height: 400, right: 400, bottom: 400,
+      toJSON: () => ({}),
+    } as DOMRect);
+    for (const [prop, value] of [['offsetWidth', 400], ['offsetHeight', 400]] as const) {
+      Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get: () => value });
+    }
+  }
+
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    new MouseEvent(type, { clientX, clientY, bubbles: true });
+
+  it('compensates from the clip’s anchor, so a corner drag pivots where the user set', () => {
+    /*
+      Scaling happens about the anchor, so the compensating move has to be measured
+      from it too. A centre-only shortcut is invisible with the default anchor — every
+      other test here uses one — and drifts the picture on every scale once the anchor
+      is off-centre.
+
+      Same gesture as the centred case above; the committed position must differ.
+    */
+    const dragAt = (transform: Record<string, number>) => {
+      stubLayout();
+      const timeline = fakeTimeline();
+      render(
+        <PreviewPane
+          state={makeState([{ id: 'a', transform }])}
+          fps={30}
+          timeline={timeline}
+        />,
+      );
+      const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+      fireEvent(layer, pointer('pointerdown', 400, 400));
+      fireEvent(layer, pointer('pointermove', 600, 600));
+      fireEvent(layer, pointer('pointerup', 600, 600));
+      const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls[0]![1] as { transform: Record<string, number> };
+      return patch.transform;
+    };
+
+    const centred = dragAt({});
+    cleanup();
+    const offCentre = dragAt({ anchorX: 0.25, anchorY: 0.25 });
+
+    expect(offCentre.scaleX).toBeCloseTo(centred.scaleX!, 6);
+    expect(offCentre.x).not.toBeCloseTo(centred.x!, 4);
+  });
+
+  it('turns the compensation by the clip’s angle', () => {
+    /*
+      The compensating move is the anchor-to-content arm *rotated into screen axes*, so
+      a turned clip has to move along a different diagonal than an upright one. Passing
+      the rotation through as zero is invisible while the clip is upright — which is
+      every other test here.
+    */
+    const dragAt = (transform: Record<string, number>) => {
+      stubLayout();
+      const timeline = fakeTimeline();
+      render(
+        <PreviewPane
+          state={makeState([{ id: 'a', transform }])}
+          fps={30}
+          timeline={timeline}
+        />,
+      );
+      const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+      fireEvent(layer, pointer('pointerdown', 400, 400));
+      fireEvent(layer, pointer('pointermove', 600, 600));
+      fireEvent(layer, pointer('pointerup', 600, 600));
+      const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls[0]![1] as { transform: Record<string, number> };
+      return patch.transform;
+    };
+
+    const upright = dragAt({});
+    cleanup();
+    const turned = dragAt({ rotation: 90 });
+
+    // Same scale either way — the factor is a distance and angles do not change it.
+    expect(turned.scaleX).toBeCloseTo(upright.scaleX!, 6);
+    // But the shift is along a different diagonal: a quarter turn swaps its components.
+    expect(turned.x!).toBeCloseTo(upright.y!, 4);
+    expect(turned.y!).toBeCloseTo(upright.x!, 4);
+  });
+
+  it('draws four grips, one per corner', () => {
+    stubLayout();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline()} />);
+    for (const corner of ['nw', 'ne', 'se', 'sw']) {
+      expect(screen.getByTestId(`preview-corner-${corner}`)).toBeTruthy();
+    }
+  });
+
+  it('draws them only on the selected clip', () => {
+    stubLayout();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={fakeTimeline(['x'])} />);
+    expect(screen.queryByTestId('preview-corner-nw')).toBeNull();
+  });
+
+  it('scales both axes and the position in one commit', () => {
+    /*
+      A corner drag is one gesture over three fields. Writing the scale without the
+      compensating position would slide the corner the user is holding still; writing
+      only one axis would shear the picture, which a uniform handle must never do.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    // Grab the south-east corner at (400,400) and pull it to (600,600): the distance
+    // from the fixed north-west corner goes 566 → 849, a factor of 1.5.
+    fireEvent(layer, pointer('pointerdown', 400, 400));
+    fireEvent(layer, pointer('pointermove', 600, 600));
+    fireEvent(layer, pointer('pointerup', 600, 600));
+
+    expect(timeline.setItemProperties).toHaveBeenCalledTimes(1);
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    expect(Object.keys(patch.transform).sort()).toEqual(['scale', 'scaleX', 'scaleY', 'x', 'y']);
+    expect(patch.transform.scaleX).toBeCloseTo(1.5, 2);
+    expect(patch.transform.scaleY).toBeCloseTo(1.5, 2);
+    /*
+      And the position must actually have been compensated, not merely included. A
+      mutant that dropped the compensation still committed the same two keys, so
+      asserting the key list alone let it through.
+
+      Here the dragged corner is south-east, so the corner that stays put is
+      north-west, and growing about it pushes the centre TOWARD the dragged corner:
+      down and right, positive. A 400x400 picture at 1.5 is 600 across, so the centre
+      travels half its own width from the fixed corner, 100 px - 0.25 of the 400 px
+      canvas.
+    */
+    expect(Number.isFinite(patch.transform.x!)).toBe(true);
+    expect(patch.transform.x!).toBeCloseTo(0.25, 3);
+    expect(patch.transform.y!).toBeCloseTo(0.25, 3);
+  });
+
+  it('scales evenly even when the clip started non-uniform', () => {
+    /*
+      A corner handle is a *uniform* scale, so a clip at 2×1 becomes 3×1.5 rather than
+      snapping to square. Multiplying the existing axes is the only reading that does
+      not silently discard the shape the user set in the inspector.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(
+      <PreviewPane
+        state={makeState([{ id: 'a', transform: { scaleX: 2, scaleY: 1 } }])}
+        fps={30}
+        timeline={timeline}
+      />,
+    );
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 400, 400));
+    fireEvent(layer, pointer('pointermove', 600, 600));
+    fireEvent(layer, pointer('pointerup', 600, 600));
+
+    const patch = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![1] as { transform: Record<string, number> };
+    expect(patch.transform.scaleX! / patch.transform.scaleY!).toBeCloseTo(2, 4);
+  });
+
+  it('writes nothing when the corner is grabbed and released in place', () => {
+    // A click on a corner is not an edit; committing it would cost an undo step.
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 400, 400));
+    fireEvent(layer, pointer('pointerup', 400, 400));
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+  });
+
+  it('still crops when the pointer goes down along an edge', () => {
+    /*
+      The behaviour this slice promised not to disturb. A point midway along the right
+      edge is far from both corners, so it stays a crop.
+    */
+    stubLayout();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+
+    fireEvent(layer, pointer('pointerdown', 400, 200));
+    fireEvent(layer, pointer('pointermove', 300, 200));
+    fireEvent(layer, pointer('pointerup', 300, 200));
+
+    // A crop writes the edge as a *key of the crop object* —  —
+    // because the command patches the document field directly.
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
+      crop: { right: expect.any(Number) },
+    });
   });
 });

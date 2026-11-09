@@ -288,3 +288,156 @@ export function pointerToPictureFraction(
     y: Math.min(1, Math.max(0, fractionY)),
   };
 }
+
+/** The four corners, named for the direction they sit in from the picture's centre. */
+export type Corner = 'nw' | 'ne' | 'se' | 'sw';
+
+export const CORNERS: readonly Corner[] = ['nw', 'ne', 'se', 'sw'];
+
+/** The corner diagonally across from one, which is the fixed point of a scale. */
+export function oppositeCorner(corner: Corner): Corner {
+  return ({ nw: 'se', ne: 'sw', se: 'nw', sw: 'ne' } as const)[corner];
+}
+
+/** A corner's offset from the picture's centre, as a sign pair in half-extents. */
+function cornerSign(corner: Corner): { x: number; y: number } {
+  return {
+    x: corner === 'nw' || corner === 'sw' ? -1 : 1,
+    y: corner === 'nw' || corner === 'ne' ? -1 : 1,
+  };
+}
+
+/**
+ * The scale a corner drag has reached, given how far the pointer has moved.
+ *
+ * A uniform scale about the opposite corner is determined by the *distance* from that
+ * corner: on pointer-down the grabbed corner sits at some distance from the fixed one,
+ * and the ratio of the current distance to that original distance is the scale factor.
+ * Using distance rather than a per-axis displacement is what makes the gesture feel
+ * the same however the picture is rotated — the user is pulling a corner away from the
+ * one that stays put, and that is a radial gesture.
+ *
+ * Returns the factor to multiply the starting scale by, so the caller applies it to
+ * whatever the axes already were; a non-uniform clip therefore scales evenly rather
+ * than snapping to uniform.
+ */
+export function cornerScaleFactor(
+  pointer: { x: number; y: number },
+  fixed: { x: number; y: number },
+  startDistance: number,
+): number {
+  if (!Number.isFinite(startDistance) || startDistance <= 0) return 1;
+  const distance = Math.hypot(pointer.x - fixed.x, pointer.y - fixed.y);
+  if (!Number.isFinite(distance)) return 1;
+  return distance / startDistance;
+}
+
+/** Where a picture point ends up on screen, given the transform it is drawn with. */
+interface Placement {
+  /** Offset of the picture's *unscaled* centre from the canvas centre, in pixels. */
+  x: number;
+  y: number;
+  rotation: number;
+  /** Picture units per pixel at scale 1 — the fit's own scaling. */
+  unitPerPixel: number;
+}
+
+/**
+ * The position change that keeps the corner opposite the dragged one still.
+ *
+ * Scaling happens about the **anchor**, so the arm from the anchor to the picture's
+ * content grows with the scale (SPEC 10 §4). Holding a screen point fixed therefore
+ * needs both a scale and a compensating move, and the move is not "toward the centre"
+ * — it is measured **from the anchor**, because that is the point everything is
+ * scaled about:
+ *
+ *     position' = position + R · (s − s') · (u − anchorOffset)
+ *
+ * where `u` is the opposite corner's offset from the picture's centre in picture units
+ * and `anchorOffset` is the anchor's. With a centred anchor the anchor term vanishes
+ * and this reduces to the familiar `R · (s − s') · u`; with an off-centre anchor a
+ * shortcut that ignored it would drift the picture a little on every scale, which is
+ * the kind of error that only shows up after several drags.
+ */
+export function scaleAboutCorner(
+  options: {
+    /** The corner being dragged, and therefore the one opposite it that stays put. */
+    corner: Corner;
+    /** Scale before and after, as the per-axis pair the model stores. */
+    fromScale: { x: number; y: number };
+    toScale: { x: number; y: number };
+    /** The pivot, 0–1 of the picture. */
+    anchorX: number;
+    anchorY: number;
+    /** The picture's size in picture units, before any scale. */
+    width: number;
+    height: number;
+    rotation: number;
+  },
+  /** The position the picture started at, in fractions of the canvas. */
+  position: { x: number; y: number },
+  /** The canvas size in pixels, so the position fractions can be converted. */
+  canvas: { width: number; height: number },
+): { x: number; y: number } {
+  const sign = cornerSign(oppositeCorner(options.corner));
+  const halfWidth = options.width / 2;
+  const halfHeight = options.height / 2;
+  // The opposite corner's offset from the picture's centre.
+  const cornerX = sign.x * halfWidth;
+  const cornerY = sign.y * halfHeight;
+  // The anchor's offset from the centre, which is what the scale grows about.
+  const anchorX = (options.anchorX - 0.5) * options.width;
+  const anchorY = (options.anchorY - 0.5) * options.height;
+
+  // `fromScale`/`toScale` are uniform here (this handle only scales evenly), so either
+  // axis describes the change; averaging keeps a non-uniform clip's factor honest
+  // instead of silently reading one axis and ignoring the other.
+  const deltaScale =
+    (options.fromScale.x + options.fromScale.y) / 2 - (options.toScale.x + options.toScale.y) / 2;
+
+  const radians = (options.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const localX = deltaScale * (cornerX - anchorX);
+  const localY = deltaScale * (cornerY - anchorY);
+
+  // Rotate into screen axes, then express the shift as a canvas fraction.
+  const screenX = cos * localX - sin * localY;
+  const screenY = sin * localX + cos * localY;
+  return {
+    x: position.x + (canvas.width > 0 ? screenX / canvas.width : 0),
+    y: position.y + (canvas.height > 0 ? screenY / canvas.height : 0),
+  };
+}
+
+/**
+ * The corner a pointer is over, or `null`.
+ *
+ * Corners take priority over edges in the overlay's hit test: a corner sits *at* the
+ * end of two edges, and scaling is the more specific gesture, so it wins. The window
+ * is square and slightly larger than the drawn square, because a rotated picture's
+ * corners are the hardest target on the canvas.
+ */
+export function cornerAt(
+  point: { x: number; y: number },
+  rect: { x: number; y: number; width: number; height: number },
+  rotation: number,
+  reach = HANDLE_SIZE,
+): Corner | null {
+  const radians = (rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const centreX = rect.x + rect.width / 2;
+  const centreY = rect.y + rect.height / 2;
+  let best: { corner: Corner; distance: number } | null = null;
+  for (const corner of CORNERS) {
+    const sign = cornerSign(corner);
+    const localX = (sign.x * rect.width) / 2;
+    const localY = (sign.y * rect.height) / 2;
+    const cornerX = centreX + cos * localX - sin * localY;
+    const cornerY = centreY + sin * localX + cos * localY;
+    const distance = Math.hypot(point.x - cornerX, point.y - cornerY);
+    if (distance <= reach && (!best || distance < best.distance)) best = { corner, distance };
+  }
+  return best ? best.corner : null;
+}

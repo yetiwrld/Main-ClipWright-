@@ -177,3 +177,73 @@ describe('the identity flag accounts for the anchor', () => {
     expect(geometryWith({}).identity).toBe(true);
   });
 });
+
+describe('the anchor arm on a non-square canvas', () => {
+  /*
+    `source.width` is a fraction of the canvas *width* and `source.height` of its
+    *height*, so the two arms are different units. Rotating mixes the axes, and a
+    rotation can only be reproduced by a `rotate()` — which works in pixels — if the
+    vector being turned is in one consistent unit.
+
+    Every anchor case before this one used a square canvas or a centred anchor, and
+    both hide the error completely: a square canvas makes the units coincide, and a
+    centred anchor makes the arm zero. It took a portrait canvas with an off-centre
+    anchor to show that the picture landed 270 px from where the pivot said it would.
+  */
+  const canvas = { width: 1080, height: 1920 };
+
+  it('converts the vertical arm into width fractions before rotating it', () => {
+    /*
+      A whole-frame source, so `source.height` is 1. An anchor a quarter down the
+      picture, turned 90° clockwise.
+
+      The arm from the anchor to the picture's centre points *down* the frame, 0.25 of
+      the height — 480 px. A quarter turn clockwise sends "down" to "left", so the
+      centre must sit 480 px to the LEFT of the pivot: −480 px, which is −0.4444 of the
+      1080-wide canvas.
+
+      The old arithmetic added the height-fraction straight into a width-fraction and
+      produced −0.25 of the width — −270 px. The visible symptom was a picture that
+      did not sit under its own crosshair.
+    */
+    const geometry = itemGeometry({
+      transform: { anchorX: 0.5, anchorY: 0.25, rotation: 90 },
+      canvas,
+    });
+    expect(geometry.offsetX * canvas.width).toBeCloseTo(-480, 6);
+    expect(geometry.offsetY * canvas.height).toBeCloseTo(0, 6);
+  });
+
+  it('is unchanged on a square canvas, which is what hid the bug', () => {
+    // The units only coincide when the canvas is square, so this pins the case that
+    // every earlier test exercised and confirms the conversion is a no-op there.
+    const square = { width: 1000, height: 1000 };
+    const geometry = itemGeometry({
+      transform: { anchorX: 0.5, anchorY: 0.25, rotation: 90 },
+      canvas: square,
+    });
+    expect(geometry.offsetX * square.width).toBeCloseTo(-250, 6);
+    expect(geometry.offsetY * square.height).toBeCloseTo(0, 6);
+  });
+
+  it('leaves a centred anchor alone at any angle', () => {
+    // The arm is zero, so no conversion can change it — the promise that old projects
+    // render byte-identically has to survive the unit fix.
+    for (const rotation of [0, 30, 90, 180, -45]) {
+      const geometry = itemGeometry({
+        transform: { anchorX: 0.5, anchorY: 0.5, rotation },
+        canvas,
+      });
+      expect(geometry.offsetX).toBe(0);
+      expect(geometry.offsetY).toBe(0);
+    }
+  });
+
+  it('falls back to a square canvas when none is given', () => {
+    // Callers that predate the field — and tests that do not care — must not start
+    // producing NaN; a NaN offset blanks the layer without throwing.
+    const geometry = itemGeometry({ transform: { anchorX: 0.5, anchorY: 0.25, rotation: 90 } });
+    expect(Number.isFinite(geometry.offsetX)).toBe(true);
+    expect(Number.isFinite(geometry.offsetY)).toBe(true);
+  });
+});

@@ -60,6 +60,12 @@ export interface ItemGeometryInput {
   keyframes?: Record<string, readonly { timeUs: number; value: unknown; interpolation?: string }[]> | undefined;
   /** The instant to evaluate at. Absent means "use the static values". */
   timeUs?: number | undefined;
+  /**
+   * The canvas size in pixels, so the anchor's arm can be rotated in one consistent
+   * unit. Absent means a square canvas, which is the only shape where the two arms'
+   * natural units coincide.
+   */
+  canvas?: { width: number; height: number } | undefined;
 }
 
 /** The source rectangle that survives the crop, as fractions of the source. */
@@ -192,13 +198,44 @@ export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
     which is the only reading that makes the crosshair land on the picture the user
     is looking at.
   */
+  /*
+    Both arms are converted into **width** fractions before they are rotated.
+
+    `source.width` is a fraction of the canvas *width* and `source.height` a fraction
+    of its *height*, so `armY` is not the same unit as `armX`. Rotating mixes the two
+    axes, and a rotation can only be drawn by a `rotate()` — which works in pixels —
+    if the vector being turned is in one consistent unit. Adding a height-fraction to
+    a width-fraction is the same arithmetic only on a square canvas.
+
+    The error was not small. On the default 1080×1920 canvas, an anchor a quarter down
+    the frame and a 90° rotation put the picture 270 px left of where the pivot said it
+    should be, instead of 480 px — and the preview drew the crosshair from the pivot,
+    so the two disagreed by three quarters of a thousand pixels. A centred anchor
+    cancels the arm entirely, which is why nothing caught it until an off-centre one
+    was rotated.
+  */
+  /*
+    Width per height. A HEIGHT-fraction becomes a WIDTH-fraction by multiplying by
+    height/width — that is, *dividing* by this — because the same pixel distance is a
+    larger share of the shorter side.
+  */
+  const canvasAspect = input.canvas ? input.canvas.width / input.canvas.height : 1;
+  const aspectIsUsable = Number.isFinite(canvasAspect) && canvasAspect > 0;
   const armX = (0.5 - anchorX) * source.width * scale.x;
-  const armY = (0.5 - anchorY) * source.height * scale.y;
+  /*
+    `armY` is a fraction of the canvas height. Multiplying by width/height turns it
+    into a fraction of the canvas width, which is `armX`'s unit. Guarded so a
+    degenerate canvas (height 0) degrades to the old behaviour instead of yielding
+    NaN, since a NaN offset blanks the layer without throwing.
+  */
+  const armY =
+    (0.5 - anchorY) * source.height * scale.y * (aspectIsUsable ? 1 / canvasAspect : 1);
   const radians = (rotation * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   const offsetX = positionX + (cos * armX - sin * armY);
-  const offsetY = positionY + (sin * armX + cos * armY);
+  // Back into height fractions, because `offsetY` is a fraction of the canvas height.
+  const offsetY = positionY + (sin * armX + cos * armY) * (aspectIsUsable ? canvasAspect : 1);
   const flipH = input.transform?.flipH ?? false;
   const flipV = input.transform?.flipV ?? false;
 

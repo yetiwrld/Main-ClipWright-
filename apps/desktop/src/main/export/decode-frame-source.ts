@@ -264,7 +264,18 @@ export function createDecodeFrameSource(options: DecodeFrameSourceOptions): Fram
         keeps one definition of it: the preview calls the same function, so a clip that
         rotates about its corner turns about the same point in the file.
       */
-      const resolved = itemGeometry({ ...staticGeometry, keyframes: keys, timeUs } as never);
+      /*
+        The canvas size is passed for the same reason the preview passes it: the
+        anchor's two arms are fractions of different sides, so rotating them only means
+        anything once they share a unit. Reading it from the plan rather than assuming
+        a square keeps the exported picture under the same pivot the editor shows.
+      */
+      const resolved = itemGeometry({
+        ...staticGeometry,
+        keyframes: keys,
+        timeUs,
+        canvas: { width: plan.width, height: plan.height },
+      } as never);
       return {
         crop: {
           left: read('crop.left', staticGeometry.crop?.left ?? 0),

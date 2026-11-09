@@ -310,6 +310,32 @@ export function PreviewPane({
           );
           return;
         }
+        if (edit.scaleX !== undefined && edit.scaleY !== undefined) {
+          /*
+            A corner drag writes the scale *and* the compensating position as one edit.
+            The position cannot be dropped: scaling happens about the anchor, so without
+            the move the corner the user held still would slide out from under the
+            pointer. And the axes are always equal, because this is a uniform handle —
+            the inspector's per-axis fields are how a non-uniform clip is made.
+          */
+          const x = edit.x ?? item.transform.x ?? 0;
+          const y = edit.y ?? item.transform.y ?? 0;
+          commitKeyed(
+            writer,
+            item,
+            [
+              { path: 'transform.scaleX', value: edit.scaleX },
+              { path: 'transform.scaleY', value: edit.scaleY },
+              { path: 'transform.x', value: x },
+              { path: 'transform.y', value: y },
+            ],
+            () =>
+              timeline.setItemProperties([change.itemId], {
+                transform: { scaleX: edit.scaleX, scaleY: edit.scaleY, x, y, scale: 1 },
+              }),
+          );
+          return;
+        }
         if (edit.x === undefined || edit.y === undefined) return;
         commitKeyed(
           writer,
@@ -583,11 +609,17 @@ export function PreviewPane({
                 only one would draw the picture in one place while its outline sat in
                 another.
               */
+              /*
+                The canvas size goes in so the anchor's arm is rotated in one unit: the
+                two arms are fractions of different sides, and a non-square canvas made
+                them disagree by the aspect ratio.
+              */
               const geometry = itemGeometry({
                 ...item,
                 ...(live ? { transform: { ...item.transform, x: live.x, y: live.y } } : {}),
                 ...(live ? { crop: live.crop } : {}),
                 timeUs: playheadUs,
+                canvas: { width: canvas.width, height: canvas.height },
               });
               const editable = Boolean(timeline) && selectedId === layer.id;
               return (
@@ -607,8 +639,8 @@ export function PreviewPane({
                     event,
                     {
                       itemId: layer.id,
-                      x: live?.x ?? item.transform.x,
-                      y: live?.y ?? item.transform.y,
+                      x: live?.x ?? item.transform.x ?? 0,
+                      y: live?.y ?? item.transform.y ?? 0,
                       rotation: live?.rotation ?? item.transform.rotation ?? 0,
                       anchorX: live?.anchorX ?? item.transform.anchorX ?? 0.5,
                       anchorY: live?.anchorY ?? item.transform.anchorY ?? 0.5,
@@ -635,8 +667,8 @@ export function PreviewPane({
                     event,
                     {
                       itemId: layer.id,
-                      x: live?.x ?? item.transform.x,
-                      y: live?.y ?? item.transform.y,
+                      x: live?.x ?? item.transform.x ?? 0,
+                      y: live?.y ?? item.transform.y ?? 0,
                       rotation: live?.rotation ?? item.transform.rotation,
                       anchorX: live?.anchorX ?? item.transform.anchorX,
                       anchorY: live?.anchorY ?? item.transform.anchorY,
@@ -668,8 +700,8 @@ export function PreviewPane({
                     event,
                     {
                       itemId: layer.id,
-                      x: live?.x ?? item.transform.x,
-                      y: live?.y ?? item.transform.y,
+                      x: live?.x ?? item.transform.x ?? 0,
+                      y: live?.y ?? item.transform.y ?? 0,
                       rotation: live?.rotation ?? item.transform.rotation ?? 0,
                       anchorX: live?.anchorX ?? item.transform.anchorX ?? 0.5,
                       anchorY: live?.anchorY ?? item.transform.anchorY ?? 0.5,
@@ -1086,11 +1118,25 @@ const PreviewLayer = memo(function PreviewLayer({
           position: 'absolute',
           top: '50%',
           left: '50%',
-          transform: `translate(-50%, -50%) scale(${
-            geometry.scaleX * (geometry.flipH ? -1 : 1) * transitionScale
-          }, ${geometry.scaleY * (geometry.flipV ? -1 : 1) * transitionScale}) rotate(${
+          /*
+            Order matters, and the CSS reads right-to-left: this says *rotate, then
+            scale*, so the scale multiplies the picture's own axes. Writing
+            `scale(...) rotate(...)` instead scales along the SCREEN axes, which is a
+            different picture whenever both are non-zero and the scale is non-uniform.
+
+            SPEC 10 §4 defines the matrix as `translate · rotate · scale`,
+            rightmost-applied-first, so the point is scaled in the picture's frame and
+            then rotated — and that is what the exporter does too, because ffmpeg
+            applies `scale` and only then `rotate`. Uniform scale commutes with
+            rotation, so the two orders only diverged once the inspector started
+            offering Scale X and Scale Y separately; from then on a rotated clip with
+            unlike axes previewed as the exported picture's opposite aspect.
+          */
+          transform: `translate(-50%, -50%) rotate(${
             geometry.rotation
-          }deg)`,
+          }deg) scale(${
+            geometry.scaleX * (geometry.flipH ? -1 : 1) * transitionScale
+          }, ${geometry.scaleY * (geometry.flipV ? -1 : 1) * transitionScale})`,
           maxWidth: '100%',
           maxHeight: '100%',
           aspectRatio: `${geometry.source.width * sourceAspect} / ${geometry.source.height}`,
@@ -1213,6 +1259,36 @@ const PreviewLayer = memo(function PreviewLayer({
                 }}
               />
             </div>
+            {/*
+              Corner grips (SPEC 10 §8.2). These *scale* uniformly about the opposite
+              corner; the edge grips below still crop. The two gestures share the
+              picture's edges, so a corner is drawn larger than an edge grip and takes
+              the hit test first — grabbing a corner must scale, and a user who meant to
+              crop can drag a little further along the edge.
+
+              Positioned inside the picture's own box, which is already rotated, so the
+              grips sit on the corners of the *oriented* bounding box the spec asks for
+              without any trigonometry here.
+            */}
+            {(['nw', 'ne', 'se', 'sw'] as const).map((corner) => (
+              <div
+                key={corner}
+                data-testid={`preview-corner-${corner}`}
+                style={{
+                  position: 'absolute',
+                  ...(corner === 'nw' ? { left: 0, top: 0 } : {}),
+                  ...(corner === 'ne' ? { right: 0, top: 0 } : {}),
+                  ...(corner === 'se' ? { right: 0, bottom: 0 } : {}),
+                  ...(corner === 'sw' ? { left: 0, bottom: 0 } : {}),
+                  width: HANDLE_SIZE,
+                  height: HANDLE_SIZE,
+                  transform: 'translate(-50%, -50%)',
+                  borderRadius: 1,
+                  background: 'var(--surface-card)',
+                  border: '1px solid var(--brand)',
+                }}
+              />
+            ))}
             {(['left', 'right', 'top', 'bottom'] as const).map((edge) => (
               <div
                 key={edge}

@@ -16,8 +16,12 @@ import {
   handleAt,
   movedOffset,
   pixelsToFraction,
+  cornerAt,
+  cornerScaleFactor,
+  oppositeCorner,
   pointerToPictureFraction,
   rotatedBy,
+  scaleAboutCorner,
 } from '../features/editor/canvas-drag.js';
 
 const canvas = { width: 1080, height: 1920 };
@@ -374,5 +378,169 @@ describe('aiming the anchor crosshair at a transformed picture', () => {
     const result = pointerToPictureFraction({ x: 10, y: 10 }, collapsed);
     expect(Number.isFinite(result.x)).toBe(true);
     expect(Number.isFinite(result.y)).toBe(true);
+  });
+});
+
+describe('corner grips', () => {
+  it('names the corner across from the one being dragged', () => {
+    // The corner that stays put, which is the whole contract of the gesture.
+    expect(oppositeCorner('nw')).toBe('se');
+    expect(oppositeCorner('ne')).toBe('sw');
+    expect(oppositeCorner('se')).toBe('nw');
+    expect(oppositeCorner('sw')).toBe('ne');
+  });
+
+  it('finds a corner at each corner of an unrotated picture', () => {
+    const rect = { x: 100, y: 100, width: 200, height: 100 };
+    expect(cornerAt({ x: 100, y: 100 }, rect, 0)).toBe('nw');
+    expect(cornerAt({ x: 300, y: 100 }, rect, 0)).toBe('ne');
+    expect(cornerAt({ x: 300, y: 200 }, rect, 0)).toBe('se');
+    expect(cornerAt({ x: 100, y: 200 }, rect, 0)).toBe('sw');
+  });
+
+  it('finds a corner on the rotated box, not the axis-aligned one', () => {
+    /*
+      A 200×100 picture turned 90° has its corners at the *swapped* extents. Reading
+      the unrotated box would put the grips where the picture is not — the same mistake
+      the anchor crosshair made before it was aimed through the transform.
+    */
+    const rect = { x: 100, y: 100, width: 200, height: 100 };
+    const centre = { x: 200, y: 150 };
+    /*
+      Rotated 90° clockwise, the picture is 100 wide and 200 tall about the same
+      centre — and the names travel with the picture, not with the screen. The corner
+      that *was* north-west now sits where north-east used to be, so the point at the
+      top-left of the rotated box is `sw`. Getting this backwards was my first
+      expectation here; the arithmetic was right and the label was not.
+    */
+    expect(cornerAt({ x: centre.x - 50, y: centre.y - 100 }, rect, 90)).toBe('sw');
+    expect(cornerAt({ x: centre.x + 50, y: centre.y - 100 }, rect, 90)).toBe('nw');
+    // And the unrotated corner is no longer a corner at all.
+    expect(cornerAt({ x: 100, y: 100 }, rect, 90)).toBeNull();
+  });
+
+  it('ignores a pointer that is nowhere near a corner', () => {
+    const rect = { x: 0, y: 0, width: 200, height: 100 };
+    expect(cornerAt({ x: 100, y: 50 }, rect, 0)).toBeNull();
+  });
+
+  it('scales by the ratio of the distance to the fixed corner', () => {
+    // Pulling a corner to twice its original distance from the fixed one doubles the
+    // scale; the gesture is radial, so only the distance matters.
+    const fixed = { x: 0, y: 0 };
+    expect(cornerScaleFactor({ x: 200, y: 0 }, fixed, 100)).toBeCloseTo(2, 10);
+    expect(cornerScaleFactor({ x: 0, y: 50 }, fixed, 100)).toBeCloseTo(0.5, 10);
+    // A diagonal pull is still measured by distance, not by one axis.
+    expect(cornerScaleFactor({ x: 300, y: 400 }, fixed, 250)).toBeCloseTo(2, 10);
+  });
+
+  it('refuses to invent a scale from a degenerate start', () => {
+    // A zero start distance would divide by zero, and a NaN scale blanks the layer
+    // silently rather than throwing. Returning 1 means "no change".
+    const fixed = { x: 0, y: 0 };
+    expect(cornerScaleFactor({ x: 100, y: 0 }, fixed, 0)).toBe(1);
+    expect(cornerScaleFactor({ x: 100, y: 0 }, fixed, Number.NaN)).toBe(1);
+  });
+});
+
+describe('scaling about the opposite corner', () => {
+  const base = {
+    corner: 'nw' as const,
+    anchorX: 0.5,
+    anchorY: 0.5,
+    width: 200,
+    height: 100,
+    rotation: 0,
+  };
+  const canvas = { width: 1000, height: 800 };
+
+  it('moves the position so the fixed corner does not move', () => {
+    /*
+      Dragging the north-west corner outward doubles the scale, and the south-east
+      corner has to stay exactly where it is. Growing about a fixed south-east corner
+      pushes the centre *toward* the north-west one — up and left — by half the
+      picture's new size. In fractions of a 1000×800 canvas that is −100/1000 and
+      −50/800.
+
+      The sign is the whole test: I first wrote it positive, imaging the picture
+      growing away from the corner being dragged. It grows away from the corner that is
+      *held*, which is the opposite one.
+    */
+    const position = scaleAboutCorner(
+      { ...base, fromScale: { x: 1, y: 1 }, toScale: { x: 2, y: 2 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(position.x).toBeCloseTo(-100 / 1000, 10);
+    expect(position.y).toBeCloseTo(-50 / 800, 10);
+  });
+
+  it('compensates from the anchor, not from the picture centre', () => {
+    /*
+      Scaling happens about the anchor, so the arm from the anchor to the content grows
+      with the scale — and the compensating move must be measured from the anchor too.
+      An off-centre anchor therefore changes the answer, and a "move the centre"
+      shortcut would drift the picture a little on every scale.
+    */
+    const centred = scaleAboutCorner(
+      { ...base, fromScale: { x: 1, y: 1 }, toScale: { x: 2, y: 2 } },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    const offsetAnchor = scaleAboutCorner(
+      {
+        ...base,
+        anchorX: 0.25,
+        anchorY: 0.25,
+        fromScale: { x: 1, y: 1 },
+        toScale: { x: 2, y: 2 },
+      },
+      { x: 0, y: 0 },
+      canvas,
+    );
+    expect(offsetAnchor.x).not.toBeCloseTo(centred.x, 6);
+  });
+
+  it('holds the opposite corner still through a rotation as well', () => {
+    /*
+      The rotating case is the one a shortcut gets wrong: the arm is rotated into
+      screen axes, so the compensation is not a diagonal move but the arm turned by the
+      clip's angle. Verified by placing the fixed corner before and after.
+    */
+    const rotation = 37;
+    const radians = (rotation * Math.PI) / 180;
+    const placedCorner = (position: { x: number; y: number }, scale: number) => {
+      // The model's own formula: offset = position + R·(0.5 − anchor)·size·scale.
+      const armX = (0.5 - 0.5) * 200 * scale;
+      const armY = (0.5 - 0.5) * 100 * scale;
+      const offsetX = position.x + (Math.cos(radians) * armX - Math.sin(radians) * armY);
+      const offsetY = position.y + (Math.sin(radians) * armX + Math.cos(radians) * armY);
+      // The south-east corner is (+w/2, +h/2) from the picture's centre, scaled.
+      const cornerX = (200 / 2) * scale;
+      const cornerY = (100 / 2) * scale;
+      return {
+        x: (offsetX + (Math.cos(radians) * cornerX - Math.sin(radians) * cornerY) / 1000) * 1000,
+        y: (offsetY + (Math.sin(radians) * cornerX + Math.cos(radians) * cornerY) / 800) * 800,
+      };
+    };
+    const start = { x: 0.1, y: -0.05 };
+    const before = placedCorner(start, 1);
+    const moved = scaleAboutCorner(
+      { ...base, rotation, fromScale: { x: 1, y: 1 }, toScale: { x: 1.8, y: 1.8 } },
+      start,
+      canvas,
+    );
+    const after = placedCorner(moved, 1.8);
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
+  });
+
+  it('does nothing when the scale did not change', () => {
+    const position = scaleAboutCorner(
+      { ...base, fromScale: { x: 1, y: 1 }, toScale: { x: 1, y: 1 } },
+      { x: 0.2, y: 0.3 },
+      canvas,
+    );
+    expect(position).toEqual({ x: 0.2, y: 0.3 });
   });
 });
