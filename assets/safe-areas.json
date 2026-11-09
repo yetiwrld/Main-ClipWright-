@@ -1,0 +1,20 @@
+{
+  "$comment": "SPEC 10 §9 — safe-area and platform-UI-zone geometry, as data rather than code so the numbers can be tuned without a release. Every rectangle is expressed as a fraction of the canvas, with the origin at the top-left. The platform zones are approximate by nature; the UI labels them as such.",
+  "version": 1,
+  "titleSafe": 0.9,
+  "actionSafe": 0.93,
+  "platforms": {
+    "9:16": {
+      "label": "Vertical (9:16)",
+      "top": 0.14,
+      "bottom": 0.25,
+      "right": 0.12
+    },
+    "4:5": {
+      "label": "Portrait (4:5)",
+      "top": 0.14,
+      "bottom": 0.25,
+      "right": 0.12
+    }
+  }
+}

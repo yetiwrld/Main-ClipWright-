@@ -19,6 +19,16 @@ import {
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
+import { PreviewOverlays } from './PreviewOverlays.js';
+import {
+  OVERLAYS_OFF,
+  nextAreaOverlay,
+  overlaysVisible,
+  parseSafeAreas,
+  platformKeyFor,
+  type OverlayState,
+} from './safe-areas.js';
+import safeAreasData from '../../../../../../assets/safe-areas.json';
 import { CaptionOverlay } from './CaptionOverlay.js';
 import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
 import type { TimelineApi } from './use-timeline.js';
@@ -26,6 +36,15 @@ import { useCanvasDrag } from './use-canvas-drag.js';
 import { commitKeyed } from './keyframe-controls.js';
 
 const MEDIA_ORIGIN = 'clipwright-media://media/';
+
+/**
+ * The guide geometry, parsed once at module load rather than per render.
+ *
+ * Parsing here also *validates*: the shipped file is checked every time this module
+ * loads — in the app, in the tests and in `check-repo` — so a malformed value is a build
+ * failure rather than an overlay drawn off-screen.
+ */
+const SAFE_AREAS = parseSafeAreas(safeAreasData);
 
 /**
  * The timeline's blend mode name → the CSS keyword that means the same thing.
@@ -244,6 +263,42 @@ export function PreviewPane({
   const durationUs = projectDurationUs(state);
 
   const canvas = state.canvas ?? { width: 1080, height: 1920, aspect: '9:16' };
+
+  /*
+    Overlays are view state, not document state (SPEC 10 §9): they are never written to
+    the project, never keyframeable, and never part of an export. Holding them in a
+    `useState` here rather than in the timeline is the whole of that guarantee at this
+    layer — nothing below the preview can see them.
+  */
+  const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
+  const platformKey = platformKeyFor(canvas.aspect ?? '');
+  const platformZone = platformKey ? (SAFE_AREAS.platforms[platformKey] ?? null) : null;
+
+  /*
+    `Ctrl+;` cycles the area overlay and `Ctrl+'` toggles the thirds, per SPEC 10 §9's
+    single binding for the set. Bound at the document while the preview is mounted: the
+    preview is the only place an overlay means anything, so it does not need a global
+    command, and a dialog that wants `Ctrl+;` gets it.
+  */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.key !== ';' && event.key !== "'") return;
+      const target = event.target as HTMLElement | null;
+      // Never steal a keystroke from a text field — `;` is an ordinary character there.
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return;
+      }
+      event.preventDefault();
+      setOverlays((current) =>
+        event.key === ';'
+          ? { ...current, areas: nextAreaOverlay(current.areas, platformZone !== null) }
+          : { ...current, thirds: !current.thirds },
+      );
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [platformZone]);
   // Subscribing to the playhead is what makes a keyframed property redraw as time
   // moves; reading `playheadStore.get()` without subscribing would animate only
   // when something else happened to re-render.
@@ -591,6 +646,14 @@ export function PreviewPane({
             border: '1px solid var(--line-subtle)',
           }}
         >
+          {/*
+            Guides sit above the picture and below the selection handles: above,
+            because a safe area you cannot see over is useless; below, because a guide
+            must never take a pointer away from a clip being dragged.
+          */}
+          {overlaysVisible(overlays) ? (
+            <PreviewOverlays state={overlays} data={SAFE_AREAS} zone={platformZone} />
+          ) : null}
           {layers.length > 0 ? (
             layers.map((layer: VisibleLayer, index: number) => {
               const transition = transitionFor(layer, state, playheadUs);

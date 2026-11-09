@@ -12,6 +12,15 @@ This document tracks architectural scope boundaries and honest limitations per `
 4. **Text on a path / 3D text / gradient text fills (`specs/11` §11):** Text items support solid fills, strokes, shadows, backgrounds, and 12 keyframe-based animations; 3D extrusion, curved path text, and gradient text fills are out of scope in v1.
 5. **Animated GIF imports (`specs/04` §2, `specs/11` §12):** Imported `.gif` files render their first frame statically; use `.mp4` or `.webm` for animated overlays.
 6. **Audio-only composition export (`specs/12` §6.9):** v1 exports video containers (`.mp4`, `.webm`); an audio-only timeline exports as a video with the composition's canvas background colour.
+7. **Guides and safe areas cover everything except the pixel grid.** `Ctrl+;` cycles
+   title safe (90%), action safe (93%) and the 9:16 / 4:5 platform UI zones, and
+   `Ctrl+'` toggles the rule of thirds; the values come from `assets/safe-areas.json`,
+   so they can be tuned without a code change. The pixel grid is implemented but never
+   appears: SPEC 10 §9 shows it at 800% zoom and above, and the preview has no zoom —
+   the threshold is in place so the grid arrives with zoom rather than needing to be
+   remembered. The safe areas are also not yet *crossing* guides: snapping uses them
+   for nothing, because 8 px object snapping (§9's other half) is a separate feature.
+
 7. **4K 60 fps CPU export speed (`specs/14` §10):** On machines without a hardware encoder (NVENC/QSV/AMF), 4K 60 fps software encoding (`libx264`) runs slower than real-time while maintaining full frame accuracy and deterministic output.
 8. **Unsigned Windows installer (`specs/15` §6.4):** When built without a commercial Authenticode certificate (`CSC_LINK`), the Windows installer and portable executable are **unsigned**. Release notes, the README, the installer, and the in-app updater clearly label builds as **Unsigned** and verify authenticity via Ed25519-signed `release-manifest.json.sig` plus SHA-256/SHA-512 checksums.
 9. **Architecture support (`specs/15` §6.1):** Windows x64 is the primary target for v1; Windows ARM64 runs via x64 emulation.
