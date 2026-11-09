@@ -65,11 +65,13 @@ export path:
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
-Still open in Phase 5: the style editor's colour pickers and anchor grid (colours
-are entered as hex today, and position is a slider rather than drag-on-canvas),
-text and shape items (the schema allows the item types; nothing draws them), brand
-kits (the schema has the field; no UI writes it), and the audio tools beyond the
-envelope (equaliser, metering UI, voiceover recorder). The inspector's keyframes,
+Still open in Phase 5: the colour eyedropper, brand kits (the schema has the field;
+no UI writes it), the icon picker dialog (the set, the search and the geometry are
+built and tested; nothing lets a user choose a different icon yet), and the audio
+tools beyond the envelope (equaliser, metering UI, voiceover recorder). This
+paragraph used to list the text and shape items as open — they have been built and
+drawn in both renderers for several slices, and icons joined them, so that claim
+was a stale line rather than a gap. The inspector's keyframes,
 effects and transitions are **done** — the §2.4 diamond and auto-keyframing on
 every animatable row, the §2.6 curve editor, the nine required effects with
 reorder/copy/paste and adjustment layers, and the transition controls with every
