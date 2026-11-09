@@ -263,6 +263,12 @@ export const TimelineItemSchema = z
       are present, because the stored geometry is what the file says the icon *was*.
     */
     iconName: z.string().optional(),
+    /*
+      SPEC 11 §12's "stroke width adjustable (0.5–4)", in the icon's own units — the 24-box
+      Lucide draws in, where the library's own default is 2. Absent means the default, so a
+      project written before this field existed draws exactly as it did.
+    */
+    iconStrokeWidth: z.number().min(0.5).max(4).optional(),
     iconShapes: z
       .array(
         z.discriminatedUnion('t', [

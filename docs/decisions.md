@@ -720,3 +720,61 @@ mutations bite.
 **Lesson worth keeping:** a test that restates the implementation's string does not verify the
 behaviour, it freezes it. Where an external renderer interprets the output, the check has to
 run that renderer.
+
+## 26. An icon is an outline, and its box is square
+
+Two properties of a Lucide icon are easy to get wrong in a way that produces a picture rather
+than an error, and both were wrong in the first version of this feature.
+
+**It is a stroke, not a fill.** A Lucide path is the *outline* of a shape: filled, a star
+outline becomes a solid pentagram and a gear becomes a disc — recognisable, wrong, and nothing
+in the pipeline reports it. Shapes stay filled, because for a rectangle the fill *is* the
+shape. The two renderers read one flag for this (`drawsAsOutline`) and one width conversion
+(`iconStrokeInBox`, 24-box → 100-box → pixels), so they cannot disagree.
+
+The ASS side needed measuring rather than reasoning. `\bord` strokes a drawing, and the
+obvious way to hollow the fill — `\1c&HFF000000&` — does not work: ASS reads `\1c` as a colour
+with no alpha, so the fill stayed opaque and a closed path rendered as one solid run **680 px**
+wide. The correct override is `\1a&HFF&`, the alpha channel, which rendered the same path as
+two crossings of **40 px** — a ring. Stroke widths then tracked the setting: 0.5 → 17 px,
+2 → 63 px, 4 → 126 px on a 540 px icon.
+
+**Its box is square.** `shapeBoxAt` returns a percentage of each axis, which is right for a
+rectangle: 50%×50% of a 16:9 frame is 960×540 px. A Lucide icon is square by definition, so
+drawing one into that box stretched it 16:9 — measured at aspect **1.668** on the rendered
+star, against its own ~1.0. An icon now takes the shorter side of its box and is centred in
+it, in both renderers. Shorter rather than longer so it never overflows the area the user
+sized, and centred so a dragged icon stays where it was dragged.
+
+**A test that reads the context after `restore()` reads the old value.** One of the icon tests
+asserted `ctx.fillStyle` after `paintShape` returned, and passed only because the painter had
+also been filling; after the switch to stroking it failed for the right reason and the wrong
+one at once. The recorded-call assertions are the correct form.
+
+**The lesson, again:** where an external renderer interprets output, the check has to run that
+renderer. Three of the four bugs found in this slice — the dropped cues, the doubled `\pos`,
+and the opaque "transparent" fill — are invisible to a unit test that only inspects the string
+the code produced.
+
+## 27. The icon picker paginates, and never shows an icon it cannot draw
+
+**Pagination, chosen from a measurement.** The whole Lucide set converts from path data to
+SVG strings in 57 ms and costs 504 KB — one page of 48 tiles is 16 KB of markup. That makes a
+page cheap enough to render eagerly and makes virtualisation, with its scroll listeners and
+its own bugs, the more expensive choice for a grid this small. The numbers decided it; they
+are in `docs/verification.md` so the decision can be revisited if the set grows by an order of
+magnitude.
+
+**The grid contains only icons that draw.** The alternative — list all 1555 and mark the 14
+arc-based ones unavailable — was rejected because a tile that cannot be clicked is a worse
+answer than an absence: the picker exists to produce an item, and an item it cannot produce
+has no business in the list. The filter is the same `resolveIconItem` the two renderers call,
+so "can this be drawn" keeps one answer rather than three.
+
+**The stroke width is part of the admission.** SPEC 11 §12 makes the width adjustable, and
+the first version of this dialog computed it, passed it to the caller, and had it discarded
+one layer later — the control looked live and changed nothing. The value now travels the
+whole way: field → `onPick` → `addIcon` → `addShapeItem` → `createIconItem` → the item → the
+ASS `\bord`. The general lesson is in §26 and holds here: a control is not built until
+something downstream stores what it says, and the test that proves it has to sit on the far
+side of the boundary the value has to cross.

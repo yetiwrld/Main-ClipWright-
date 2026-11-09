@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { SHAPE_KINDS, shapeGeometry, shapePath } from '@clipwright/compositor';
-import { assShapeDrawing, assShapeOverride } from '../ass-shapes.js';
+import { assIconOverride, assShapeDrawing, assShapeOverride } from '../ass-shapes.js';
 
 const BOX = { x: 0, y: 0, width: 1000, height: 1000 };
 
@@ -225,5 +225,70 @@ describe('the override block', () => {
     const override = assShapeOverride(BOX, '&H00FFFFFF&');
     expect(override).toContain('\\bord0');
     expect(override).toContain('\\shad0');
+  });
+});
+
+describe('an icon maps onto the square inside its box', () => {
+  /*
+    Measured on the rendered star: mapped onto a 960×540 box it came out at aspect 1.668
+    instead of ~1.0, i.e. stretched 16:9. `square` takes the shorter side and centres.
+  */
+  const SUBPATH = [{ x: 0, y: 0, closed: true, segments: [{ op: 'line' as const, x: 100, y: 100 }] }];
+
+  it('fills the whole box for a shape', () => {
+    // A rectangle should reach the box's edges — that is what "half the frame each way" means.
+    const drawing = assShapeDrawing(SUBPATH, { x: 480, y: 270, width: 960, height: 540 });
+    expect(drawing).toContain('l1440 810');
+  });
+
+  it('draws inside the centred square for an icon', () => {
+    // 960x540 -> a 540 square, centred, so x runs 690..1230 rather than 480..1440.
+    const drawing = assShapeDrawing(SUBPATH, { x: 480, y: 270, width: 960, height: 540 }, { square: true });
+    expect(drawing).toContain('l1230 810');
+    expect(drawing).toContain('m690 270');
+  });
+
+  it('is a no-op on an already-square box', () => {
+    const box = { x: 0, y: 0, width: 540, height: 540 };
+    expect(assShapeDrawing(SUBPATH, box, { square: true })).toBe(assShapeDrawing(SUBPATH, box));
+  });
+});
+
+describe('an icon is stroked, not filled (SPEC 11 §12)', () => {
+  /*
+    Lucide's paths are *outlines*: the icon is the stroke around a path, not the area inside
+    it. Filling one draws a different picture — a filled star outline is a solid pentagram and
+    a filled gear is a disc. These assertions exist because every one of them was measured
+    through ffmpeg against the real renderer before it was written down; see
+    `docs/verification.md` for the numbers.
+  */
+
+  it('makes the fill transparent with the alpha override, not a colour', () => {
+    /*
+      The trap: writing `\1c&HFF000000&` looks like "transparent black" and is not — ASS treats
+      `\1c` as a colour with no alpha, so the fill stayed opaque and a closed path rendered as
+      one solid run 680 px wide. `\1a&HFF&` is the alpha override and rendered the same path as
+      two crossings of 40 px, a hollow ring.
+    */
+    const override = assIconOverride(40, '&H00FF0000&');
+    expect(override).toContain('\\1a&HFF&');
+    expect(override).not.toContain('\\1c&HFF000000&');
+  });
+
+  it('carries the stroke colour on the outline channel and the width on \\bord', () => {
+    const override = assIconOverride(40, '&H0000FF00&');
+    expect(override).toContain('\\3c&H0000FF00&');
+    expect(override).toContain('\\bord40');
+  });
+
+  it('anchors at the origin like a shape, because a drawing is absolute', () => {
+    // The same bug class as `assShapeOverride`: `\pos(box)` would double the origin.
+    expect(assIconOverride(10, '&H00FFFFFF&')).toContain('\\pos(0,0)');
+  });
+
+  it('never emits a zero border, which libass reads as no stroke at all', () => {
+    // A sub-pixel width rounding to 0 would draw a filled icon again, silently.
+    expect(assIconOverride(0.2, '&H00FFFFFF&')).toContain('\\bord1');
+    expect(assIconOverride(0, '&H00FFFFFF&')).toContain('\\bord1');
   });
 });

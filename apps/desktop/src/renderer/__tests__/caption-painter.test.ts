@@ -36,6 +36,9 @@ function recordingContext(): { ctx: CanvasRenderingContext2D; calls: Call[] } {
     font: '',
     fillStyle: '#000',
     strokeStyle: '#000',
+    lineWidth: 1,
+    lineCap: 'butt',
+    lineJoin: 'miter',
   };
   const ctx = new Proxy(
     {
@@ -60,6 +63,9 @@ function recordingContext(): { ctx: CanvasRenderingContext2D; calls: Call[] } {
       rect: record('rect'),
       clip: record('clip'),
       fill: record('fill'),
+      // Icons are stroked rather than filled (SPEC 11 §12), so the recorder needs the op the
+      // canvas is now asked for — without it every icon test failed with "not a function".
+      stroke: record('stroke'),
       fillText: record('fillText'),
       strokeText: record('strokeText'),
       get font(): string {
@@ -516,8 +522,13 @@ describe('painting a shape (SPEC 11 §12)', () => {
     const painted = paintShape(ctx, { type: 'shape', iconName: 'star', startUs: 0, durationUs: 1 }, '#4ADE80', 1920, 1080);
     expect(painted).toBe(true);
     expect(calls.some((call) => call.op === 'bezierCurveTo')).toBe(true);
-    // Filled with the same colour a built-in shape would use.
-    expect(ctx.fillStyle).toBe('#4ADE80');
+    /*
+      Stroked, not filled — an icon is an outline. Asserted from the recorded assignment
+      because the painter restores the context on the way out, so reading `ctx.strokeStyle`
+      here sees the *previous* value. This assertion originally read `ctx.fillStyle` and
+      passed only because icons were, wrongly, being filled at the time.
+    */
+    expect(calls.some((call) => call.op === 'strokeStyle' && call.args[0] === '#4ADE80')).toBe(true);
     // And in the frame, not in the corner: the default box is the middle half of the canvas.
     const points = calls
       .filter((call) => call.op === 'moveTo' || call.op === 'lineTo' || call.op === 'bezierCurveTo')
@@ -557,6 +568,60 @@ describe('painting a shape (SPEC 11 §12)', () => {
     );
     expect(painted).toBe(true);
     expect(calls.some((call) => call.op === 'closePath')).toBe(true);
+  });
+
+  it('strokes an icon instead of filling it (SPEC 11 §12)', () => {
+    /*
+      A filled Lucide icon is a different picture from the icon — the star outline filled is a
+      solid pentagram, the gear filled is a disc. The exporter makes the same choice from the
+      same `drawsAsOutline`, so the two renderers cannot disagree about it.
+    */
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, { type: 'shape', iconName: 'star', startUs: 0, durationUs: 1 }, '#4ADE80', 1920, 1080);
+    expect(calls.some((call) => call.op === 'stroke')).toBe(true);
+    expect(calls.some((call) => call.op === 'fill')).toBe(false);
+    // The colour is asserted from the recorded assignment rather than from `ctx.strokeStyle`:
+    // the painter restores the context on the way out, which is correct, and a recorded
+    // `restore` puts the previous colour back.
+    expect(calls.some((call) => call.op === 'strokeStyle' && call.args[0] === '#4ADE80')).toBe(true);
+    // Rounded joins and caps, matching how libass draws a stroked path.
+    expect(ctx.lineCap).toBe('round');
+    expect(ctx.lineJoin).toBe('round');
+  });
+
+  it('fills a built-in shape and never strokes it', () => {
+    // A rectangle is an area; its fill *is* the shape. Stroking it instead draws an outline
+    // of the rectangle, which is a different item.
+    const { ctx, calls } = recordingContext();
+    paintShape(ctx, shapeItem() as never, '#FFF', 1920, 1080);
+    expect(calls.some((call) => call.op === 'fill')).toBe(true);
+    expect(calls.some((call) => call.op === 'stroke')).toBe(false);
+  });
+
+  it('scales the icon stroke from the 24-box onto the canvas', () => {
+    /*
+      The stroke is in canvas pixels, so it has to be scaled by the same factor the points
+      were. At 1080p a half-frame icon is 540 px tall, so one 100-box unit is 5.4 px and
+      Lucide's default 2 (in a 24-box) is 8.333 box units ≈ 45 px. A width left unscaled would
+      be 8.33 px — a hairline on a 540 px icon.
+    */
+    const { ctx } = recordingContext();
+    paintShape(ctx, { type: 'shape', iconName: 'star', startUs: 0, durationUs: 1 }, '#FFF', 1920, 1080);
+    expect(ctx.lineWidth).toBeGreaterThan(30);
+    expect(ctx.lineWidth).toBeLessThan(60);
+  });
+
+  it('honours the item stroke width, and clamps a wild value', () => {
+    const thin = recordingContext();
+    paintShape(thin.ctx, { type: 'shape', iconName: 'star', iconStrokeWidth: 0.5, startUs: 0, durationUs: 1 }, '#FFF', 1920, 1080);
+    const fat = recordingContext();
+    paintShape(fat.ctx, { type: 'shape', iconName: 'star', iconStrokeWidth: 4, startUs: 0, durationUs: 1 }, '#FFF', 1920, 1080);
+    const wild = recordingContext();
+    paintShape(wild.ctx, { type: 'shape', iconName: 'star', iconStrokeWidth: 999, startUs: 0, durationUs: 1 }, '#FFF', 1920, 1080);
+    expect(thin.ctx.lineWidth).toBeGreaterThan(0);
+    expect(fat.ctx.lineWidth).toBeGreaterThan(thin.ctx.lineWidth! * 4);
+    // 999 clamps to the same 4 the schema's maximum allows.
+    expect(wild.ctx.lineWidth).toBe(fat.ctx.lineWidth);
   });
 
   it('restores the context even though it changed the fill', () => {

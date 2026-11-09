@@ -13,7 +13,16 @@ import { captionItemAt, captionFrameAt, type CaptionWordTiming } from '@clipwrig
 import type { TimelineState } from '@clipwright/timeline-engine';
 import { canvasMeasure, paintCaptionFrame } from './caption-painter.js';
 import { textFrameAt, type GraphicItemLike } from './graphics.js';
-import { ICON_LIBRARY, resolveIconItem, shapeBoxAt, shapeGeometry } from '@clipwright/compositor';
+import {
+  ICON_LIBRARY,
+  drawsAsOutline,
+  iconBoxPx,
+  iconStrokeInBox,
+  resolveIconItem,
+  shapeBoxAt,
+  shapeGeometry,
+  type IconShape,
+} from '@clipwright/compositor';
 import { usePlayheadUs } from './playhead-store.js';
 
 /** The words of a caption that are actually visible, with their timings. */
@@ -150,10 +159,35 @@ export function paintShape(
     : shapeGeometry(shape.shapeKind);
   if (!geometry) return false;
   const box = shapeBoxAt((shape as { transform?: { x?: number; y?: number; scaleX?: number; scaleY?: number } }).transform);
+  /*
+    An icon draws in the square inside its box, a shape in the whole box. A box is a
+    percentage of each axis, so in a 16:9 frame it is 960×540 px — correct for a rectangle and
+    wrong for a Lucide icon, which is square by definition. Measured on the rendered star
+    before this: aspect 1.668 instead of 1.0, i.e. every icon stretched 16:9.
+  */
+  const square = drawsAsOutline(shape as { iconName?: string; iconShapes?: readonly IconShape[] });
+  const iconBox = square
+    ? iconBoxPx(box, { width, height })
+    : {
+        x: (box.x / 100) * width,
+        y: (box.y / 100) * height,
+        width: (box.width / 100) * width,
+        height: (box.height / 100) * height,
+      };
   const toPx = (x: number, y: number): [number, number] => [
-    ((box.x + (x / 100) * box.width) / 100) * width,
-    ((box.y + (y / 100) * box.height) / 100) * height,
+    iconBox.x + (x / 100) * iconBox.width,
+    iconBox.y + (y / 100) * iconBox.height,
   ];
+
+  /*
+    An icon is stroked, a shape is filled — and both go through this one loop. Lucide's paths
+    are outlines: filling one draws a silhouette that is a different picture from the icon
+    (a filled "star" outline is a solid pentagram; a filled "settings" cog is a disc). The
+    stroke width comes from `iconStrokeInBox`, which converts the 24-box value into the same
+    100-box the coordinates are in, so the preview and the ASS pass cannot disagree about it.
+  */
+  const outlined = drawsAsOutline(shape as { iconName?: string; iconShapes?: readonly IconShape[] });
+  const strokeInBox = iconStrokeInBox((shape as { iconStrokeWidth?: number }).iconStrokeWidth);
 
   ctx.save();
   ctx.beginPath();
@@ -172,8 +206,29 @@ export function paintShape(
     }
     if (subpath.closed) ctx.closePath();
   }
-  ctx.fillStyle = colour;
-  ctx.fill();
+  if (outlined) {
+    /*
+      The stroke is applied in the *same* pixel mapping as the points, so a rounded join and
+      a cap match the ASS pass. `lineWidth` is in canvas pixels, so the box width is scaled by
+      the same factor the coordinates were: the mean of the two axes, matching how
+      `assShapeDrawing` maps a box onto the script.
+    */
+    /*
+      The mapping is square for an icon, so the two axes agree and a single width is correct —
+      the mean is kept because a shape could in principle reach this branch through a caller
+      that passes one, and averaging a non-square box is still better than picking an axis.
+    */
+    const perBoxX = iconBox.width / 100;
+    const perBoxY = iconBox.height / 100;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = (strokeInBox * (perBoxX + perBoxY)) / 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = colour;
+    ctx.fill();
+  }
   ctx.restore();
   return true;
 }

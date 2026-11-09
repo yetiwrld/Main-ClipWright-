@@ -479,12 +479,15 @@ describe('timeline panel', () => {
     expect(timeline.addShape).toHaveBeenCalledWith('rect');
   });
 
-  it('the context menu adds an icon', () => {
+  it('the context menu opens the icon picker, and choosing one adds it', () => {
     /*
       Reachability, and the reason this test exists at all: `iconName` was in the schema, the
       renderers and the exporter grew support for it — and nothing in the UI could set it. A
       feature with no control is indistinguishable from one that was never built, and this
       project has shipped that mistake more than once.
+
+      The picker opens *before* an item exists: adding a star and then editing it would leave
+      an undo step and a visible item behind for a choice the user cancelled.
     */
     const state = fixture();
     const timeline = fakeTimeline(state);
@@ -492,9 +495,38 @@ describe('timeline panel', () => {
     const emptyArea = container.querySelector('[data-testid^="empty-area"]');
     fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
     fireEvent.click(screen.getByText('Add icon'));
-    // A visible default rather than a picker first: the user gets an item they can see and
-    // then chooses which icon, the same reasoning as the placeholder text on a new title.
-    expect(timeline.addIcon).toHaveBeenCalledWith('star');
+    // The dialog is up, and nothing has been added yet.
+    expect(screen.getByText('Choose an icon')).toBeTruthy();
+    expect(timeline.addIcon).not.toHaveBeenCalled();
+
+    /*
+      Search first: the grid is alphabetical and paginated, so `star` is not on page one —
+      which is the pagination working, not a failure. This is also the flow a user follows,
+      because scrolling 33 pages to find a star is not one.
+    */
+    fireEvent.change(screen.getByLabelText('Search icons'), { target: { value: 'star' } });
+    fireEvent.click(screen.getByLabelText('star'));
+    expect(timeline.addIcon).toHaveBeenCalledWith('star', 2);
+    expect(screen.queryByText('Choose an icon')).toBeNull();
+  });
+
+  it('passes the picker\'s stroke width through to addIcon (SPEC 11 §12)', () => {
+    /*
+      The picker always computed a width and handed it to `onPick`; the panel's handler took
+      the name and dropped the width, so the field was decorative and every icon came out at
+      the default 2. Asserted through the panel so the *wiring* is what is under test — the
+      picker's own tests cover that it reports the right number.
+    */
+    const timeline = fakeTimeline(fixture());
+    const { container } = render(<TimelinePanel timeline={timeline} />);
+    const emptyArea = container.querySelector('[data-testid^="empty-area"]');
+    fireEvent.contextMenu(emptyArea!, { clientX: 150, clientY: 150 });
+    fireEvent.click(screen.getByText('Add icon'));
+
+    fireEvent.change(screen.getByLabelText('Stroke width'), { target: { value: '3.5' } });
+    fireEvent.change(screen.getByLabelText('Search icons'), { target: { value: 'star' } });
+    fireEvent.click(screen.getByLabelText('star'));
+    expect(timeline.addIcon).toHaveBeenCalledWith('star', 3.5);
   });
 
   it('shows and flips the fill lock (SPEC 10 §8.5)', () => {

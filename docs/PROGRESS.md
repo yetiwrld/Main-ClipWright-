@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `3ac8481`. 2929 automated tests, all passing.
+Last updated after commit `3ac8481`. 2949 automated tests, all passing.
 
 ---
 
@@ -66,8 +66,8 @@ export path:
   file matches the preview.
 
 Still open in Phase 5: the colour eyedropper, brand kits (the schema has the field;
-no UI writes it), the icon picker dialog (the set, the search and the geometry are
-built and tested; nothing lets a user choose a different icon yet), and the audio
+no UI writes it), a shape row in the inspector (an icon's stroke width is set in the
+picker when it is added and cannot be changed afterwards), and the audio
 tools beyond the envelope (equaliser, metering UI, voiceover recorder). This
 paragraph used to list the text and shape items as open — they have been built and
 drawn in both renderers for several slices, and icons joined them, so that claim
@@ -220,7 +220,20 @@ docs had claimed otherwise for one commit. **Icons are in** (SPEC 11 §12): the 
 Lucide set ships offline as data, converted to the same geometry a rectangle is drawn
 from, so an icon needs no renderer of its own. 1541 of Lucide's 1555 icons convert; the
 14 that use a genuinely elliptical arc are refused by name rather than drawn
-approximately, and the picker does not offer them. Adding one is a context-menu entry. The style editor's **colour pickers and anchor grid are in**:
+approximately, and the picker does not offer them. Adding one is a context-menu entry
+that opens the **picker** — a searchable, paginated grid of the drawable set with a
+stroke-width field. It is the same reachability problem the shapes had, since a library
+with no control is indistinguishable from one that was never imported; and it is where
+the stroke width is chosen, so the value has to travel from the field through the
+command onto the item and out to `\bord` — an earlier version computed it and dropped
+it at the panel, which is exactly the sort of gap that looks like a working control.
+They draw as **outlines**, not silhouettes, at a stroke width the project stores
+(0.5–4 in Lucide's own units), inside a **square** box — an icon drawn into the
+shape box was stretched 16:9, measured at aspect 1.668 before the fix. Rendering a
+star through the real ffmpeg is what found both, and the same pass found two older
+export bugs that no test had seen: every shape and icon was being dropped from the
+burned-in script, and `\pos` was doubling the box origin so a centred rectangle
+landed in the bottom-right corner. The style editor's **colour pickers and anchor grid are in**:
 colours are hex-only (no eyedropper, recorded as a limitation), and the nine-cell
 anchor grid is a real control rather than a display — it had to be added alongside a
 fix, because the horizontal half of a caption's anchor was dead code in the layout
@@ -268,7 +281,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 2929 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 2949 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

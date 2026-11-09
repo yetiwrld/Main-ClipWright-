@@ -255,7 +255,7 @@ export interface TimelineApi {
    * may not have. Returns false when the icon does not resolve, so a caller can say so
    * instead of appearing to succeed and drawing nothing.
    */
-  addIcon: (iconName: string) => boolean;
+  addIcon: (iconName: string, strokeWidth?: number) => boolean;
   /** Toggle one editing flag on the composition (SPEC 09 §9.6). */
   setToggle: (patch: Partial<NonNullable<TimelineState['toggles']>>) => boolean;
   /**
@@ -777,7 +777,7 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
           addShapeItem(s, { id, shapeKind: kind, startUs: playheadStore.get(), fps })
         );
       },
-      addIcon: (iconName) => {
+      addIcon: (iconName, strokeWidth) => {
         /*
           Checked before the command runs, so an icon this build cannot draw is a refusal the
           caller can report rather than an item that exists, is selectable, and paints nothing.
@@ -786,7 +786,13 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
         if (resolveIconItem({ iconName }, ICON_LIBRARY).status !== 'drawn') return false;
         const id = nextId('ico');
         return run('Add icon', (s) =>
-          addShapeItem(s, { id, iconName, startUs: playheadStore.get(), fps })
+          addShapeItem(s, {
+            id,
+            iconName,
+            ...(strokeWidth !== undefined ? { iconStrokeWidth: strokeWidth } : {}),
+            startUs: playheadStore.get(),
+            fps,
+          })
         );
       },
       /*

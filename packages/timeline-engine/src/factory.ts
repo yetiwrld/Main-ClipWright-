@@ -304,6 +304,11 @@ export interface CreateIconItemParams {
   iconName: string;
   /** The icon's children, if the file should not depend on this build's library. */
   iconShapes?: TimelineItem['iconShapes'];
+  /**
+   * How thick to stroke the outline, in the 100-box's units (SPEC 11 §12: adjustable 0.5–4).
+   * Absent means the library default, so an icon added by any older path draws as it always did.
+   */
+  iconStrokeWidth?: number;
   label?: string;
   styleId?: string;
 }
@@ -325,6 +330,9 @@ export function createIconItem(params: CreateIconItemParams): TimelineItem {
     effects: [],
     iconName: params.iconName,
     ...(params.iconShapes ? { iconShapes: params.iconShapes } : {}),
+    ...(params.iconStrokeWidth !== undefined
+      ? { iconStrokeWidth: params.iconStrokeWidth }
+      : {}),
     captionStyleId: params.styleId,
   }) as TimelineItem;
 }

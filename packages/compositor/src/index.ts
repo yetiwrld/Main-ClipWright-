@@ -207,7 +207,13 @@ export {
  * The library is bundled data, never a network fetch.
  */
 export {
+  ICON_DEFAULT_STROKE_WIDTH,
+  ICON_STROKE_MAX,
+  ICON_STROKE_MIN,
   ICON_VIEWBOX,
+  drawsAsOutline,
+  iconBoxPx,
+  iconStrokeInBox,
   arcsAreCircular,
   circularArcToCubics,
   drawableIconNames,
@@ -218,6 +224,7 @@ export {
   pathToSubpaths,
   resolveIconItem,
   searchIcons,
+  subpathsToSvgPath,
   supportedPathCommands,
   tokenisePath,
   type CubicSegment,

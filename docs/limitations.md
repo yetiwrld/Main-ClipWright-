@@ -443,8 +443,10 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **There is no icon picker dialog.** The context menu adds a star, and the item stores its
-    name, but choosing a different icon needs the picker UI that `searchIconLibrary` was built
-    for. The search, the drawable-only list and the geometry are all in place and tested; what
-    is missing is the panel. Until it exists, an icon cannot be changed after it is added
-    except by editing the project file.
+13. **An icon's stroke width can be set when it is added, and not afterwards.** The picker
+    has the 0.5–4 field (SPEC 11 §12) and the value is stored on the item, drawn by both
+    renderers and written as `\bord` in the burn-in — but the inspector has no row for it, so
+    changing it means removing the icon and adding it again. The item's *icon* is likewise not
+    editable after the fact; the picker is an "add" flow, not a property editor. Both are the
+    same missing piece: a shape row in the inspector. Recorded rather than hidden because a
+    control that appears once and then cannot be revisited reads as a bug to anyone who tries.

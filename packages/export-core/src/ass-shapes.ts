@@ -49,19 +49,49 @@ function mapPoint(x: number, y: number, box: AssShapeBox): { x: number; y: numbe
  * numbers are written plainly (`m-1-2` parses, and spaces are harmless). Every command
  * is absolute, which is what lets a single coordinate mapping serve the whole path.
  */
-export function assShapeDrawing(subpaths: readonly ShapeSubpath[], box: AssShapeBox): string {
+/**
+ * A drawing mapped onto the box, or onto the **square inside it**.
+ *
+ * `square` exists for icons. A shape's box is a percentage of each axis, so a 50%×50% box in
+ * a 16:9 frame is 960×540 px and a rectangle fills it — that is correct for a rectangle. A
+ * Lucide icon is square, and mapping one onto 960×540 drew it at aspect 1.668, measured on the
+ * rendered star. Shorter side, centred, so the icon keeps its shape and stays where the user
+ * put it.
+ */
+/**
+ * The largest square that fits inside a box, centred.
+ *
+ * The shorter side, not the longer: an icon should never overflow the area the user sized,
+ * and centring keeps a dragged icon where it was dragged.
+ */
+function squareInside(box: AssShapeBox): AssShapeBox {
+  const side = Math.min(box.width, box.height);
+  return {
+    x: box.x + (box.width - side) / 2,
+    y: box.y + (box.height - side) / 2,
+    width: side,
+    height: side,
+  };
+}
+
+export function assShapeDrawing(
+  subpaths: readonly ShapeSubpath[],
+  box: AssShapeBox,
+  options: { square?: boolean } = {},
+): string {
+  const target = options.square ? squareInside(box) : box;
   const parts: string[] = [];
   for (const subpath of subpaths) {
-    const start = mapPoint(subpath.x, subpath.y, box);
+    const start = mapPoint(subpath.x, subpath.y, target);
     parts.push(`m${start.x} ${start.y}`);
     let cursor = start;
     for (const segment of subpath.segments) {
-      const end = mapPoint(segment.x, segment.y, box);
+      const end = mapPoint(segment.x, segment.y, target);
       if (segment.op === 'line') {
         parts.push(`l${end.x} ${end.y}`);
       } else {
-        const c1 = mapPoint(segment.c1x, segment.c1y, box);
-        const c2 = mapPoint(segment.c2x, segment.c2y, box);
+        const c1 = mapPoint(segment.c1x, segment.c1y, target);
+        const c2 = mapPoint(segment.c2x, segment.c2y, target);
         // `b` takes three points: two controls and the end. ASS has no relative form
         // worth using here, and mixing absolute and relative in one string is the kind
         // of thing that renders correctly in libass and wrongly in something else.
@@ -104,4 +134,33 @@ export function assShapeOverride(box: AssShapeBox, colour: string): string {
   */
   void box;
   return `{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c${colour}}`;
+}
+
+/**
+ * The override block for an **icon**, which is outlined rather than filled.
+ *
+ * Measured before choosing it: libass strokes a path with `\bord`, using `\3c` (outline
+ * colour) for the stroke and `\1c` (primary colour) for the fill. Setting the fill to
+ * transparent and the outline to the item's colour is therefore a real stroke of arbitrary
+ * width — the same picture the canvas draws with `ctx.stroke()`. Filling instead gives a
+ * silhouette, which for Lucide is a different icon: a filled star outline is a solid
+ * pentagram and a filled gear is a disc.
+ *
+ * `\bord` is in script pixels, so the width arrives already scaled — see `iconStrokeInBox`
+ * in the compositor, which is the one place the 24-box value becomes a box value.
+ *
+ * The border also needs `\shad0` for the same reason a shape does: the borrowed caption
+ * style has a shadow, and a drop shadow under a stroked icon is a smudge the preview does not
+ * show.
+ */
+export function assIconOverride(strokePx: number, colour: string): string {
+  const width = Math.max(1, Math.round(strokePx));
+  /*
+    The fill is made transparent with `\1a&HFF&`, the *alpha* override — not by writing a
+    colour with an FF alpha byte into `\1c`. That distinction is measured, not guessed: with
+    `\1c&HFF000000&` a closed path rendered as one solid run 680 px wide, i.e. the fill was
+    still opaque and the "outline" was a silhouette. With `\1a&HFF&` the same path renders as
+    two crossings of 40 px each, which is a hollow ring — the stroke alone.
+  */
+  return `{\\an7\\pos(0,0)\\p1\\bord${width}\\shad0\\1a&HFF&\\3c${colour}}`;
 }

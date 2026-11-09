@@ -2420,6 +2420,38 @@ describe('addShapeItem (SPEC 11 §12)', () => {
     expect(addShapeItem(base(), { id: 'b', startUs: 0, fps: 30 })).toMatchObject({ ok: false });
   });
 
+  it('stores the stroke width the picker was set to', () => {
+    /*
+      SPEC 11 §12 makes stroke width adjustable 0.5–4. The picker reports the width with the
+      name, and the whole chain has to carry it: an earlier version computed the width, passed
+      it to `onPick`, and dropped it on the floor at the panel, so every icon came out at the
+      default however the user set the field. Asserted through the *command* rather than the
+      component, because the drop was in the layer between them.
+    */
+    const result = addShapeItem(base(), {
+      id: 'ico',
+      iconName: 'star',
+      iconStrokeWidth: 3.5,
+      startUs: 0,
+      fps: 30,
+    });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.items['ico']?.iconStrokeWidth).toBe(3.5);
+  });
+
+  it('omits the stroke width when it is not given, so old projects draw unchanged', () => {
+    /*
+      Absent has to stay absent, not become a written 2. A file that carries `iconStrokeWidth:
+      2` where the field used to be missing differs from the file the user saved, and the
+      schema comment promises an absent field means "the default" — which is only true while
+      nothing writes it.
+    */
+    const result = addShapeItem(base(), { id: 'ico', iconName: 'star', startUs: 0, fps: 30 });
+    if (!result.ok) throw new Error(result.message);
+    const item = result.state.items['ico'];
+    expect(item && 'iconStrokeWidth' in item).toBe(false);
+  });
+
   it('accepts stored icon shapes, so the file can carry its own geometry', () => {
     const shapes = [{ t: 'path' as const, d: 'M0 0 L24 0 L12 24 Z' }];
     const result = addShapeItem(base(), { id: 'ico', iconName: 'custom', iconShapes: shapes, startUs: 0, fps: 30 });

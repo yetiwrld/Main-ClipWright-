@@ -62,6 +62,7 @@ export interface PlannedItem {
    */
   iconName?: string;
   iconShapes?: readonly IconShape[];
+  iconStrokeWidth?: number;
   /**
    * The caption's full segment: word timings for karaoke, overrides, speaker.
    * Absent for a caption typed into a build that did not store one.
@@ -275,9 +276,10 @@ export interface ExportSettings {
     textContent?: string;
     /** A `shape` item's geometry kind (SPEC 11 §12), for the ASS drawing pass. */
     shapeKind?: string;
-    /** An icon item's name and stored geometry (§12). */
+    /** An icon item's name, stored geometry and stroke width (§12). */
     iconName?: string;
     iconShapes?: readonly IconShape[];
+    iconStrokeWidth?: number;
     /** Keyframed properties, so an animated item can be segmented. */
     keyframes?: Record<string, Array<{ timeUs: number; value: unknown }>>;
     /** Crop and transform, so the decoded frame matches the preview. */
@@ -378,6 +380,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         shapeKind: item.shapeKind,
         iconName: item.iconName,
         iconShapes: item.iconShapes,
+        iconStrokeWidth: item.iconStrokeWidth,
         geometry: item.geometry,
         keyframes: item.keyframes,
         opacity: item.opacity,

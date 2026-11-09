@@ -18,13 +18,15 @@
 import type { CaptionStyle } from '@clipwright/caption-styles';
 import {
   ICON_LIBRARY,
+  drawsAsOutline,
+  iconStrokeInBox,
   resolveIconItem,
   shapeBoxAt,
   shapeGeometry,
   type IconShape,
   type ShapeSubpath,
 } from '@clipwright/compositor';
-import { assShapeDrawing, assShapeOverride } from './ass-shapes.js';
+import { assIconOverride, assShapeDrawing, assShapeOverride } from './ass-shapes.js';
 
 /** One word with its timing, as ASS karaoke needs it. */
 export interface AssWord {
@@ -57,6 +59,16 @@ export interface AssCue {
     geometry: ShapeSubpath[];
     /** Box in percent of frame, from the item's transform. */
     box: { x: number; y: number; width: number; height: number };
+    /**
+     * Whether this drawing is an icon, and so is stroked rather than filled.
+     *
+     * Carried on the cue rather than recomputed in the serialiser, because the serialiser
+     * never sees the item — only the cue — and the preview decides the same question from the
+     * item with the same function.
+     */
+    outline: boolean;
+    /** Stroke width in `ShapeSubpath` units, already converted from the icon's 24-box. */
+    strokeInBox: number;
   };
   words?: AssWord[];
   styleId?: string;
@@ -309,7 +321,19 @@ export function assDialogue(cue: AssCue, options: AssScriptOptions): string {
       width: (cue.shape.box.width / 100) * options.width,
       height: (cue.shape.box.height / 100) * options.height,
     };
-    const override = assShapeOverride(box, assColour(style.fill.color));
+    /*
+      An icon is outlined, a shape is filled — the same distinction the preview makes, read
+      from the same flag. `\bord` is in script pixels, so the stroke width is scaled from the
+      100-box by the same factor `assShapeDrawing` uses for the coordinates: the mean of the
+      two axes, because a box that is not square would otherwise stroke one axis thicker.
+    */
+    const strokeColour = assColour(style.fill.color);
+    const override = cue.shape.outline
+      ? assIconOverride(
+          (cue.shape.strokeInBox * ((box.width + box.height) / 2)) / 100,
+          strokeColour,
+        )
+      : assShapeOverride(box, strokeColour);
     return [
       'Dialogue: ' + '0',
       assTimestamp(cue.startUs),
@@ -320,7 +344,7 @@ export function assDialogue(cue: AssCue, options: AssScriptOptions): string {
       '0',
       '0',
       '',
-      `${override}${assShapeDrawing(geometry, box)}`,
+      `${override}${assShapeDrawing(geometry, box, { square: cue.shape.outline })}`,
     ].join(',');
   }
 
@@ -439,6 +463,10 @@ export function assCuesFromPlan(
       textContent?: string;
       /** Set on a `shape` item: which geometry to draw (SPEC 11 §12). */
       shapeKind?: string;
+      /** Set on an icon item instead of `shapeKind`: a Lucide name, or stored children. */
+      iconName?: string;
+      iconShapes?: readonly IconShape[];
+      iconStrokeWidth?: number;
       /** The item's resolved geometry, for a shape's box. */
       geometry?: {
         transform?: { x?: number; y?: number; scaleX?: number; scaleY?: number };
@@ -494,7 +522,12 @@ export function assCuesFromPlan(
         // Drawing mode treats every character as geometry, so the body is empty.
         text: '',
         styleId: item.captionStyleId,
-        shape: { geometry, box: shapeBoxAt(item.geometry?.transform) },
+        shape: {
+          geometry,
+          box: shapeBoxAt(item.geometry?.transform),
+          outline: drawsAsOutline(item),
+          strokeInBox: iconStrokeInBox(item.iconStrokeWidth),
+        },
       });
       continue;
     }

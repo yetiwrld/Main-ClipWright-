@@ -1480,6 +1480,8 @@ export function addShapeItem(
     iconName?: string;
     /** The icon's children, when the file should carry its own copy. */
     iconShapes?: TimelineItem['iconShapes'];
+    /** Outline thickness in the 100-box, 0.5–4. Absent means the library default. */
+    iconStrokeWidth?: number;
     startUs: number;
     durationUs?: number;
     fps: Fps;
@@ -1542,6 +1544,9 @@ export function addShapeItem(
           durationUs,
           iconName: params.iconName!,
           ...(params.iconShapes ? { iconShapes: params.iconShapes } : {}),
+          ...(params.iconStrokeWidth !== undefined
+            ? { iconStrokeWidth: params.iconStrokeWidth }
+            : {}),
           styleId: params.styleId,
         })
       : createShapeItem({

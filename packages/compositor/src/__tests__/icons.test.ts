@@ -6,13 +6,19 @@ import {
   searchIconLibrary,
 } from '../icon-library.js';
 import {
+  ICON_DEFAULT_STROKE_WIDTH,
+  ICON_STROKE_MAX,
+  ICON_STROKE_MIN,
   arcsAreCircular,
   circularArcToCubics,
   hasArcCommand,
   iconGeometry,
   ICON_VIEWBOX,
+  drawsAsOutline,
   iconAppearanceKey,
+  iconBoxPx,
   iconLibraryFromStored,
+  iconStrokeInBox,
   pathToSubpaths,
   resolveIconItem,
   supportedPathCommands,
@@ -741,5 +747,83 @@ describe('the bundled library (SPEC 11 §12)', () => {
     expect(library.mixed).toHaveLength(1);
     expect(library.mixed?.[0]?.t).toBe('path');
     expect(library.empty).toEqual([]);
+  });
+});
+
+describe('stroke width (SPEC 11 §12: adjustable 0.5–4)', () => {
+  it('converts the icon units into the box the renderers draw in', () => {
+    /*
+      Lucide draws a 2 px stroke in a 24-box; the shape renderers work in a 100-box. Getting
+      this wrong is not a crash but a wrong picture: too thin and the icon looks washed out,
+      too thick and it closes up into a blob at small sizes.
+    */
+    expect(iconStrokeInBox(undefined)).toBeCloseTo((2 / 24) * 100, 10);
+    expect(iconStrokeInBox(2)).toBeCloseTo((2 / 24) * 100, 10);
+    expect(iconStrokeInBox(4)).toBeCloseTo((4 / 24) * 100, 10);
+    expect(iconStrokeInBox(0.5)).toBeCloseTo((0.5 / 24) * 100, 10);
+  });
+
+  it('clamps rather than refusing, because the alternative is nothing drawn', () => {
+    // The schema already clamps; this is the guard for a hand-edited project.
+    expect(iconStrokeInBox(0)).toBe(iconStrokeInBox(ICON_STROKE_MIN));
+    expect(iconStrokeInBox(-3)).toBe(iconStrokeInBox(ICON_STROKE_MIN));
+    expect(iconStrokeInBox(99)).toBe(iconStrokeInBox(ICON_STROKE_MAX));
+    // And a non-finite value from a corrupt file lands on the default rather than NaN, which
+    // would make the whole canvas path invisible.
+    expect(iconStrokeInBox(Number.NaN)).toBe(iconStrokeInBox(ICON_DEFAULT_STROKE_WIDTH));
+  });
+
+  it('strokes an icon and fills a built-in shape', () => {
+    /*
+      The one decision both renderers read. A filled Lucide icon is a different picture from
+      the icon — a filled star outline is a solid pentagram — so this flag is what keeps the
+      preview and the burn-in showing an outline.
+    */
+    expect(drawsAsOutline({ iconName: 'star' })).toBe(true);
+    expect(drawsAsOutline({ iconShapes: [{ t: 'path', d: 'M0 0 L1 1' }] })).toBe(true);
+    expect(drawsAsOutline({})).toBe(false);
+    expect(drawsAsOutline({ iconShapes: [] })).toBe(false);
+    // A built-in kind is an area: a filled rectangle *is* the shape.
+    expect(drawsAsOutline({ shapeKind: 'rect' } as { iconName?: string })).toBe(false);
+  });
+});
+
+describe('an icon draws in a square box (SPEC 11 §12)', () => {
+  /*
+    A shape's box is a percentage of each axis, which is right for a rectangle: 50%×50% of a
+    16:9 frame is 960×540 px and "half the frame each way" is what a rectangle should do. An
+    icon is square by definition, so drawn into that box it came out at aspect 1.668 —
+    measured on the rendered star — i.e. every icon was stretched 16:9.
+  */
+
+  it('takes the shorter side of the box and centres in it', () => {
+    const box = iconBoxPx({ x: 25, y: 25, width: 50, height: 50 }, { width: 1920, height: 1080 });
+    // 50% x 50% => 960 x 540 px, so the square is 540 and is inset 210 px horizontally.
+    expect(box.width).toBe(540);
+    expect(box.height).toBe(540);
+    expect(box.x).toBe(480 + 210);
+    expect(box.y).toBe(270);
+  });
+
+  it('is already square on a square canvas', () => {
+    const box = iconBoxPx({ x: 25, y: 25, width: 50, height: 50 }, { width: 1000, height: 1000 });
+    expect(box).toEqual({ x: 250, y: 250, width: 500, height: 500 });
+  });
+
+  it('uses the shorter side so an icon never overflows the box', () => {
+    // A wide, short box: the icon must fit inside the height and stay inside the width.
+    const box = iconBoxPx({ x: 0, y: 40, width: 100, height: 20 }, { width: 1920, height: 1080 });
+    expect(box.width).toBe(box.height);
+    expect(box.height).toBeCloseTo(216, 6);
+    expect(box.x).toBeCloseTo((1920 - 216) / 2, 6);
+    expect(box.y).toBeCloseTo(432, 6);
+  });
+
+  it('keeps the transform offset, so a dragged icon stays where it was dragged', () => {
+    const centred = iconBoxPx({ x: 25, y: 25, width: 50, height: 50 }, { width: 1920, height: 1080 });
+    const moved = iconBoxPx({ x: 35, y: 25, width: 50, height: 50 }, { width: 1920, height: 1080 });
+    // A 10% shift right is 192 px, and the square centre moves with it.
+    expect(moved.x - centred.x).toBeCloseTo(192, 6);
+    expect(moved.width).toBe(centred.width);
   });
 });

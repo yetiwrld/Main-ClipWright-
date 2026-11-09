@@ -45,6 +45,7 @@ import {
   Slider,
   TimecodeField,
 } from '@clipwright/design-system';
+import { IconPicker } from './IconPicker.js';
 import {
   contentDurationUs,
   frameDurationUs,
@@ -137,6 +138,12 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
     rightItemId: string;
     us: number;
   } | null>(null);
+  /*
+    The picker is opened *instead of* the menu action completing, so the icon is chosen before
+    an item exists. An item created first and edited afterwards would leave an undo step and a
+    visible star on the timeline for a choice the user then cancelled.
+  */
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLCanvasElement>(null);
@@ -1496,9 +1503,18 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
                   ? markerMenuItems(menu.targetId, timeline, state)
                   : menu.type === 'keyframe' && menu.targetId && menu.property
                     ? keyframeMenuItems(menu.targetId, menu.property, menu.timeUs ?? 0, timeline, fps)
-                    : emptyMenuItems(timeline)}
+                    : emptyMenuItems(timeline, () => setIconPickerOpen(true))}
         />
       )}
+
+      <IconPicker
+        open={iconPickerOpen}
+        onClose={() => setIconPickerOpen(false)}
+        onPick={(iconName, strokeWidth) => {
+          timeline.addIcon(iconName, strokeWidth);
+          setIconPickerOpen(false);
+        }}
+      />
 
       {timeline.notes.length > 0 && (
         <div
@@ -1632,6 +1648,7 @@ function keyframeMenuItems(
 /** Empty track area context menu items (SPEC 09 §21). */
 function emptyMenuItems(
   timeline: TimelineApi,
+  onAddIcon: () => void,
 ): MenuItem[] {
   return [
     { id: 'paste', label: 'Paste', icon: <ClipboardPaste size={14} />, onSelect: () => timeline.paste(playheadStore.get()) },
@@ -1667,7 +1684,9 @@ function emptyMenuItems(
       id: 'add-icon',
       label: 'Add icon',
       icon: <Star size={14} />,
-      onSelect: () => timeline.addIcon('star'),
+      // Opens the picker rather than adding a fixed icon: the set is 1541 icons and a menu
+      // entry that always adds a star is a demo, not a feature.
+      onSelect: onAddIcon,
     },
     {
       id: 'add-adjustment',

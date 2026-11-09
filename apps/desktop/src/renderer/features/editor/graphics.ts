@@ -21,6 +21,7 @@ import type { TimelineItem } from '@clipwright/project-schema';
 import {
   ICON_LIBRARY,
   SHAPE_KINDS,
+  searchIconLibrary,
   captionFrameAt,
   layoutText,
   shapeBoxAt,
@@ -34,7 +35,7 @@ import {
   type ShapeKind,
 } from '@clipwright/compositor';
 
-export { SHAPE_KINDS, shapeGeometry, shapePath, type ShapeKind };
+export { SHAPE_KINDS, shapeGeometry, shapePath, searchIconLibrary, type ShapeKind };
 
 /** An item that draws type or geometry rather than footage. */
 export interface GraphicItemLike {
@@ -45,6 +46,8 @@ export interface GraphicItemLike {
   iconName?: string;
   /** Stored children, when the file carries its own copy of the icon. */
   iconShapes?: readonly IconShape[];
+  /** The icon's stroke width in Lucide's 24-box, 0.5–4 (SPEC 11 §12). */
+  iconStrokeWidth?: number;
   startUs: number;
   durationUs: number;
 }

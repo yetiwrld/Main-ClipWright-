@@ -827,3 +827,111 @@ export function searchIcons(names: readonly string[], query: string): string[] {
   const rank = (name: string) => (name === normalised ? 0 : name.startsWith(normalised) ? 1 : 2);
   return matches.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
+
+/* ----------------------------------------------------------------- stroke --- */
+
+/** Lucide's own stroke width, in the 24-box, and the range SPEC 11 §12 allows. */
+export const ICON_DEFAULT_STROKE_WIDTH = 2;
+export const ICON_STROKE_MIN = 0.5;
+export const ICON_STROKE_MAX = 4;
+
+/**
+ * The stroke width an item draws with, in `ShapeSubpath` units — and the one place that
+ * unit is decided.
+ *
+ * Two renderers have to agree about this or an icon is outlined on the canvas and filled in
+ * the file, so the conversion lives here rather than in either of them. Lucide draws in a
+ * 24-box and the shape renderers in a 100-box, so a width of 2 becomes `2 / 24 * 100`. The
+ * item's value is clamped rather than rejected: it comes from a schema that already clamps
+ * it, and a hand-edited project should draw a fat icon, not nothing.
+ */
+export function iconStrokeInBox(strokeWidth?: number): number {
+  /*
+    `Number.isFinite` first, because `Math.min`/`Math.max` propagate `NaN` rather than
+    clamping it — a corrupt file with `"iconStrokeWidth": "2"` or a `null` reaching here as
+    `NaN` would otherwise put `NaN` in every coordinate derived from the width, and a canvas
+    path with a `NaN` width is not a thin icon, it is no icon at all.
+  */
+  const requested = strokeWidth ?? ICON_DEFAULT_STROKE_WIDTH;
+  const width = Number.isFinite(requested) ? requested : ICON_DEFAULT_STROKE_WIDTH;
+  const clamped = Math.min(ICON_STROKE_MAX, Math.max(ICON_STROKE_MIN, width));
+  return (clamped / ICON_VIEWBOX) * 100;
+}
+
+/**
+ * Whether an item draws as an outline rather than a filled area.
+ *
+ * Only icons do. A shape from `shapeGeometry` is an area — a filled rectangle is the shape —
+ * while a Lucide icon is a set of strokes around an open path, and filling one draws a
+ * silhouette that is a different picture from the icon.
+ */
+export function drawsAsOutline(item: { iconName?: string; iconShapes?: readonly IconShape[] }): boolean {
+  return Boolean(item.iconName) || (item.iconShapes?.length ?? 0) > 0;
+}
+
+/* ------------------------------------------------------------------- box --- */
+
+/**
+ * Where an icon item draws, in **pixels**, as a square.
+ *
+ * `shapeBoxAt` returns a box in percent of each axis, which is right for a shape: a 50%×50%
+ * rectangle in a 16:9 frame is 960×540 px and that is what "half the frame each way" means.
+ * For an icon it is wrong, because a Lucide icon is square by definition — drawn into a
+ * 960×540 box it came out at **aspect 1.668 instead of 1.0**, measured on the rendered star,
+ * so every icon was stretched 16:9.
+ *
+ * So an icon takes the box's shorter side as its side and centres it in the box. Shorter
+ * rather than longer so the icon never overflows the area the user sized, and centred so the
+ * transform still moves it where it was dragged.
+ */
+export function iconBoxPx(
+  box: { x: number; y: number; width: number; height: number },
+  canvas: { width: number; height: number },
+): { x: number; y: number; width: number; height: number } {
+  const left = (box.x / 100) * canvas.width;
+  const top = (box.y / 100) * canvas.height;
+  const boxWidth = (box.width / 100) * canvas.width;
+  const boxHeight = (box.height / 100) * canvas.height;
+  const side = Math.min(boxWidth, boxHeight);
+  return {
+    x: left + (boxWidth - side) / 2,
+    y: top + (boxHeight - side) / 2,
+    width: side,
+    height: side,
+  };
+}
+
+/* -------------------------------------------------------------- thumbnails --- */
+
+/**
+ * The SVG `d` attribute for a set of subpaths, for drawing a *thumbnail*.
+ *
+ * The third serialiser over this geometry, after the canvas painter and the ASS drawing — and
+ * it exists for a different job: a picker showing 1541 icons needs each one as a small vector,
+ * and rasterising 1541 canvases to show a grid is not a thing to do on every keystroke.
+ *
+ * This is the one place markup is correct. The rule the rest of this module keeps — that the
+ * renderers take geometry, never markup — is about the preview and the export, which must
+ * agree about a frame. A thumbnail agrees about nothing; it is a picture of the icon in a
+ * dialog, and SVG is the smallest way to draw 1541 of them.
+ *
+ * Numbers are rounded to 2dp: at a 24 px tile that is well under a pixel, and it keeps the
+ * markup small enough that a whole grid is one string per icon.
+ */
+export function subpathsToSvgPath(subpaths: readonly ShapeSubpath[]): string {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return subpaths
+    .map((subpath) => {
+      const parts = [`M${round(subpath.x)} ${round(subpath.y)}`];
+      for (const segment of subpath.segments) {
+        parts.push(
+          segment.op === 'line'
+            ? `L${round(segment.x)} ${round(segment.y)}`
+            : `C${round(segment.c1x)} ${round(segment.c1y)} ${round(segment.c2x)} ${round(segment.c2y)} ${round(segment.x)} ${round(segment.y)}`,
+        );
+      }
+      if (subpath.closed) parts.push('Z');
+      return parts.join(' ');
+    })
+    .join(' ');
+}

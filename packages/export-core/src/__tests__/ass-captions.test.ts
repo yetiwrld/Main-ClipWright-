@@ -728,6 +728,33 @@ describe('a shape becomes a drawing, not text (SPEC 11 §12)', () => {
     expect(assDialogue(cue!, options)).toContain('Dialogue:');
   });
 
+  it('strokes an icon cue and fills a shape cue', () => {
+    /*
+      The distinction both renderers read. `outline` and `strokeInBox` are on the cue because
+      the serialiser never sees the item, and the preview decides the same two values from the
+      item with the same compositor functions.
+    */
+    const [icon] = assCuesFromPlan(plan([{ type: 'shape', startUs: 0, durationUs: 1_000_000, iconName: 'star', iconStrokeWidth: 3 }]));
+    expect(icon!.shape?.outline).toBe(true);
+    expect(icon!.shape?.strokeInBox).toBeCloseTo((3 / 24) * 100, 10);
+
+    const [rect] = assCuesFromPlan(plan([shape()]));
+    expect(rect!.shape?.outline).toBe(false);
+    // A shape still carries a width, because the cue type is one shape — it is simply unused.
+    expect(rect!.shape?.strokeInBox).toBeGreaterThan(0);
+  });
+
+  it('writes a stroke, not a silhouette, for an icon in the script', () => {
+    // `\1a&HFF&` is the alpha override that hollows the fill; `\3c` carries the colour.
+    const script = buildAssScript(
+      assCuesFromPlan(plan([{ type: 'shape', startUs: 0, durationUs: 1_000_000, iconName: 'star' }])),
+      options,
+    );
+    expect(script).toContain('\\1a&HFF&');
+    expect(script).toContain('\\3c');
+    expect(script).toContain('\\bord');
+  });
+
   it('leaves out an icon this build cannot draw rather than substituting one', () => {
     // `gift` is refused for an elliptical arc; the preview cannot draw it either, so the
     // user sees it missing where they placed it rather than only in the rendered file.
