@@ -20,6 +20,7 @@ import {
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
+import { itemBounds, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
   nextAreaOverlay,
@@ -618,6 +619,61 @@ export function PreviewPane({
 
 
 
+  /*
+    Every layer's geometry at the current instant, keyed by id, plus the drawn bounds
+    snapping measures against.
+
+    Computed here rather than inside the render loop because a drag needs its
+    *neighbours'* bounds, and no item can know those while the others are still being
+    drawn. One pass, then a lookup per layer.
+  */
+  const layerGeometry = useMemo(() => {
+    const byId: Record<string, ReturnType<typeof itemGeometry>> = {};
+    for (const layer of layers) {
+      const item = state.items[layer.id];
+      if (!item) continue;
+      byId[layer.id] = itemGeometry({
+        ...item,
+        timeUs: playheadUs,
+        canvas: { width: canvas.width, height: canvas.height },
+      });
+    }
+    return byId;
+  }, [layers, state.items, playheadUs, canvas.width, canvas.height]);
+
+  /*
+    The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
+    clip to where it already is would pin it in place — so the map is of *every* item and
+    the drag filters; doing it the other way round would need one map per dragged item.
+  */
+  const snapBounds = useMemo(() => {
+    const canvasAspect =
+      canvas.height > 0 && Number.isFinite(canvas.width / canvas.height)
+        ? canvas.width / canvas.height
+        : 1;
+    const bounds: Record<string, { x: ItemBounds; y: ItemBounds }> = {};
+    for (const [id, geometry] of Object.entries(layerGeometry)) {
+      /*
+        The drawn size in canvas fractions: `source.width` is already a fraction of the
+        canvas width, and the scale multiplies it. Crop is already folded into
+        `source.width`, so a cropped clip snaps to the edges of what is actually visible.
+      */
+      const width = geometry.source.width * geometry.scaleX;
+      const height = geometry.source.height * geometry.scaleY;
+      bounds[id] = {
+        x: itemBounds(geometry.offsetX, width, geometry.rotation, height, canvasAspect),
+        y: itemBounds(
+          geometry.offsetY,
+          height,
+          geometry.rotation,
+          width,
+          Number.isFinite(canvasAspect) && canvasAspect > 0 ? 1 / canvasAspect : 1,
+        ),
+      };
+    }
+    return bounds;
+  }, [layerGeometry, canvas.width, canvas.height]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
@@ -654,6 +710,12 @@ export function PreviewPane({
           {overlaysVisible(overlays) ? (
             <PreviewOverlays state={overlays} data={SAFE_AREAS} zone={platformZone} />
           ) : null}
+          {/*
+            Every layer's geometry, computed before the render loop rather than inside
+            it, because snapping needs the *other* items' bounds — and an item cannot
+            know its neighbours while its neighbours are still being drawn. One pass
+            here, one lookup below.
+          */}
           {layers.length > 0 ? (
             layers.map((layer: VisibleLayer, index: number) => {
               const transition = transitionFor(layer, state, playheadUs);
@@ -685,6 +747,25 @@ export function PreviewPane({
                 timeUs: playheadUs,
                 canvas: { width: canvas.width, height: canvas.height },
               });
+              /*
+                What this drag can snap to, and where its own edges are.
+
+                `others` excludes this item: snapping a clip to a line it already sits on
+                would pin it in place for the whole gesture. The extents are the drawn
+                size in canvas fractions, which is what `snapAxis` measures half of.
+              */
+              const snapExtent = {
+                x: geometry.source.width * geometry.scaleX,
+                y: geometry.source.height * geometry.scaleY,
+              };
+              const snapOthers = {
+                x: Object.entries(snapBounds)
+                  .filter(([id]) => id !== layer.id)
+                  .map(([, bounds]) => bounds.x),
+                y: Object.entries(snapBounds)
+                  .filter(([id]) => id !== layer.id)
+                  .map(([, bounds]) => bounds.y),
+              };
               const editable = Boolean(timeline) && selectedId === layer.id;
               return (
               <PreviewLayer
@@ -716,6 +797,8 @@ export function PreviewPane({
                       size: { width: box.width, height: box.height },
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
+                      extent: snapExtent,
+                      others: snapOthers,
                       rect: { x: 0, y: 0, width: box.width, height: box.height },
                     },
                     canvasRef.current,
@@ -744,6 +827,8 @@ export function PreviewPane({
                       size: { width: box.width, height: box.height },
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
+                      extent: snapExtent,
+                      others: snapOthers,
                       // The pivot has to be measured against the *picture's* box, so
                       // the handle turns about the crosshair rather than the frame.
                       rect: fitBox
@@ -776,6 +861,8 @@ export function PreviewPane({
                       size: fit ? { width: fit.offsetWidth, height: fit.offsetHeight } : { width: box.width, height: box.height },
                       scaleX: geometry.scaleX,
                       scaleY: geometry.scaleY,
+                      extent: snapExtent,
+                      others: snapOthers,
                       rect: fitBox
                         ? {
                             x: fitBox.left - box.left,

@@ -37,6 +37,15 @@ import {
   type CropEdge,
   type CropEdges,
 } from './canvas-drag.js';
+import {
+  itemBounds,
+  snapAxis,
+  snapTargetsFor,
+  snapThresholdPx,
+  snappingApplies,
+  type ItemBounds,
+  type SnapTarget,
+} from './snapping.js';
 
 export interface CanvasDragTarget {
   itemId: string;
@@ -61,6 +70,16 @@ export interface CanvasDragTarget {
   /** The transform the picture is drawn with, so a pointer can be carried back. */
   scaleX: number;
   scaleY: number;
+  /**
+   * The picture's drawn size in canvas fractions, for snapping: half of each is the
+   * distance from the item's centre to its edge, which is what `snapAxis` needs.
+   */
+  extent: { x: number; y: number };
+  /**
+   * Every *other* visible item's bounds, in canvas fractions from the canvas centre —
+   * the lines this drag can snap to (SPEC 10 §8.8).
+   */
+  others: { x: readonly ItemBounds[]; y: readonly ItemBounds[] };
 }
 
 /** The values a gesture can change, as they stand at any moment during it. */
@@ -105,6 +124,8 @@ interface Gesture {
    */
   centre: { x: number; y: number };
   startCentreDistance: number;
+  /** The guide lines this drag is currently snapped to, for drawing them. */
+  snapped: { x: SnapTarget | null; y: SnapTarget | null };
   /** The canvas's top-left in client coordinates, so pointer positions can be
    * converted back into the picture's own space. */
   boxLeft: number;
@@ -290,6 +311,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
           x: box.left + target.rect.x + target.rect.width / 2,
           y: box.top + target.rect.y + target.rect.height / 2,
         },
+        snapped: { x: null, y: null },
         startCentreDistance: Math.hypot(
           event.clientX - (box.left + target.rect.x + target.rect.width / 2),
           event.clientY - (box.top + target.rect.y + target.rect.height / 2),
@@ -336,7 +358,31 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
         { xPixels: locked === 'y' ? 0 : dx, yPixels: locked === 'x' ? 0 : dy },
         current.canvas,
       );
-      current.to = { ...current.to, ...moved };
+      /*
+        Snapping applies to a move only. Scaling and rotating have their own arithmetic
+        that a snap would fight — a scale is measured from a corner the user is holding,
+        and nudging it onto a guide would move the picture out from under the pointer.
+        SPEC 10 §8.8 lists canvas edges, item edges and centres as the move targets, and
+        `Alt` bypasses the lot.
+      */
+      const snapped = snappingApplies(event)
+        ? {
+            x: snapAxis(
+              moved.x,
+              current.target.extent.x / 2,
+              snapTargetsFor('x', { others: current.target.others.x }),
+              snapThresholdPx(current.canvas.width),
+            ),
+            y: snapAxis(
+              moved.y,
+              current.target.extent.y / 2,
+              snapTargetsFor('y', { others: current.target.others.y }),
+              snapThresholdPx(current.canvas.height),
+            ),
+          }
+        : null;
+      current.snapped = { x: snapped?.x.target ?? null, y: snapped?.y.target ?? null };
+      current.to = { ...current.to, x: snapped?.x.position ?? moved.x, y: snapped?.y.position ?? moved.y };
     } else if (current.mode === 'anchor') {
       /*
         Dragging the crosshair moves the pivot *without moving the picture* — the

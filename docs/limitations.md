@@ -78,9 +78,17 @@ This document tracks architectural scope boundaries and honest limitations per `
    through the picture's own rotation, because a 90° turn swaps the bounding box's axes
    and box arithmetic silently puts things in the wrong place.
 
-   Still missing: **`Alt` does nothing on a body drag**, because SPEC 10 §8.2's "Alt
-   disables snapping" has nothing to disable — there is no 8 px canvas snapping or
-   guide system (§9's guides) built yet, so the modifier is inert until one is. The
+   Snapping (SPEC 10 §8.8) pulls a dragged clip onto the canvas centre lines, the canvas
+   edges and every other visible item's edges and centres, at 8 screen pixels, with `Alt`
+   to bypass. It is measured on screen so it feels the same at any preview size, and it is
+   applied to a *move* only — a scale or a rotate has its own arithmetic that a snap would
+   fight.
+
+   Still missing from §8.8: **the guide lines are not drawn.** Snapping silently aligns the
+   clip but shows no `--brand` line, no distance label, and there is no cap of four lines;
+   the gesture knows which target it hit and nothing renders it yet. **Equal-spacing hints**,
+   **user guides** (`Ctrl`-drag from the viewport edge, saved with the project) and the
+   **3×3 grid overlay** are all absent, as is snapping to safe-area edges. And the
    **four edge handles still crop rather than scaling one axis each**: crop is
    reachable along the whole edge, which keeps the gesture this app has always had,
    but it means SPEC 10 §8.2's per-axis scale has no pointer affordance. And the
