@@ -163,12 +163,16 @@ This document tracks architectural scope boundaries and honest limitations per `
    is rendered at would be a switch that does nothing. The four **edge handles** now
    scale the one axis each governs, as §8.2 asks, with `Shift` giving them the uniform
    corner behaviour; cropping moved onto the **Crop tool** (`C`), which is where §8.6 puts
-   it. What the crop tool does *not* have is §8.6's crop rectangle over the uncropped
-   source, its eight handles, the aspect-lock select (Free/Original/1:1/9:16/16:9/4:5/
-   Canvas), the rounded-corner slider, its dimmed-outside look, or `Enter`/`Esc` as
-   apply-and-cancel. Dragging an edge crops in place instead, against the picture's own
-   drawn box rather than against the source, and an `Esc` does abandon the drag. So the
-   gesture is there and the tool frame around it is not.
+   it, and the tool now owns a *frame*: a rectangle over the **uncropped** source with eight
+   handles, the four dimmed regions outside it, the aspect-lock select (Free/Original/1:1/
+   9:16/16:9/4:5/Canvas), a rounded-corners slider, and `Enter`/`Esc` as apply-and-cancel.
+   The session is a draft in view state, not a document edit, so several drags cost one undo
+   step and `Esc` costs none. What is missing is §8.6's **\"Set framing…\"** button and the
+   video-reframe gesture behind it (the manual precursor of auto-reframe, `13`), and the
+   radius is capped at 50% of the window's short side — a larger value is an ellipse rather
+   than a rounder corner, and the export's mask draws it that way too. Cropping works through
+   the frame only: the clip's own edge handles always scale (§8.2), whatever tool is active,
+   because two live crop paths disagreed about *when* they wrote.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
    them.** SPEC 12 §2.6 asks for a lot: wheel zoom, middle-drag pan, fit selection,
    snapping, and numeric copy/paste/mirror/reverse/scale-time/scale-value tools for

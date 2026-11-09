@@ -201,3 +201,51 @@ without either being a modifier away.
   away from the side the user is not touching. It is computed from the drawn box captured
   at pointer-down, for the same reason the corner path captures it: a mid-drag layout shift
   would otherwise move the side that is meant to be still.
+
+## 13. The crop session is a draft, and the frame sits over the uncropped source
+
+**Decision:** the Crop tool's frame (SPEC 10 §8.6) edits a **draft** held in view state.
+Nothing is written to the document until `Enter`; `Esc` discards the session. The frame is
+drawn over the **uncropped** source, so the picture is rendered whole while the tool is on
+— the stored crop is dropped for that layer and nothing else is.
+
+**Reasoning:** §8.6 asks for apply-and-cancel over a rectangle drawn on the uncropped
+source, and neither half survives a per-gesture write. Writing each drag straight to the
+document makes `Esc` a thing that can only undo what it is meant to discard, one undo entry
+at a time; and drawing the frame over the *cropped* picture makes widening a crop
+impossible, because the area the user would widen into is already invisible, so the grips
+sit on the edge of a picture that has been cut away. Both are the same underlying choice:
+the session is a statement about the picture, and the picture has to be whole for the
+statement to be expressible.
+
+**Consequences:**
+- A session that changed nothing pushes no undo step, compared with a 1e-6 tolerance
+  (`cropChanged`). `Enter` on an untouched frame is a way to leave the tool, not an edit, and
+  an empty undo entry teaches the user not to trust `Ctrl+Z`. The tolerance is the other
+  direction of the same rule: a drag that returned to its start lands a few ulps away and
+  must not be recorded as a change either.
+- Cropping now happens **only** through the frame. The clip's own edge handles always scale
+  their one axis (§8.2), under every tool. Keeping the old per-clip edge-crop alive
+  alongside the frame would have left two overlapping hit tests that disagree about *when*
+  they write — one on pointer-up, one held until `Enter` — so a drag near an edge could be
+  committed by one and reverted by the other's `Esc`.
+- Exiting the tool by any route is the same as `Esc`. The draft is adopted when a session
+  opens and dropped when it closes, so pressing `V` half-way through cannot leave a crop the
+  user never applied.
+- Applying goes through `commitKeyed`, like every other canvas edit. Writing
+  `setItemProperties` directly was a real bug the existing §2.4 test caught: an animated
+  clip's crop appeared to work and then vanished on the next redraw, because the evaluator
+  reads the keys and ignores the static field.
+- The locked aspect grows the *other* axis from its **own centre**, and refuses rather than
+  clamping when that centring would push the window off the source. Clamping one side while
+  refusing the mirror case made the same situation behave two ways — a window near the top
+  slid down to stay legal, and the mirror image near the bottom was refused — and sliding
+  breaks the framing the user chose as much as refusing does.
+- The corner radius needed a field that existed but was read by nothing. `crop.radius` is
+  now resolved in `itemGeometry`, capped at half the **cropped** window's short side (past
+  that it is an ellipse, and renderers disagree about which), and drawn as a `borderRadius`
+  clip on the element whose `overflow: hidden` already does the cropping — so the preview
+  and the export cut one shape rather than two. A broken value falls back to square, because
+  a `NaN` radius blanks the layer without throwing.
+- §8.6's **"Set framing…"** button and the reframe gesture behind it (the manual precursor
+  of auto-reframe, `13`) are *not* built. The limitation records it.

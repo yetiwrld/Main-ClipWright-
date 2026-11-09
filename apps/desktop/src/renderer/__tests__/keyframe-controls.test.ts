@@ -167,6 +167,9 @@ describe('the animatable property list', () => {
       'crop.right',
       'crop.top',
       'crop.bottom',
+      // Added with the Crop tool's radius slider (§8.6): `itemGeometry` resolves it to
+      // `geometry.radius`, which the layer draws as a `borderRadius` clip.
+      'crop.radius',
     ]);
     for (const property of ANIMATABLE_PROPERTIES) {
       expect(evaluated.has(property.path), `${property.path} is not read by any consumer`).toBe(true);

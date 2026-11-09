@@ -896,6 +896,7 @@ describe('the animatable-property list is the contract (SPEC 12 §2.4)', () => {
       'crop.right': { label: 'Crop right', value: '20' },
       'crop.top': { label: 'Crop top', value: '20' },
       'crop.bottom': { label: 'Crop bottom', value: '20' },
+      'crop.radius': { label: 'Crop radius', value: '20' },
     };
 
     for (const property of ANIMATABLE_PROPERTIES) {

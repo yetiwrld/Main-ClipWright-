@@ -597,6 +597,37 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           </KeyframeRow>
         ))}
       </div>
+      {/*
+        The corner radius (SPEC 10 §8.6). A percentage of the cropped window's short side, which
+        is the unit the schema stores and the canvas slider speaks, so a value means the same
+        shape at any preview zoom. Capped at 50: past that the corners are not rounder, they are
+        elliptical, and every renderer draws those differently.
+      */}
+      <KeyframeRow
+        label="Rounded corners (% of short side)"
+        accessibleName="Rounded corners"
+        path="crop.radius"
+        value={item.crop.radius}
+        item={item}
+        timeline={timeline}
+      >
+        <Input
+          type="number"
+          min={0}
+          max={50}
+          value={Math.round((item.crop.radius ?? 0) * 100)}
+          aria-label="Crop radius"
+          onChange={(event) => {
+            if (event.target.value.trim() === '') return;
+            const percent = Number(event.target.value);
+            if (!Number.isFinite(percent)) return;
+            const fraction = Math.min(50, Math.max(0, percent)) / 100;
+            applyAnimatable(timeline, item, 'crop.radius', fraction, () =>
+              timeline.setItemProperties([item.id], { crop: { radius: fraction } }),
+            );
+          }}
+        />
+      </KeyframeRow>
 
       <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Transform</div>
       {/*

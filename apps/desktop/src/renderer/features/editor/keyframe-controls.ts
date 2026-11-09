@@ -62,6 +62,8 @@ export const ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   { path: 'crop.right', label: 'Crop right' },
   { path: 'crop.top', label: 'Crop top' },
   { path: 'crop.bottom', label: 'Crop bottom' },
+  // The label is the inspector's own, because the contract test looks the diamond up by it.
+  { path: 'crop.radius', label: 'Rounded corners' },
 ];
 
 /**

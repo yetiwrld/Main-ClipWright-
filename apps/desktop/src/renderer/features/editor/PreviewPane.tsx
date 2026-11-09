@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
   Crop,
   Frame,
   Grid3x3,
@@ -93,6 +94,16 @@ import {
 import safeAreasData from '../../../../../../assets/safe-areas.json';
 import { CaptionOverlay } from './CaptionOverlay.js';
 import { HANDLE_SIZE, croppedEdge, handleAt, movedOffset, pixelsToFraction, type CropEdge } from './canvas-drag.js';
+import { CropFrame } from './CropFrame.js';
+import {
+  ASPECT_CHOICES,
+  appliedAspect,
+  cropChanged,
+  cropRect,
+  radiusCss,
+  resolveAspect,
+  type AspectChoice,
+} from './crop-tool.js';
 import type { TimelineApi } from './use-timeline.js';
 import { useCanvasDrag } from './use-canvas-drag.js';
 import { commitKeyed } from './keyframe-controls.js';
@@ -292,6 +303,37 @@ const CSS_BLEND_MODE: Record<string, React.CSSProperties['mixBlendMode']> = {
  * the main-track item, scaled into the project canvas. Playback advances the
  * playhead from a real clock and lets the video element follow it.
  */
+/**
+ * What the Crop tool is editing: the clip, and the crop as the session currently stands.
+ *
+ * The crop is carried whole rather than read back from the document, because a session holds a
+ * draft the document does not have yet (SPEC 10 §8.6's `Enter`/`Esc`).
+ */
+/** The human names for the aspect choices, in §8.6's own words. */
+const ASPECT_LABELS: Record<AspectChoice, string> = {
+  free: 'Free',
+  original: 'Original',
+  '1:1': '1:1',
+  '9:16': '9:16',
+  '16:9': '16:9',
+  '4:5': '4:5',
+  canvas: 'Canvas',
+};
+
+interface CropTarget {
+  itemId: string;
+  crop: CropEdgesWithRadius;
+}
+
+/** A crop plus its rounded-corner radius, which the frame and the frame's slider both edit. */
+type CropEdgesWithRadius = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  radius: number;
+};
+
 export function PreviewPane({
   state,
   fps,
@@ -379,6 +421,25 @@ export function PreviewPane({
   */
   const [handlesOn, setHandlesOn] = useState(true);
   const [tool, setTool] = useState<PreviewTool>('select');
+  /*
+    The Crop tool's *session* (SPEC 10 §8.6): a draft crop, the locked aspect, and the crop the
+    session started from.
+
+    A draft rather than a write per gesture, because §8.6 says `Enter` applies and `Esc` throws
+    the whole session away — several drags, one undo step. Writing on every pointer-up would
+    make `Esc` unable to undo what it is meant to discard, and would leave a dozen entries in
+    the undo stack for one framing.
+  */
+  const [cropDraft, setCropDraft] = useState<CropEdgesWithRadius | null>(null);
+  const [aspectChoice, setAspectChoice] = useState<AspectChoice>('free');
+  /*
+    The selected clip's source aspect, as reported by its own media element.
+
+    `null` until a frame has loaded, which is the honest state: the crop's locked ratios are
+    ratios of the *source*, and before the first frame there is no source to speak of. The
+    canvas aspect is used as a stand-in until then, which is what the preview itself does.
+  */
+  const [sourceAspect, setSourceAspect] = useState<number | null>(null);
   /*
     Whether Space is currently held, for Space+drag (SPEC 10 §4).
 
@@ -776,6 +837,114 @@ export function PreviewPane({
   const selectedId = timeline?.selection.length === 1 ? timeline.selection[0] : undefined;
 
   /*
+    The crop session (SPEC 10 §8.6), and the three things that end it.
+
+    Opening: the Crop tool with exactly one clip selected. Closing writes nothing — the draft
+    *is* the edit until `Enter`, so leaving the tool by any route has to be the same as `Esc`,
+    or a user who pressed `V` would keep a crop they never applied.
+  */
+  const cropTarget: CropTarget | null = (() => {
+    if (tool !== 'crop' || !selectedId || !timeline) return null;
+    const item = state.items[selectedId];
+    if (!item) return null;
+    return {
+      itemId: selectedId,
+      crop: {
+        left: item.crop?.left ?? 0,
+        top: item.crop?.top ?? 0,
+        right: item.crop?.right ?? 0,
+        bottom: item.crop?.bottom ?? 0,
+        radius: item.crop?.radius ?? 0,
+      },
+    };
+  })();
+  /*
+    The draft is adopted from the document when the session opens, and dropped when it closes.
+    Doing it with an effect rather than during render keeps the "start from the stored crop"
+    rule in one place — and means switching tool or clip mid-session throws the draft away
+    instead of applying it to whatever is selected next.
+  */
+  /**
+   * The source as the crop arithmetic sees it: unit height, the reported ratio as its width.
+   *
+   * Only the ratio is ever read, so this is the whole of the source's shape — and expressing it
+   * this way means the value is correct the moment a frame loads rather than depending on a
+   * resolution the document does not store. The canvas stands in until then, which is the same
+   * guess the preview itself makes before the first frame.
+   */
+  const cropSource = { width: sourceAspect ?? canvas.width / Math.max(1, canvas.height), height: 1 };
+  const cropSessionKey = cropTarget ? `${cropTarget.itemId}:${String(tool === 'crop')}` : null;
+  const sessionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sessionKeyRef.current === cropSessionKey) return;
+    sessionKeyRef.current = cropSessionKey;
+    setCropDraft(cropTarget ? cropTarget.crop : null);
+    setAspectChoice('free');
+  }, [cropSessionKey, cropTarget]);
+
+  /**
+   * `Enter` — write the session's crop as **one** edit (SPEC 10 §8.6).
+   *
+   * Guarded by `cropChanged` so a session that moved nothing pushes no undo step: `Enter` on an
+   * untouched frame is a way to leave the tool, not an edit, and an empty undo entry makes the
+   * next `Ctrl+Z` look broken.
+   *
+   * The radius travels with the edges in the same write. Writing it separately would give the
+   * session two undo entries whenever the user had both dragged and rounded.
+   */
+  const applyCrop = useCallback(() => {
+    const target = cropTarget;
+    const draft = cropDraft;
+    if (!timeline || !target || !draft) return;
+    const before = target.crop;
+    if (!cropChanged(before, draft) && (draft.radius ?? 0) === (before.radius ?? 0)) return;
+    /*
+      Only the edges that actually moved are written, which is what makes an aspect-locked
+      session show up in the undo stack as "the crop changed on two sides" rather than as a
+      no-op write of the two it left alone — and it keeps a keyframed edge untouched.
+    */
+    const changed: { path: string; value: number }[] = [];
+    for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+      if (Math.abs((before[edge] ?? 0) - (draft[edge] ?? 0)) >= 1e-6) {
+        changed.push({ path: `crop.${edge}`, value: draft[edge] ?? 0 });
+      }
+    }
+    if ((draft.radius ?? 0) !== (before.radius ?? 0)) {
+      changed.push({ path: 'crop.radius', value: draft.radius ?? 0 });
+    }
+    /*
+      Through `commitKeyed`, like every other canvas edit, so a crop applied to an *animated*
+      clip lands as a keyframe at the playhead (SPEC 12 §2.4) instead of silently overwriting
+      the static value the animation already overrides. Writing `setItemProperties` directly
+      made the frame's crop appear to work and then vanish on the next redraw.
+    */
+    const item = state.items[target.itemId];
+    if (!item) return;
+    const writer = {
+      playheadUs: quantizeUs(playheadStore.get(), fps),
+      addKeyframe: (id: string, path: string, at: number, value: number) =>
+        timeline.addKeyframe(id, path, at, value),
+      updateKeyframe: (id: string, path: string, at: number, patch: { value: number }) =>
+        timeline.updateKeyframe(id, path, at, patch),
+    };
+    const crop: Record<string, number> = {};
+    for (const { path, value } of changed) crop[path.slice('crop.'.length)] = value;
+    commitKeyed(writer, item, changed, () => timeline.setItemProperties([target.itemId], { crop }));
+    setTool('select');
+  }, [cropDraft, cropTarget, timeline, state.items, fps]);
+
+  /**
+   * `Esc` — throw the session away (SPEC 10 §8.6).
+   *
+   * Nothing was written, so there is nothing to undo: dropping the draft and leaving the tool
+   * is the whole of it. Distinct from `applyCrop` for that reason rather than by symmetry.
+   */
+  const cancelCrop = useCallback(() => {
+    setCropDraft(null);
+    setTool('select');
+  }, []);
+
+  /*
     `Esc` abandons an in-flight drag (SPEC 10 §8.3). Bound at the document rather than
     the canvas because the pointer may have been captured by the layer and focus can be
     anywhere; the handler is only active while a gesture is running, so it does not
@@ -791,6 +960,41 @@ export function PreviewPane({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [drag.dragging, drag.cancel]);
+
+  /*
+    `Enter` applies the crop session and `Esc` cancels it (SPEC 10 §8.6).
+
+    A session-level binding, separate from the drag's `Esc` above, because the two `Esc` keys
+    mean different things at different moments: while a drag is in flight it drops that drag and
+    leaves the session open, and with no drag running it closes the session. Both listeners are
+    registered, so the drag's one runs first and the session's sees a gesture that has already
+    been cancelled — which is why it stands down while `drag.dragging` is still true.
+  */
+  useEffect(() => {
+    if (!cropDraft) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      /*
+        Guarded against text fields and selects for the same reason `H`/`C` are: `Enter` is how
+        a dropdown is committed, and swallowing it here would leave the aspect select unusable
+        from the keyboard.
+      */
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyCrop();
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelCrop();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [cropDraft, applyCrop, cancelCrop]);
 
 
 
@@ -1532,10 +1736,23 @@ export function PreviewPane({
                 two arms are fractions of different sides, and a non-square canvas made
                 them disagree by the aspect ratio.
               */
+              /*
+                While the Crop tool is editing this clip, *everything but the crop itself* comes
+                from the item: the picture is drawn whole, so the frame has something to frame.
+
+                §8.6 asks for the rectangle "over the **uncropped** source", and that is not a
+                cosmetic choice — with the stored crop applied, the part of the picture outside
+                the window is invisible, so a user could never widen the crop back out: the grips
+                would sit on the edge of a picture that has already been cut. Only the crop is
+                dropped; a scale, a rotation and a position still apply, so the frame lands over
+                the picture as it is actually placed.
+              */
+              const cropping = cropTarget?.itemId === layer.id;
               const geometry = itemGeometry({
                 ...item,
                 ...(live ? { transform: { ...item.transform, x: live.x, y: live.y } } : {}),
                 ...(live ? { crop: live.crop } : {}),
+                ...(cropping ? { crop: {} } : {}),
                 timeUs: playheadUs,
                 canvas: { width: canvas.width, height: canvas.height },
               });
@@ -1619,7 +1836,15 @@ export function PreviewPane({
                       them scale one axis each. Corners scale either way.
                     */
                     undefined,
-                    tool === 'crop' ? 'crop' : 'scale',
+                    /*
+                      Edges never crop here: with the Crop tool on, the *frame* owns cropping
+                      (SPEC 10 §8.6), and this surface keeps its §8.2 edge scale. Leaving the
+                      old edge-crop path switched on as well would have meant two different
+                      crops from two overlapping hit tests — one writing per gesture, one drafting
+                      until `Enter` — which is the kind of disagreement that shows up as a crop
+                      that jumps back when the mouse is released.
+                    */
+                    'scale',
                   );
                 }}
                 onRotateStart={(event) => {
@@ -1703,6 +1928,44 @@ export function PreviewPane({
                   drag.end(event);
                 }}
                 showAnchor={showAnchor}
+                onSourceAspect={cropping ? setSourceAspect : undefined}
+                cropOverlay={
+                  cropping && cropDraft ? (
+                    <CropFrame
+                      /*
+                        The draft, not the stored crop: the whole point of the session is that
+                        the picture follows the pointer while the document stays untouched.
+                      */
+                      crop={cropDraft}
+                      /*
+                        The source, expressed at unit height: the crop arithmetic only ever reads
+                        the *ratio* (`other = dragged × (sourceW/sourceH) / aspect`), so a real
+                        pixel size buys nothing and a guessed one would be a lie in the code.
+                      */
+                      source={cropSource}
+                      aspect={resolveAspect(aspectChoice, {
+                        source: cropSource,
+                        canvas: { width: canvas.width, height: canvas.height },
+                      })}
+                      onPreview={(next) =>
+                        // The radius survives a frame drag: it belongs to the window, not to
+                        // the gesture, and a drag that reset it would undo a slider change
+                        // made a moment earlier.
+                        setCropDraft((current) => ({ ...next, radius: current?.radius ?? 0 }))
+                      }
+                      /*
+                        The release only settles the draft. Nothing is written until `Enter`:
+                        §8.6's `Esc` has to be able to discard a whole session, including drags
+                        that were already visible on screen, and a per-gesture write would make
+                        the crop a document fact that `Esc` could then only undo one step at a
+                        time.
+                      */
+                      onCommit={(next) =>
+                        setCropDraft((current) => ({ ...next, radius: current?.radius ?? 0 }))
+                      }
+                    />
+                  ) : undefined
+                }
                 opacity={layer.opacity * (transition?.fromOpacity ?? 1)}
                 blendMode={layer.blendMode}
                 transitionOffsetX={transition?.offsetX ?? 0}
@@ -1969,6 +2232,91 @@ export function PreviewPane({
             icon={<Crop size={14} />}
             onClick={() => setTool((current) => (current === 'crop' ? 'select' : 'crop'))}
           />
+          {/*
+            The crop session's controls (SPEC 10 §8.6): the aspect lock and the corner radius.
+
+            Only while a session is open, and only in the toolbar rather than in the inspector:
+            both are properties of the frame the user is dragging, so they belong beside the tool
+            that draws it. A session that is not open has no frame, and a lock with nothing to
+            lock would be a control that silently does nothing.
+          */}
+          {cropDraft ? (
+            <>
+              <select
+                aria-label="Crop aspect"
+                value={aspectChoice}
+                onChange={(event) => {
+                  const choice = event.target.value as AspectChoice;
+                  setAspectChoice(choice);
+                  /*
+                    Choosing a ratio reshapes the frame immediately. A lock that only took
+                    effect on the next drag would look broken — the user has stated what shape
+                    they want, and the picture has to answer.
+                  */
+                  const resolved = resolveAspect(choice, {
+                    source: cropSource,
+                    canvas: { width: canvas.width, height: canvas.height },
+                  });
+                  setCropDraft((current) =>
+                    current ? { ...appliedAspect(current, resolved, cropSource), radius: current.radius } : current,
+                  );
+                }}
+                style={{
+                  padding: 'var(--space-1) var(--space-2)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--line-default)',
+                  background: 'var(--surface-raised)',
+                  color: 'var(--text-primary)',
+                  fontSize: 'var(--fs-xs)',
+                }}
+              >
+                {ASPECT_CHOICES.map((choice) => (
+                  <option key={choice} value={choice}>
+                    {ASPECT_LABELS[choice]}
+                  </option>
+                ))}
+              </select>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  fontSize: 'var(--fs-xs)',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                Rounded
+                <input
+                  type="range"
+                  aria-label="Corner radius"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={cropDraft.radius ?? 0}
+                  onChange={(event) => {
+                    const radius = Number(event.target.value);
+                    setCropDraft((current) => (current ? { ...current, radius } : current));
+                  }}
+                  style={{ width: 72 }}
+                />
+              </label>
+              <IconButton
+                label="Cancel crop"
+                shortcut="Esc"
+                size={28}
+                icon={<X size={14} />}
+                onClick={cancelCrop}
+              />
+              <IconButton
+                label="Apply crop"
+                shortcut="Enter"
+                size={28}
+                active
+                icon={<Check size={14} />}
+                onClick={applyCrop}
+              />
+            </>
+          ) : null}
           <IconButton
             label={tool === 'pan' ? 'Pan view (on)' : 'Pan view'}
             shortcut="Space+drag"
@@ -2159,6 +2507,8 @@ const PreviewLayer = memo(function PreviewLayer({
   fps,
   onAnchorStart,
   showAnchor = true,
+  cropOverlay,
+  onSourceAspect,
 }: {
   item: TimelineState['items'][string];
   geometry: ItemGeometry;
@@ -2188,6 +2538,23 @@ const PreviewLayer = memo(function PreviewLayer({
    * must not resurrect it.
    */
   showAnchor?: boolean;
+  /**
+   * The Crop tool's frame, rendered over the **uncropped** source (SPEC 10 §8.6).
+   *
+   * Passed in as a node rather than as a crop and a callback, because the frame is the parent's
+   * session: this layer owns the picture, not the edit, and a layer that both drew the frame and
+   * reported its drags would need the document to agree with a draft.
+   */
+  cropOverlay?: React.ReactNode;
+  /**
+   * The source's own aspect ratio, once the element has told us.
+   *
+   * Reported upward because the Crop tool needs it and lives in the parent: the crop fractions
+   * are relative to the *source*, so a locked aspect has to convert through the source's shape
+   * rather than the canvas's. The layer is the only thing that can measure it — the document
+   * stores a media id, not a resolution.
+   */
+  onSourceAspect?: (aspect: number) => void;
   /**
    * The project's frame rate, for the seek threshold: "close enough" is measured in
    * frames, so half a frame at 60 fps is half the time it is at 30.
@@ -2433,6 +2800,15 @@ const PreviewLayer = memo(function PreviewLayer({
           maxHeight: '100%',
           aspectRatio: `${geometry.source.width * sourceAspect} / ${geometry.source.height}`,
           width: '100%',
+          /*
+            The rounded corners (SPEC 10 §8.6). `overflow: hidden` on the same element already
+            clips the picture to this box, so a radius here is a clip rather than a decoration —
+            which is what makes it survive the export instead of being preview-only chrome.
+
+            A percentage, so it is a fraction of the *cropped* window's short side and means the
+            same shape at preview size and at export size.
+          */
+          borderRadius: radiusCss(geometry.radius, { width: 100, height: 100 }),
           overflow: 'hidden',
         }}
       >
@@ -2476,6 +2852,7 @@ const PreviewLayer = memo(function PreviewLayer({
             }}
           />
         ) : null}
+        {cropOverlay}
         <>
         {/*
           The anchor crosshair sits *outside* the selection overlay's `editable` gate, and
@@ -2620,7 +2997,10 @@ const PreviewLayer = memo(function PreviewLayer({
           crossOrigin="anonymous"
           onLoadedMetadata={(event) => {
             const { videoWidth, videoHeight } = event.currentTarget;
-            if (videoWidth > 0 && videoHeight > 0) setSourceAspect(videoWidth / videoHeight);
+            if (videoWidth > 0 && videoHeight > 0) {
+              setSourceAspect(videoWidth / videoHeight);
+              onSourceAspect?.(videoWidth / videoHeight);
+            }
           }}
           style={{
             position: 'absolute',

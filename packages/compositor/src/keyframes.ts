@@ -43,7 +43,13 @@ export type PropertyPath =
   | 'crop.left'
   | 'crop.top'
   | 'crop.right'
-  | 'crop.bottom';
+  | 'crop.bottom'
+  /*
+    The crop's corner radius (SPEC 10 §8.6). Keyable for the same reason as the edges: a
+    rounded corner that appears partway through a clip is a mask reveal, and refusing it here
+    would have meant the slider worked in the inspector but not on the timeline.
+  */
+  | 'crop.radius';
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 

@@ -24,7 +24,21 @@ import { evaluateProperty } from './keyframes.js';
 
 export interface ItemGeometryInput {
   /** Stored crop edges, 0–1, as fractions of the source. */
-  crop?: { left?: number; top?: number; right?: number; bottom?: number } | undefined;
+  crop?:
+    | {
+        left?: number;
+        top?: number;
+        right?: number;
+        bottom?: number;
+        /**
+         * Corner radius, in **pixels of the cropped source's short side** — the unit SPEC 10
+         * §8.6's slider speaks, so a radius means the same thing whatever the window's size.
+         * Zero is square corners, which is what every project made before this field existed
+         * has, so nothing needed migrating.
+         */
+        radius?: number;
+      }
+    | undefined;
   /**
    * Stored transform. `scale` is the pre-keyframe framing field; `scaleX/scaleY`
    * are the per-axis values the inspector writes.
@@ -98,6 +112,16 @@ export interface ItemGeometry {
   anchorY: number;
   flipH: boolean;
   flipV: boolean;
+  /**
+   * The corner radius to draw, in the same units the crop rectangle is measured in: pixels of
+   * the **cropped source**. The preview converts it to a CSS length and the export to a filter
+   * mask, so a rounded corner means the same shape in both.
+   *
+   * Clamped to half the shorter side, because a radius larger than that is not a rounder
+   * corner — it is an ellipse, and every renderer that has tried to draw it has disagreed with
+   * the others about which one.
+   */
+  radius: number;
   /** True when nothing is set, so a caller can skip the wrapper entirely. */
   identity: boolean;
 }
@@ -238,6 +262,19 @@ export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
   const offsetY = positionY + (sin * armX + cos * armY) * (aspectIsUsable ? canvasAspect : 1);
   const flipH = input.transform?.flipH ?? false;
   const flipV = input.transform?.flipV ?? false;
+  /*
+    The corner radius, clamped to half the shorter side of the *cropped* window. The clamp
+    lives here rather than in the slider because the window can be reshaped by a crop and by
+    keyframes, so a radius that was legal when it was set may not be legal at this instant.
+    A `NaN` or negative radius falls back to square: a broken field should draw a square
+    corner, not blank the layer.
+  */
+  const wantedRadius = at(input.keyframes, timeUs, 'crop.radius', input.crop?.radius ?? 0);
+  const shortSide = Math.min(source.width, source.height);
+  const radius =
+    Number.isFinite(wantedRadius) && wantedRadius > 0
+      ? Math.min(wantedRadius, shortSide / 2)
+      : 0;
 
   const identity =
     source.x === 0 &&
@@ -269,6 +306,7 @@ export function itemGeometry(input: ItemGeometryInput): ItemGeometry {
     anchorY,
     flipH,
     flipV,
+    radius,
     identity,
   };
 }

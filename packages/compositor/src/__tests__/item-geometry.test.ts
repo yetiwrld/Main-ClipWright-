@@ -187,3 +187,49 @@ describe('itemGeometry with keyframes', () => {
     }
   });
 });
+
+describe('the corner radius (SPEC 10 §8.6)', () => {
+  /** The other suite's helper, defined here rather than exported: it is three lines. */
+  const keys = (pairs: Array<[number, number]>) =>
+    pairs.map(([timeUs, value]) => ({ timeUs, value, interpolation: 'linear' as const }));
+
+  it('is zero unless the crop asks for one', () => {
+    // Every project made before the field existed has no radius, and must draw square corners.
+    expect(itemGeometry({}).radius).toBe(0);
+    expect(itemGeometry({ crop: { left: 0.1 } }).radius).toBe(0);
+  });
+
+  it('passes a legal radius through untouched', () => {
+    // 0.2 of a 1×1 window's short side is well under the half-way cap.
+    expect(itemGeometry({ crop: { radius: 0.2 } }).radius).toBe(0.2);
+  });
+
+  it('caps at half the shorter side of the cropped window', () => {
+    /*
+      Past half, the shape is an ellipse rather than a rounder corner, and every renderer that
+      has tried to draw one has disagreed about it. The cap is on the *cropped* window, not the
+      source: cropping narrower must pull the maximum down with it.
+    */
+    expect(itemGeometry({ crop: { radius: 5 } }).radius).toBe(0.5);
+    // A window 0.2 wide is the shorter side, so the cap is 0.1.
+    const narrow = itemGeometry({ crop: { right: 0.8, radius: 5 } });
+    expect(narrow.source.width).toBeCloseTo(0.2, 6);
+    expect(narrow.radius).toBeCloseTo(0.1, 6);
+  });
+
+  it('treats a broken radius as square rather than as NaN', () => {
+    // A NaN radius would blank the layer without throwing, which is the worst failure mode.
+    expect(itemGeometry({ crop: { radius: Number.NaN } }).radius).toBe(0);
+    expect(itemGeometry({ crop: { radius: -1 } }).radius).toBe(0);
+    expect(itemGeometry({ crop: { radius: Number.POSITIVE_INFINITY } }).radius).toBe(0);
+  });
+
+  it('follows the keyframes when it is animated', () => {
+    // The slider is only half the feature: §8.6 stores the radius as keyframeable, so a
+    // rounded corner that appears partway through a clip is a mask reveal.
+    const keyframes = { 'crop.radius': keys([[0, 0], [1_000_000, 0.4]]) };
+    expect(itemGeometry({ keyframes, timeUs: 0 }).radius).toBeCloseTo(0, 6);
+    expect(itemGeometry({ keyframes, timeUs: 500_000 }).radius).toBeCloseTo(0.2, 6);
+    expect(itemGeometry({ keyframes, timeUs: 1_000_000 }).radius).toBeCloseTo(0.4, 6);
+  });
+});

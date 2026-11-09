@@ -307,21 +307,41 @@ describe('the Crop tool decides what an edge drag means', () => {
     expect(transform.scaleY).toBe(1);
   });
 
-  it('crops with the Crop tool on', () => {
+  it('puts cropping on the frame, not on the clip edge, with the Crop tool on', () => {
+    /*
+      The tool no longer changes what the *clip's* edge means — cropping moved to the frame over
+      the uncropped source (SPEC 10 §8.6). So the clip's edge keeps its §8.2 scale under every
+      tool, and the crop comes from the frame instead.
+
+      Asserting both halves together is the point: the interesting failure is the two paths
+      disagreeing, not either one being wrong on its own.
+    */
     stubLayout();
     const timeline = fakeTimeline();
     render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
     fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
 
+    // The clip's own edge: a scale, never a crop.
     fireEvent(layer(), pointer('pointerdown', 2, 200));
     fireEvent(layer(), pointer('pointermove', 40, 200));
     fireEvent(layer(), pointer('pointerup', 40, 200));
-
     const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
-    const patch = calls[0]?.[1] as Record<string, unknown> | undefined;
-    expect(patch).toBeDefined();
-    expect(patch).toHaveProperty('crop');
-    expect(patch).not.toHaveProperty('transform');
+    for (const call of calls) {
+      expect(call[1]).not.toHaveProperty('crop');
+    }
+
+    // The frame: a crop, and only once `Enter` applies the session.
+    const frame = screen.getByTestId('preview-crop-rect');
+    fireEvent(frame, pointer('pointerdown', 2, 200));
+    fireEvent(frame, pointer('pointermove', 40, 200));
+    fireEvent(frame, pointer('pointerup', 40, 200));
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    const cropCall = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      (call) => 'crop' in (call[1] as object),
+    );
+    expect(cropCall).toBeDefined();
+    expect(cropCall![1]).toHaveProperty('crop');
   });
 
   it('toggles on C, and off again', () => {

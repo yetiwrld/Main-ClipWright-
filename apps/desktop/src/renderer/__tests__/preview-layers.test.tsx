@@ -522,33 +522,102 @@ describe('crop-edge drags on the canvas (SPEC 12 Phase 4)', () => {
   const pointer = (type: string, clientX: number, clientY: number) =>
     new MouseEvent(type, { clientX, clientY, bubbles: true });
 
-  it('drags a crop edge instead of moving the clip', () => {
+  it('crops from the frame and writes nothing until Enter', () => {
     /*
-      A drag that began on an edge must write crop, not position. Getting this wrong
-      is subtle: the clip would slide instead of being framed, and the picture would
-      still change under the pointer, so it looks like "something happened".
+      The whole §8.6 contract in one gesture.
 
-      The **Crop tool** now turns that meaning on (SPEC 10 §8.6). With every other tool the
-      same edge scales one axis instead (§8.2), which is why this test presses `C` first —
-      the gesture it guards still has to work, it just has a tool of its own now.
+      A drag on the left edge of the *frame* moves the crop's left inset, and it stays a draft:
+      the document is untouched until `Enter`, so `Esc` can throw the session away. Before the
+      frame existed this surface cropped per drag and wrote on pointer-up, which made the two
+      undo entries a single drag produced impossible to explain to a user who had pressed `Esc`.
     */
     stubBoxes();
     const timeline = fakeTimeline();
     render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
     fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
-    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    const frame = screen.getByTestId('preview-crop-rect');
 
-    // 2 px from the left edge, mid-height. 40 px of travel = a tenth of the width.
-    fireEvent(layer, pointer('pointerdown', 2, 300));
-    fireEvent(layer, pointer('pointermove', 42, 300));
-    fireEvent(layer, pointer('pointerup', 42, 300));
+    // The frame fills the 400×600 box, so 40 px of travel is a tenth of its width.
+    fireEvent(frame, pointer('pointerdown', 2, 300));
+    fireEvent(frame, pointer('pointermove', 42, 300));
+    fireEvent(frame, pointer('pointerup', 42, 300));
 
+    // Nothing written yet: a session in flight is a draft.
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Enter' });
     expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
       crop: { left: 0.1 },
     });
     // The position must be untouched: one gesture, one property.
     const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls.every((call) => !('transform' in (call[1] as object)))).toBe(true);
+  });
+
+  it('applies nothing when Enter follows a session that changed nothing', () => {
+    /*
+      `Enter` on an untouched frame is a way to leave the tool, not an edit. Without the guard
+      it pushes an undo step that changes nothing, so the next `Ctrl+Z` appears to do nothing at
+      all — a dead undo is worse than a missing one, because it teaches the user not to trust it.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    expect(timeline.addKeyframe).not.toHaveBeenCalled();
+    expect(timeline.updateKeyframe).not.toHaveBeenCalled();
+  });
+
+  it('throws the session away on Esc, writing nothing', () => {
+    /*
+      The half of §8.6 that a per-gesture write would make impossible: a drag that was visible
+      on screen and then discarded. Nothing reaches the document at any point, so `Esc` needs no
+      undo of its own — and crucially leaves the clip's *stored* crop in place.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState([{ id: 'a' }])} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
+    const frame = screen.getByTestId('preview-crop-rect');
+
+    fireEvent(frame, pointer('pointerdown', 2, 300));
+    fireEvent(frame, pointer('pointermove', 42, 300));
+    fireEvent(frame, pointer('pointerup', 42, 300));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    // And the tool is back to Select, so the frame is gone.
+    expect(screen.queryByTestId('preview-crop-rect')).toBeNull();
+  });
+
+  it('draws the frame over the uncropped source, not over the crop', () => {
+    /*
+      §8.6 says the rectangle goes over the **uncropped** source, and this is why: with the
+      stored crop applied, the picture outside the window is invisible, so a user could never
+      widen a crop back out — the grips would sit on the edge of a picture already cut away.
+
+      The clip below is cropped to its left quarter, so the two geometries differ by a lot. The
+      crop is *stored*, so this is exercised without any session drag.
+    */
+    stubBoxes();
+    const timeline = fakeTimeline();
+    const state = makeState([{ id: 'a' }]);
+    state.items.a = { ...state.items.a!, crop: { left: 0, top: 0, right: 0.75, bottom: 0, radius: 0 } };
+    render(<PreviewPane state={state} fps={30} timeline={timeline} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
+
+    const fit = document.querySelector('[data-testid="preview-item-fit"]') as HTMLElement;
+    /*
+      The fit box's `aspectRatio` is `${source.width * sourceAspect} / ${source.height}`, and
+      `source` is the *cropped* rectangle. Stored, the 0.75 crop makes it 0.25 of the source
+      wide; dropped, it is the whole source. Asserting the exact string rather than "not one
+      value" is what makes this catch the bug: the crop has to be *gone*, not merely different.
+    */
+    // The canvas is 9:16 and no frame has loaded, so the source's stand-in ratio is 0.5625 —
+    // and 0.5625 / 1 is the *uncropped* box. With the crop applied it would be 0.140625 / 1.
+    expect(fit.style.aspectRatio).toBe('0.5625 / 1');
   });
 
   it('does not crop when the drag began in the middle of the picture', () => {
@@ -663,13 +732,18 @@ describe('canvas drags follow the same auto-keyframing rule as the sidebar (SPEC
       { id: 'a', keyframes: { 'crop.left': [{ timeUs: 0, value: 0, interpolation: 'linear' }] } },
     ]);
     render(<PreviewPane state={state} fps={30} timeline={timeline} />);
-    // Cropping is the Crop tool's gesture now (SPEC 10 §8.6).
+    /*
+      Cropping is the Crop tool's gesture now (SPEC 10 §8.6), and it goes through the frame.
+      An edge on the clip itself scales one axis (§8.2) whatever the tool, so the animation rule
+      is exercised on the frame's own drag.
+    */
     fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }));
-    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    const frame = screen.getByTestId('preview-crop-rect');
 
-    fireEvent(layer, pointer('pointerdown', 2, 300));
-    fireEvent(layer, pointer('pointermove', 42, 300));
-    fireEvent(layer, pointer('pointerup', 42, 300));
+    fireEvent(frame, pointer('pointerdown', 2, 300));
+    fireEvent(frame, pointer('pointermove', 42, 300));
+    fireEvent(frame, pointer('pointerup', 42, 300));
+    fireEvent.keyDown(document, { key: 'Enter' });
 
     // A key already sits at the playhead, so this updates rather than inserting.
     expect(timeline.updateKeyframe).toHaveBeenCalledWith('a', 'crop.left', 0, { value: 0.1 });
@@ -1265,13 +1339,16 @@ describe('the corner grips (SPEC 10 §8.2)', () => {
     expect(timeline.setItemProperties).not.toHaveBeenCalled();
   });
 
-  it('still crops when the pointer goes down along an edge', () => {
+  it('keeps the edge gesture on the clip once cropping has a frame of its own', () => {
     /*
-      The behaviour this slice promised not to disturb, and the reason it is checked with
-      the Crop tool on: a point midway along the right edge is far from both corners, so it
-      is the edge gesture — which crops under `C` and scales one axis under every other
-      tool. Both meanings are asserted together in `preview-view-tools.test.tsx`; this one
-      keeps the crop meaning honest.
+      Under the Crop tool the clip's own edge is *no longer* a crop gesture (SPEC 10 §8.6):
+      cropping moved to the frame, so a press on the clip's edge has to fall through to the
+      per-axis scale of §8.2.
+
+      That leaves exactly one crop path rather than two overlapping hit tests, which matters
+      because they disagree: the old one wrote on pointer-up, while the frame drafts until
+      `Enter`. Both being live meant a drag near the edge could be committed by one and then
+      reverted by the other's `Esc`.
     */
     stubLayout();
     const timeline = fakeTimeline();
@@ -1283,10 +1360,11 @@ describe('the corner grips (SPEC 10 §8.2)', () => {
     fireEvent(layer, pointer('pointermove', 300, 200));
     fireEvent(layer, pointer('pointerup', 300, 200));
 
-    // A crop writes the edge as a *key of the crop object* —  —
-    // because the command patches the document field directly.
+    // A scale writes the transform, never a crop.
+    const calls = (timeline.setItemProperties as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.every((call) => !('crop' in (call[1] as object)))).toBe(true);
     expect(timeline.setItemProperties).toHaveBeenCalledWith(['a'], {
-      crop: { right: expect.any(Number) },
+      transform: expect.objectContaining({ scaleX: expect.any(Number) }),
     });
   });
 });
