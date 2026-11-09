@@ -76,7 +76,7 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-snap guides being drawn and a `Show anchor` toggle, the playback clock is not audio-mastered,
+a `Show anchor` toggle and the rest of §8.8's guide set, the playback clock is not audio-mastered,
 and the preview still shows a scrubbed frame by seeking a `<video>` — coalesced and
 served from a proxy, but seek-bound rather than decode-bound. Canvas drag editing *is*
 built — move, crop, scale, rotate and the anchor crosshair, modifiers included — dragging a selected clip moves it, dragging an edge crops it — and so are
@@ -139,10 +139,11 @@ Also found and fixed two real security holes along the way:
 
 ## What is left, in order
 
-**1. Finish Phase 4 ⚠️** — drawing the snap guides, a `Show anchor` toggle, and a
+**1. Finish Phase 4 ⚠️** — the rest of the snap guides, a `Show anchor` toggle, and a
 decoded-frame scrub cache to replace seeking `<video>`. Canvas drag editing is otherwise
 complete, modifiers included, the preview plays proxies, coalesces its seeks, shows its
-compliance overlays and snaps a dragged clip to the canvas and to its neighbours: a
+compliance overlays, snaps a dragged clip to the canvas and to its neighbours and draws
+a line on what it caught: a
 selected clip's picture can be dragged to move it (`Shift` locks an axis), its edges
 dragged to crop it, its corners dragged to scale it about the opposite corner
 (`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to

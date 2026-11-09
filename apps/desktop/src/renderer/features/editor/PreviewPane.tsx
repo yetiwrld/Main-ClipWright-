@@ -20,6 +20,7 @@ import {
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import { PreviewOverlays } from './PreviewOverlays.js';
+import { SnapGuides } from './SnapGuides.js';
 import { itemBounds, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -710,6 +711,12 @@ export function PreviewPane({
           {overlaysVisible(overlays) ? (
             <PreviewOverlays state={overlays} data={SAFE_AREAS} zone={platformZone} />
           ) : null}
+          {/*
+            Above the guides and below the handles: a snap line is about the gesture in
+            progress, so it sits with the selection rather than with the compliance
+            overlays the user switched on deliberately.
+          */}
+          <SnapGuides guides={drag.guides} />
           {/*
             Every layer's geometry, computed before the render loop rather than inside
             it, because snapping needs the *other* items' bounds — and an item cannot

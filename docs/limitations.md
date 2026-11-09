@@ -18,13 +18,14 @@ This document tracks architectural scope boundaries and honest limitations per `
    so they can be tuned without a code change. The pixel grid is implemented but never
    appears: SPEC 10 §9 shows it at 800% zoom and above, and the preview has no zoom —
    the threshold is in place so the grid arrives with zoom rather than needing to be
-   remembered. The safe areas are also not yet *crossing* guides: snapping uses them
-   for nothing, because 8 px object snapping (§9's other half) is a separate feature.
+   remembered. The safe areas are not yet *crossing* guides: object snapping (above)
+   pulls a clip onto the canvas and onto other items, but not onto the title- and
+   action-safe edges.
 
-7. **4K 60 fps CPU export speed (`specs/14` §10):** On machines without a hardware encoder (NVENC/QSV/AMF), 4K 60 fps software encoding (`libx264`) runs slower than real-time while maintaining full frame accuracy and deterministic output.
-8. **Unsigned Windows installer (`specs/15` §6.4):** When built without a commercial Authenticode certificate (`CSC_LINK`), the Windows installer and portable executable are **unsigned**. Release notes, the README, the installer, and the in-app updater clearly label builds as **Unsigned** and verify authenticity via Ed25519-signed `release-manifest.json.sig` plus SHA-256/SHA-512 checksums.
-9. **Architecture support (`specs/15` §6.1):** Windows x64 is the primary target for v1; Windows ARM64 runs via x64 emulation.
-10. **Roadmap ("LATER") features not in v1 (`specs/13` §2):** Offline speaker diarization, multi-language caption translation tracks, AI voice dubbing, key-less background removal, B-roll suggestion, and multi-speaker split-screen auto-layout are reserved for future versions and are absent from the UI.
+8. **4K 60 fps CPU export speed (`specs/14` §10):** On machines without a hardware encoder (NVENC/QSV/AMF), 4K 60 fps software encoding (`libx264`) runs slower than real-time while maintaining full frame accuracy and deterministic output.
+9. **Unsigned Windows installer (`specs/15` §6.4):** When built without a commercial Authenticode certificate (`CSC_LINK`), the Windows installer and portable executable are **unsigned**. Release notes, the README, the installer, and the in-app updater clearly label builds as **Unsigned** and verify authenticity via Ed25519-signed `release-manifest.json.sig` plus SHA-256/SHA-512 checksums.
+10. **Architecture support (`specs/15` §6.1):** Windows x64 is the primary target for v1; Windows ARM64 runs via x64 emulation.
+11. **Roadmap ("LATER") features not in v1 (`specs/13` §2):** Offline speaker diarization, multi-language caption translation tracks, AI voice dubbing, key-less background removal, B-roll suggestion, and multi-speaker split-screen auto-layout are reserved for future versions and are absent from the UI.
 
 ---
 
@@ -84,11 +85,14 @@ This document tracks architectural scope boundaries and honest limitations per `
    applied to a *move* only — a scale or a rotate has its own arithmetic that a snap would
    fight.
 
-   Still missing from §8.8: **the guide lines are not drawn.** Snapping silently aligns the
-   clip but shows no `--brand` line, no distance label, and there is no cap of four lines;
-   the gesture knows which target it hit and nothing renders it yet. **Equal-spacing hints**,
-   **user guides** (`Ctrl`-drag from the viewport edge, saved with the project) and the
-   **3×3 grid overlay** are all absent, as is snapping to safe-area edges. And the
+   A snapped drag draws a `--brand` hairline on each axis it caught, and the line goes
+   when the drag ends or is abandoned, so a line never outlives the gesture that explains
+   it. A line with no label only says *something* lined up, though, so still missing from
+   §8.8: the **distance label**, the **cap of four lines** (a busy frame can draw more
+   than that; it is not limited yet because only one clip is dragged at a time and two
+   axes is the ceiling per gesture), **equal-spacing hints**, **user guides**
+   (`Ctrl`-drag from the viewport edge, saved with the project) and the **3×3 grid
+   overlay**, as is snapping to safe-area edges. And the
    **four edge handles still crop rather than scaling one axis each**: crop is
    reachable along the whole edge, which keeps the gesture this app has always had,
    but it means SPEC 10 §8.2's per-axis scale has no pointer affordance. And the

@@ -169,6 +169,14 @@ export interface CanvasDragApi {
   /** Which gesture is running, for the cursor and the outline. */
   mode: GestureMode | CropEdge | null;
   /**
+   * The guide lines the drag is currently snapped to, or `null` per axis.
+   *
+   * Exposed so the preview can draw them: a snap that moves the picture without showing
+   * *why* is indistinguishable from the clip jumping, and that is the one thing a guide
+   * exists to prevent (SPEC 10 §8.8).
+   */
+  guides: { x: SnapTarget | null; y: SnapTarget | null };
+  /**
    * @param forcedMode Starts a specific gesture regardless of hit testing — how the
    * rotate handle and the anchor crosshair begin, since they are not edges of the
    * picture and the hit test would read them as a move.
@@ -203,6 +211,15 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
   const [previewed, setPreviewed] = useState<
     (State & { itemId: string }) | null
   >(null);
+  /*
+    Held in state rather than read off the gesture ref, because the ref does not cause a
+    render — the guide would only appear on whichever pointer move happened to coincide
+    with some other re-render, which is not an affordance but a flicker.
+  */
+  const [guides, setGuides] = useState<{ x: SnapTarget | null; y: SnapTarget | null }>({
+    x: null,
+    y: null,
+  });
 
   const begin = useCallback(
     (
@@ -381,7 +398,16 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
             ),
           }
         : null;
-      current.snapped = { x: snapped?.x.target ?? null, y: snapped?.y.target ?? null };
+      const guide = { x: snapped?.x.target ?? null, y: snapped?.y.target ?? null };
+      current.snapped = guide;
+      /*
+        Only set when it changed. A pointer move emits sixty of these a second and every
+        one would otherwise re-render the preview, which the performance targets in
+        SPEC 10 §12 explicitly rule out.
+      */
+      setGuides((previous) =>
+        previous.x?.at === guide.x?.at && previous.y?.at === guide.y?.at ? previous : guide,
+      );
       current.to = { ...current.to, x: snapped?.x.position ?? moved.x, y: snapped?.y.position ?? moved.y };
     } else if (current.mode === 'anchor') {
       /*
@@ -513,6 +539,12 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
       setDragging(false);
       setMode(null);
       setPreviewed(null);
+      /*
+        The guide goes with the gesture. A line left behind after the pointer is released
+        would claim the clip is still aligned to something when it is simply where it
+        ended up.
+      */
+      setGuides({ x: null, y: null });
       (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
       if (!current) return;
 
@@ -591,6 +623,7 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     setDragging(false);
     setMode(null);
     setPreviewed(null);
+    setGuides({ x: null, y: null });
   }, []);
 
   const preview = useCallback(
@@ -598,5 +631,5 @@ export function useCanvasDrag(commit: (change: CanvasDragCommit) => void): Canva
     [previewed],
   );
 
-  return { preview, dragging, mode, begin, move, end, cancel };
+  return { preview, dragging, mode, guides, begin, move, end, cancel };
 }
