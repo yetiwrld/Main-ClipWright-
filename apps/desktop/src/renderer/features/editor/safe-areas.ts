@@ -14,6 +14,8 @@
  * be mistaken for pixels or handed to a renderer that draws to a frame.
  */
 
+import type { GridChoice } from './grid.js';
+
 export interface PlatformZone {
   label: string;
   /** Fraction of the canvas height covered by platform chrome at the top. */
@@ -138,9 +140,6 @@ export function platformBands(zone: PlatformZone): {
   };
 }
 
-/** The rule-of-thirds lines, as positions across the frame. */
-export const THIRDS = [1 / 3, 2 / 3] as const;
-
 /**
  * The pixel grid, or `null` when it must not be drawn (SPEC 10 §9).
  *
@@ -175,12 +174,19 @@ export function platformKeyFor(aspect: string): string | null {
 export interface OverlayState {
   /** Safe areas and platform zones: mutually exclusive. */
   areas: OverlayKind;
-  /** Composition lines, which may be shown alongside an area overlay. */
-  thirds: boolean;
+  /**
+   * The composition grid — the thirds by default, or whatever N×M the user chose.
+   *
+   * Named `thirds` because that is what it was and what it still is unless asked
+   * otherwise: the spec describes one overlay with two settings, so widening this from a
+   * boolean to a `GridChoice` adds the custom case without a second toggle or a second
+   * keybinding. `null` is off.
+   */
+  thirds: GridChoice | null;
   centreCross: boolean;
 }
 
-export const OVERLAYS_OFF: OverlayState = { areas: 'none', thirds: false, centreCross: false };
+export const OVERLAYS_OFF: OverlayState = { areas: 'none', thirds: null, centreCross: false };
 
 /**
  * Cycle to the next area overlay.
@@ -207,5 +213,5 @@ export function nextAreaOverlay(kind: OverlayKind, hasPlatform: boolean): Overla
 
 /** Whether anything at all is being drawn — the panel skips the whole overlay tree. */
 export function overlaysVisible(state: OverlayState): boolean {
-  return state.areas !== 'none' || state.thirds || state.centreCross;
+  return state.areas !== 'none' || state.thirds !== null || state.centreCross;
 }

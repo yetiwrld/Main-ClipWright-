@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewPane } from '../features/editor/PreviewPane.js';
 import { playheadStore } from '../features/editor/playhead-store.js';
@@ -300,7 +300,7 @@ describe('snapping to the thirds (SPEC 10 §8.8, §9)', () => {
     render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
     if (thirdsOn) {
       fireEvent.keyDown(document, { key: "'", ctrlKey: true });
-      expect(screen.getByTestId('overlay-third-v-0')).toBeTruthy();
+      expect(screen.getByTestId('overlay-grid-v-0')).toBeTruthy();
     }
     const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
     fireEvent(layer, pointer('pointerdown', 200, 200));
@@ -317,6 +317,65 @@ describe('snapping to the thirds (SPEC 10 §8.8, §9)', () => {
   it('pulls onto the first third when the lines are showing', () => {
     // 1/3, not 0.325: the clip's left edge lands on the visible line.
     expect(commitX(true)).toBeCloseTo(1 / 3, 6);
+  });
+});
+
+describe('snapping to a custom grid (SPEC 10 §8.8, §9)', () => {
+  /*
+    A custom grid is the same overlay with other divisors, so it has to be the same *snap
+    target* too — otherwise the lines would be drawn and pull nothing, which reads as
+    snapping having stopped working rather than as the grid being decorative.
+
+    Four columns put lines at 1/4, 1/2 and 3/4. The drag below is 130 px on a 400 px
+    canvas, which with a half-canvas-wide item leaves its left edge 3 px short of 1/3 and
+    17 px short of 1/4 — so it is inside the threshold of the thirds and nowhere near the
+    quarter. A grid of four must therefore commit 0.325, and the delta is what proves the
+    custom divisors reached the snap and not just the drawing.
+  */
+  const commitWithGrid = (columns: string): number | undefined => {
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    fireEvent.keyDown(document, { key: "'", ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: /Guides and grid/ }));
+    fireEvent.click(
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: /Composition grid/ }),
+    );
+    fireEvent.change(screen.getByLabelText('Columns'), { target: { value: columns } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    const layer = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    fireEvent(layer, pointer('pointerdown', 200, 200));
+    fireEvent(layer, pointer('pointermove', 330, 200));
+    fireEvent(layer, pointer('pointerup', 330, 200));
+    const calls = (timeline.setItemProperties as ReturnType<typeof vi.fn>).mock.calls;
+    return calls.at(-1)?.[1]?.transform?.x as number | undefined;
+  };
+
+  it('snaps to the lines of a 4-column grid where there is no third', () => {
+    // 0.325 is the raw drag: the nearest quarter is 17 px away, outside the threshold.
+    expect(commitWithGrid('4')).toBeCloseTo(0.325, 6);
+  });
+
+  it('still snaps to a third when the grid is 3 columns', () => {
+    // The same fixture with the default grid: the line is back, so the pull is back.
+    expect(commitWithGrid('3')).toBeCloseTo(1 / 3, 6);
+  });
+
+  it('draws the same number of lines it snaps to', () => {
+    /*
+      The drawing and the snapping read the same divisors, so this cannot drift — but the
+      pair is what a user actually checks, and a grid that draws four lines and snaps to
+      two is exactly the bug a single-source-of-truth is meant to prevent.
+    */
+    const timeline = fakeTimeline();
+    render(<PreviewPane state={makeState()} fps={30} timeline={timeline} />);
+    fireEvent.keyDown(document, { key: "'", ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: /Guides and grid/ }));
+    fireEvent.click(
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: /Composition grid/ }),
+    );
+    fireEvent.change(screen.getByLabelText('Columns'), { target: { value: '6' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getAllByTestId(/^overlay-grid-v-/)).toHaveLength(5);
   });
 });
 

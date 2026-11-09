@@ -14,7 +14,8 @@ This document tracks architectural scope boundaries and honest limitations per `
 6. **Audio-only composition export (`specs/12` §6.9):** v1 exports video containers (`.mp4`, `.webm`); an audio-only timeline exports as a video with the composition's canvas background colour.
 7. **Guides and safe areas cover everything except the pixel grid.** `Ctrl+;` cycles
    title safe (90%), action safe (93%) and the 9:16 / 4:5 platform UI zones, and
-   `Ctrl+'` toggles the rule of thirds; the values come from `assets/safe-areas.json`,
+   `Ctrl+'` toggles the composition grid, the thirds by default or any N×M from 2 to 12
+   chosen in the Guides menu; the safe-area values come from `assets/safe-areas.json`,
    so they can be tuned without a code change. The pixel grid is implemented but never
    appears: SPEC 10 §9 shows it at 800% zoom and above, and the preview has no zoom —
    the threshold is in place so the grid arrives with zoom rather than needing to be
@@ -116,14 +117,15 @@ This document tracks architectural scope boundaries and honest limitations per `
    no room for a badge, so the state is read off the button's icon. Still missing
    is any way to see **the list of guides** rather than the lines themselves, and
    **per-guide locking**: *Lock* acts on every guide at once, which is what the menu item
-   is. Still missing from §8.8: the **custom N×M grid** (the 3×3 thirds toggle exists).
-   Snapping does follow the safe-area edges, but
+   is. The **custom N×M grid** is in, reached from the same menu: the grid *is* the thirds
+   overlay with other divisors, so one key, one drawing path and one set of snap targets
+   serve both. Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
-   clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The thirds
-   work the same way under `Ctrl+'`. The **pixel grid** is the one overlay still not a
-   snap target, because it does not exist yet — it needs a zoom the preview does not
-   have (above). The **cap of four lines** is met by construction rather
-   than by a limit: one target is chosen per axis, so a dragged clip can draw two at
+   clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The grid
+   works the same way under `Ctrl+'`, at whatever N×M is set. The **pixel grid** is the
+   one overlay still not a snap target, because it does not exist yet — it needs a zoom
+   the preview does not have (above). The **cap of four lines** is met by construction
+   rather than by a limit: one target is chosen per axis, so a dragged clip can draw two at
    most. The pivot crosshair sits behind §8.2's
    *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles
    here: there is no **Handles** toggle (`H`), no zoom dropdown and no preview-quality

@@ -13,11 +13,11 @@ import { memo } from 'react';
 import {
   platformBands,
   safeAreaRect,
-  THIRDS,
   type OverlayState,
   type PlatformZone,
   type SafeAreaData,
 } from './safe-areas.js';
+import { effectiveGrid, gridLines } from './grid.js';
 
 /** The colour every guide shares, kept in one place so the four agree. */
 const GUIDE = 'var(--brand)';
@@ -62,6 +62,15 @@ export const PreviewOverlays = memo(function PreviewOverlays({
   zone,
 }: PreviewOverlaysProps) {
   const { areas, thirds, centreCross } = state;
+  /*
+    The grid's lines, computed once. A custom grid is the same overlay as the thirds with
+    another pair of divisors, so there is nothing below that knows which one it is drawing
+    — which is the point: one code path, one set of snap targets, no way for the drawing and
+    the snapping to disagree about where a line is.
+  */
+  const grid = thirds ? effectiveGrid(thirds) : null;
+  const gridX = grid ? gridLines(grid.columns) : [];
+  const gridY = grid ? gridLines(grid.rows) : [];
   const showSafe = areas === 'title-safe' || areas === 'action-safe';
   const showPlatform = areas === 'platform-zones' && zone !== null;
   /** The safe area being drawn, computed once rather than per style property. */
@@ -118,20 +127,25 @@ export const PreviewOverlays = memo(function PreviewOverlays({
         </>
       ) : null}
 
-      {/* Rule of thirds: two verticals and two horizontals. */}
-      {thirds ? (
+      {/*
+        The composition grid: the columns give the verticals, the rows the horizontals.
+        The edges are excluded by `gridLines`, because the canvas border is already visible
+        and already a snap target — a line on top of it would be a second target in exactly
+        the same place for the tie-break to pick between.
+      */}
+      {grid ? (
         <>
-          {THIRDS.map((at, index) => (
+          {gridX.map((at, index) => (
             <div
               key={`v-${index}`}
-              data-testid={`overlay-third-v-${index}`}
+              data-testid={`overlay-grid-v-${index}`}
               style={lineStyle({ left: `${at * 100}%`, top: 0, width: 1, height: '100%' })}
             />
           ))}
-          {THIRDS.map((at, index) => (
+          {gridY.map((at, index) => (
             <div
               key={`h-${index}`}
-              data-testid={`overlay-third-h-${index}`}
+              data-testid={`overlay-grid-h-${index}`}
               style={lineStyle({ top: `${at * 100}%`, left: 0, height: 1, width: '100%' })}
             />
           ))}

@@ -76,7 +76,7 @@ reorder/copy/paste and adjustment layers, and the transition controls with every
 type's direction and mode.
 
 **Phase 4 is unfinished in specific ways**, all listed in `docs/limitations.md`:
-§8.8's custom grid, the playback clock is not audio-mastered,
+the playback clock is not audio-mastered,
 and the preview still shows a scrubbed frame by seeking a `<video>` — coalesced and
 served from a proxy, but seek-bound rather than decode-bound. Canvas drag editing *is*
 built — move, crop, scale, rotate and the anchor crosshair, modifiers included — dragging a selected clip moves it, dragging an edge crops it — and so are
@@ -140,15 +140,16 @@ Also found and fixed two real security holes along the way:
 ## What is left, in order
 
 **1. Finish Phase 4 ⚠️** — a preview that *reads* the frame cache it now writes instead
-of seeking `<video>` to show every frame, and §8.8's last shortcut (a custom N×M grid).
+of seeking `<video>` to show every frame, and the canvas zoom the pixel grid waits on.
 Canvas drag editing is otherwise
 complete, modifiers included, the preview plays proxies, coalesces its seeks, shows its
 compliance overlays, snaps a dragged clip to the canvas, to its neighbours, to the
-safe-area edges and thirds when those are showing and to the user's own guides, draws a
+safe-area edges and grid lines when those are showing and to the user's own guides, draws a
 labelled line on what it caught and equalises the gaps when a spacing nearly matches. The
 guides come from §8.8's menu — *Add horizontal*, *Add vertical*, *Lock*, *Clear* — or from
 `Ctrl`-dragging in from an edge, and `Shift`+`Ctrl`-drag takes one away; a locked guide is
-immune to both. A selected clip's
+immune to both. The composition grid is the thirds or any N×M from 2 to 12, chosen in the
+same menu, and its lines are snap targets while it is showing. A selected clip's
 picture can be dragged to move it (`Shift` locks an axis), its edges
 dragged to crop it, its corners dragged to scale it about the opposite corner
 (`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to

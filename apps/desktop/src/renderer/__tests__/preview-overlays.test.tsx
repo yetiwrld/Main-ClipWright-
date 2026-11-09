@@ -118,13 +118,13 @@ describe('the overlay set (SPEC 10 §9)', () => {
     */
     render(<PreviewPane state={makeState()} fps={30} />);
     chord("'");
-    expect(screen.getByTestId('overlay-third-v-0')).toBeTruthy();
-    expect(screen.getByTestId('overlay-third-h-1')).toBeTruthy();
+    expect(screen.getByTestId('overlay-grid-v-0')).toBeTruthy();
+    expect(screen.getByTestId('overlay-grid-h-1')).toBeTruthy();
     // No safe area was switched on by the thirds key.
     expect(screen.queryByTestId('overlay-safe-area')).toBeNull();
 
     chord("'");
-    expect(screen.queryByTestId('overlay-third-v-0')).toBeNull();
+    expect(screen.queryByTestId('overlay-grid-v-0')).toBeNull();
   });
 
   it('composes thirds with a safe area rather than replacing it', () => {
@@ -132,7 +132,7 @@ describe('the overlay set (SPEC 10 §9)', () => {
     chord(';');
     chord("'");
     expect(screen.getByTestId('overlay-safe-area')).toBeTruthy();
-    expect(screen.getByTestId('overlay-third-v-0')).toBeTruthy();
+    expect(screen.getByTestId('overlay-grid-v-0')).toBeTruthy();
   });
 
   it('never takes a keystroke from a text field', () => {

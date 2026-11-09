@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import rawSafeAreas from '../../../../../assets/safe-areas.json';
 import {
-  THIRDS,
   parseSafeAreas,
   pixelGrid,
   platformBands,
@@ -100,11 +99,6 @@ describe('guide geometry', () => {
     expect(bands.right).toEqual({ x: 0.88, y: 0, width: 0.12, height: 1 });
   });
 
-  it('puts the thirds where thirds go', () => {
-    expect(THIRDS[0]).toBeCloseTo(1 / 3, 10);
-    expect(THIRDS[1]).toBeCloseTo(2 / 3, 10);
-  });
-
   it('withholds the pixel grid until 800% zoom', () => {
     /*
       SPEC 10 §9 shows the pixel grid at ≥ 800% zoom. There is no canvas zoom in this
@@ -154,8 +148,11 @@ describe('overlays never reach an export (SPEC 10 §9, §15 check 6)', () => {
         accident. Naming it here is what makes that property hold rather than happen to
         hold. `/guides/` would also catch a comment, which is the intent — an export that
         mentions guides at all is one someone is about to teach it to draw them.
+        `grid` is here for the same reason, and it is the *new* way in: the grid is a
+        setting now with a module of its own, so an export that reached for a divisor to
+        line something up with is one commit away from drawing the lines into the frame.
       */
-      if (/safe-areas|safeAreaRect|platformBands|rule-of-thirds|THIRDS|\bguides\b/.test(source)) {
+      if (/safe-areas|safeAreaRect|platformBands|rule-of-thirds|THIRDS|\bguides\b|\bgrid\b/i.test(source)) {
         offenders.push(file);
       }
     }

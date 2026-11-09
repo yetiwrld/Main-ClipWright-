@@ -44,7 +44,9 @@ import { PreviewOverlays } from './PreviewOverlays.js';
 import { SnapGuides } from './SnapGuides.js';
 import { SpacingHints } from './SpacingHints.js';
 import { UserGuides } from './UserGuides.js';
+import { GridDialog } from './GridDialog.js';
 import { addGuide, edgeAt, guideSnapTargets, guideToRemove, axisForEdge } from './user-guides.js';
+import { GRID_THIRDS, effectiveGrid, gridLabel, gridLines, type GridChoice } from './grid.js';
 import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -53,7 +55,6 @@ import {
   parseSafeAreas,
   platformKeyFor,
   safeAreaRect,
-  THIRDS,
   type OverlayState,
 } from './safe-areas.js';
 import safeAreasData from '../../../../../../assets/safe-areas.json';
@@ -335,6 +336,16 @@ export function PreviewPane({
   const guideDrag = useRef<{ axis: 'x' | 'y'; at: number; removing: boolean } | null>(null);
   const [showAnchor, setShowAnchor] = useState(true);
   const [overlays, setOverlays] = useState<OverlayState>(OVERLAYS_OFF);
+  /**
+   * The grid the user has chosen — the thirds until they say otherwise.
+   *
+   * Separate from `overlays` because it is a *setting*, not a visibility: `Ctrl+'` turns
+   * the grid off and on again, and the choice has to survive that, or setting 5×4 and
+   * toggling twice would silently put the thirds back. It is view state and is not saved
+   * with the project, like every other overlay.
+   */
+  const [grid, setGrid] = useState<GridChoice>(GRID_THIRDS);
+  const [gridDialogOpen, setGridDialogOpen] = useState(false);
   const platformKey = platformKeyFor(canvas.aspect ?? '');
   const platformZone = platformKey ? (SAFE_AREAS.platforms[platformKey] ?? null) : null;
 
@@ -357,12 +368,17 @@ export function PreviewPane({
       setOverlays((current) =>
         event.key === ';'
           ? { ...current, areas: nextAreaOverlay(current.areas, platformZone !== null) }
-          : { ...current, thirds: !current.thirds },
+          : /*
+              A toggle that *remembers*: turning the grid off sets it to `null`, turning it
+              back on restores `grid` — so a user who set 5×4 and pressed `Ctrl+'` twice
+              gets their 5×4 back rather than being quietly reset to the thirds.
+            */
+            { ...current, thirds: current.thirds ? null : grid },
       );
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [platformZone]);
+  }, [platformZone, grid]);
   /*
     `A` toggles the crosshair (SPEC 10 §8.2). Bare, not `Ctrl`-modified, so it needs its
     own listener — the effect above returns early on anything without a modifier.
@@ -747,10 +763,13 @@ export function PreviewPane({
           : null;
     const rects = safeFraction !== null ? [safeAreaRect(safeFraction)] : [];
     /*
-      The thirds, when they are showing. Same gate and same reason: `Ctrl+'` draws them,
-      and a clip must not stick to a composition line the user has not asked to see.
+      The grid, when it is showing. Same gate and same reason: `Ctrl+'` draws it, and a
+      clip must not stick to a composition line the user has not asked to see. The columns
+      govern vertical lines, so they are `x` targets; the rows are `y`.
     */
-    const lines = overlays.thirds ? targetsForLines(THIRDS, 'grid-line') : [];
+    const grid = overlays.thirds ? effectiveGrid(overlays.thirds) : null;
+    const gridX = grid ? targetsForLines(gridLines(grid.columns), 'grid-line') : [];
+    const gridY = grid ? targetsForLines(gridLines(grid.rows), 'grid-line') : [];
     /*
       The user's guides are always snap targets, unlike the compliance overlays: they are
       on screen whenever the project is open, because the user put them there, so there is
@@ -760,12 +779,12 @@ export function PreviewPane({
       x: [
         ...rects.flatMap((rect) => targetsForOverlayRect(rect, 'x')),
         ...guideSnapTargets(userGuides, 'x'),
-        ...lines,
+        ...gridX,
       ],
       y: [
         ...rects.flatMap((rect) => targetsForOverlayRect(rect, 'y')),
         ...guideSnapTargets(userGuides, 'y'),
-        ...lines,
+        ...gridY,
       ],
     };
   }, [overlays.areas, overlays.thirds, userGuides]);
@@ -840,8 +859,22 @@ export function PreviewPane({
           timeline?.run('Clear guides', (stateNow) => clearGuidesCommand(stateNow));
         },
       },
+      {
+        id: 'grid-settings',
+        label: overlays.thirds ? `Composition grid (${gridLabel(overlays.thirds)})` : 'Composition grid',
+        icon: <Grid3x3 size={13} />,
+        separatorBefore: true,
+        /*
+          The grid lives here because this button already *is* the overlay control in the
+          transport strip, and a second button next to it for one overlay would be the
+          beginning of a toolbar row. It is also where a user who has just pressed `Ctrl+'`
+          will look to change what they see.
+        */
+        shortcut: "Ctrl+'",
+        onSelect: () => setGridDialogOpen(true),
+      },
     ];
-  }, [userGuides, timeline]);
+  }, [userGuides, timeline, overlays.thirds]);
 
   /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
@@ -1330,7 +1363,12 @@ export function PreviewPane({
         >
           <span style={{ position: 'relative', display: 'inline-flex' }}>
             <IconButton
-              label="Guides"
+              /*
+                The label carries the grid, because the grid is a setting with no other
+                visible home: `Ctrl+'` turns it on and off and the lines themselves say
+                nothing about whether they are 3×3 or 5×4.
+              */
+              label={`Guides and grid (${gridLabel(overlays.thirds ?? grid)})`}
               shortcut="Ctrl+drag from an edge"
               size={28}
               active={guideMenuAt !== null}
@@ -1369,6 +1407,21 @@ export function PreviewPane({
               onClose={() => setGuideMenuAt(null)}
             />
           )}
+          <GridDialog
+            open={gridDialogOpen}
+            value={grid}
+            onClose={() => setGridDialogOpen(false)}
+            onApply={(next) => {
+              setGrid(next);
+              /*
+                Applying turns the grid *on*. Someone who opens this dialog has asked to see
+                a grid, and making them press `Ctrl+'` afterwards to find out whether the
+                numbers were what they wanted would be a second step for no reason.
+              */
+              setOverlays((current) => ({ ...current, thirds: next }));
+              setGridDialogOpen(false);
+            }}
+          />
           <IconButton
             label={muted ? 'Unmute preview' : 'Mute preview'}
             size={28}
