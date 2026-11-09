@@ -476,6 +476,18 @@ export const MediaRecordSchema = z
     peaks256Path: z.string().optional(),
     peaks4096Path: z.string().optional(),
     thumbPath: z.string().optional(),
+    /**
+     * The preview proxy, when one was generated (SPEC 04 §7).
+     *
+     * Recorded on the media rather than derived from the layout, because the path
+     * depends on the storage mode and the derived directory — and a record that cannot
+     * name its own proxy is a proxy nothing can ever find, which is what happened
+     * before this field existed: every proxy was written and then orphaned.
+     *
+     * Optional and nullable both appear in practice: absent on media imported before
+     * proxies existed, null when `needsProxy` declined to make one.
+     */
+    proxyPath: z.string().nullish(),
   })
   .passthrough();
 
@@ -754,6 +766,14 @@ export const AppSettingsSchema = z
     clickEmptyMovesPlayhead: z.boolean().default(false),
     proxyQuality: z.enum(['low', 'medium', 'high']).default('medium'),
     alwaysCreateProxies: z.boolean().default(false),
+    /**
+     * Whether the *preview* plays proxies instead of the originals.
+     *
+     * Defaults on: a proxy that is made but never played is pure waste, which is
+     * exactly what the last few releases did. Off is the escape hatch for a proxy that
+     * a transcode got wrong — the user can see the real file without deleting anything.
+     */
+    useProxyPreview: z.boolean().default(true),
     defaultProviders: z
       .object({
         transcription: z.string().optional(),

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, net, protocol, shell, ipcMain, session } from 'electron';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, writeFileSync } from 'node:fs';
 import {
   buildSecureWindowConfig,
   CONTENT_SECURITY_POLICY,
@@ -14,6 +14,7 @@ import { StorageService } from './storage/storage-service.js';
 import { Logger } from './storage/logger.js';
 import { SecretStore } from './storage/secret-store.js';
 import { ingestMedia, type IngestRequest } from './media-pipeline.js';
+import { previewSourceFor } from './preview-source.js';
 import { runTranscription, type TranscribeJobRequest } from './transcribe-job.js';
 import { ProviderService } from './ai/provider-service.js';
 import { ConsentService } from './ai/consent-service.js';
@@ -1184,7 +1185,33 @@ app.whenReady().then(async () => {
       if (record.status === 'missing') {
         return new Response('This file is no longer at its recorded location.', { status: 410 });
       }
-      return await net.fetch(pathToFileURL(record.path).toString(), {
+      /*
+        This protocol serves the preview only — the exporter reads `record.path` from
+        storage directly, so the choice made here cannot reach a render. That is the
+        property that lets a proxy be served at all: an export must never be built from
+        a transcode.
+
+        Which path to play is a policy question with fallbacks, so it lives in
+        `preview-source.ts` where it can be tested; this handler only supplies the two
+        facts it cannot know — the user's setting and whether the file is still there.
+      */
+      const useProxies = requireStorage().getSettings().useProxyPreview !== false;
+      const chosen = previewSourceFor(record, {
+        useProxies,
+        exists: (candidate) => {
+          try {
+            return statSync(candidate).isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (chosen.reason === 'proxy-missing') {
+        // Worth a line: it means the derived directory was cleared, which is invisible
+        // to the user except as "editing is slow again".
+        logger?.info('Preview proxy missing, serving the original', { mediaId });
+      }
+      return await net.fetch(pathToFileURL(chosen.path).toString(), {
         headers: request.headers,
         method: request.method,
       });

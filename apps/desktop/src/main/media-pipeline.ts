@@ -229,6 +229,13 @@ export async function ingestMedia(
     peaks256Path: join(derivedDir, 'peaks256.bin'),
     peaks4096Path: join(derivedDir, 'peaks4096.bin'),
     thumbPath: thumbPath || undefined,
+    /*
+      The proxy has been written to disk since proxies were introduced, and until now
+      its path was returned to the caller and then dropped — so every proxy this app
+      ever generated was an orphan nobody could find. Recording it is the whole
+      difference between "we make proxies" and "proxies are used".
+    */
+    proxyPath: proxyPath ?? undefined,
   } as never);
 
   storage.updateProject(request.projectId, {

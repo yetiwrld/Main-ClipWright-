@@ -40,6 +40,8 @@ export interface AppSettings {
   clickEmptyMovesPlayhead: boolean;
   proxyQuality: 'low' | 'medium' | 'high';
   alwaysCreateProxies: boolean;
+  /** Whether the preview plays proxies. Exports always use the original. */
+  useProxyPreview: boolean;
   defaultProviders: {
     transcription?: string;
     moment_analysis?: string;

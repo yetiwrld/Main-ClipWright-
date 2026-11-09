@@ -289,6 +289,16 @@ function PerformanceSection({ settings, update }: { settings: AppSettings; updat
           onChange={(v) => update({ alwaysCreateProxies: v })}
         />
       </SettingRow>
+      <SettingRow
+        label="Use proxies in the preview"
+        desc="Play the lighter proxy while editing. Exports always use the original file."
+      >
+        <Toggle
+          label="Use proxies in the preview"
+          value={settings.useProxyPreview !== false}
+          onChange={(v) => update({ useProxyPreview: v })}
+        />
+      </SettingRow>
     </>
   );
 }

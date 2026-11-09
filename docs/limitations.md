@@ -34,7 +34,18 @@ This document tracks architectural scope boundaries and honest limitations per `
 ## 3. Phase 4 notes (editor core, in progress)
 
 1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes the audio device position the master clock whenever audio plays. This slice advances the playhead from `performance.now()` and lets the `<video>` element follow it, so a long playback can drift from the audio by a frame. Audio-mastered playback lands with the audio tools.
-2. **Preview uses the original media and seeks the `<video>` element.** Proxies are generated during import but the preview does not yet switch to them, so scrubbing a 4K source is slower than the "use proxies by default" requirement.
+2. **The preview plays proxies, but seeking a `<video>` element is still the scrub
+   mechanism.** Import generates a proxy for 4K, Chromium-unsafe-codec, variable
+   frame-rate and HDR sources (SPEC 04 §7), the media record stores its path, and the
+   preview protocol now serves it when present — falling back to the original when the
+   derived cache has been cleared, and never reaching an export, which reads the
+   original path from storage directly. Proxies can be switched off in Settings for a
+   transcode that got a clip wrong.
+
+   What has *not* changed is the transport: each layer still seeks its own `<video>`
+   for every playhead move, so a long scrub is bounded by seek latency rather than by
+   decode cost. The proxy removes the decode half of that; a frame-accurate scrub
+   driven by decoded frames rather than seeks is the remaining half.
 3. **Not every SPEC 09/10 acceptance check is automated yet.** Covered by unit tests: time model and timecode, frame quantisation, all five commands plus `addItem`, invariant checks after every command, undo round-trips, snapping maths, and the project-duration selector. Not covered: gesture feel (marquee, razor, rolling edit, ripple-trim modifiers), the React re-render assertions from SPEC 09 §27, and every visual check in SPEC 09 §30 / SPEC 10 — those need a real window.
 4. **Implemented so far:** select/marquee selection, razor tool, move, trim (incl. ripple Shift-drag and Q/W trim-to-playhead with Shift ripple), split, delete, ripple delete, duplicate, copy/cut/paste, group/ungroup, Alt+Up/Down track moves, markers, snapping, zoom, scroll, timecode entry, mute toggles, undo/redo. Transitions render, export, and can be created from the inspector: pick the incoming clip, choose a type, then adjust its length and where it sits relative to the cut. What is missing is a **timeline handle** — the transition has no draggable widget on the cut itself, so its length is set with a slider rather than by dragging its edge, and there is no way to see its span on the track. **Not implemented yet:** linked audio detach/unlink, transition handles, markers in the ruler, context menus, in-editor import.
 5. **The media library lists imported media but does not import from inside the editor** (drag-in from Explorer, replace, relink, "in use" counts). Importing still happens on the start screen.
