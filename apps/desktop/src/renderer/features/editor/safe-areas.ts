@@ -141,18 +141,6 @@ export function platformBands(zone: PlatformZone): {
 }
 
 /**
- * The pixel grid, or `null` when it must not be drawn (SPEC 10 §9).
- *
- * The spec shows it at 800% zoom and above. There is no canvas zoom in this build, so
- * this returns `null` for every zoom it is given except past that threshold — which
- * means the feature is *correctly absent* rather than silently missing.
- */
-export function pixelGrid(zoom: number): { spacing: number } | null {
-  if (!Number.isFinite(zoom) || zoom < 8) return null;
-  return { spacing: 1 };
-}
-
-/**
  * The aspect key a platform zone should be looked up by, or `null`.
  *
  * Platform chrome only exists for vertical and portrait frames; a 16:9 landscape

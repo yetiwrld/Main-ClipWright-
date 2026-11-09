@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import rawSafeAreas from '../../../../../assets/safe-areas.json';
 import {
   parseSafeAreas,
-  pixelGrid,
   platformBands,
   platformKeyFor,
   safeAreaRect,
@@ -99,18 +98,6 @@ describe('guide geometry', () => {
     expect(bands.right).toEqual({ x: 0.88, y: 0, width: 0.12, height: 1 });
   });
 
-  it('withholds the pixel grid until 800% zoom', () => {
-    /*
-      SPEC 10 §9 shows the pixel grid at ≥ 800% zoom. There is no canvas zoom in this
-      build, so the grid is absent everywhere — but the threshold is implemented and
-      tested, so the feature is correctly *not shown* rather than missing on purpose.
-    */
-    expect(pixelGrid(1)).toBeNull();
-    expect(pixelGrid(7.99)).toBeNull();
-    expect(pixelGrid(8)).toEqual({ spacing: 1 });
-    expect(pixelGrid(16)).toEqual({ spacing: 1 });
-    expect(pixelGrid(Number.NaN)).toBeNull();
-  });
 
   it('offers platform bands only for vertical compositions', () => {
     // A 16:9 landscape frame has no top band and no column of action buttons, so

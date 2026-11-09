@@ -6,6 +6,7 @@
  * tests pin that down, then the clamps that keep a drag from destroying the clip.
  */
 import { describe, expect, it } from 'vitest';
+import { SNAP_PX, snapThresholdPx } from '../features/editor/snapping.js';
 import {
   MAX_ROTATION,
   MIN_CROP_EXTENT,
@@ -712,5 +713,36 @@ describe('the Shift and Alt modifiers (SPEC 10 §8.2)', () => {
     // The factor is a distance ratio, and Alt changes which point it is measured from.
     expect(scaleAboutCentre({ x: 200, y: 0 }, { x: 0, y: 0 }, 100)).toBeCloseTo(2, 10);
     expect(scaleAboutCentre({ x: 0, y: 25 }, { x: 0, y: 0 }, 100)).toBeCloseTo(0.25, 10);
+  });
+});
+
+describe('at any preview zoom (SPEC 10 §4)', () => {
+  /*
+    Zoom is applied as a CSS transform, and a transformed element reports its *transformed*
+    rectangle from `getBoundingClientRect()`. Every drag divides its client-pixel delta by
+    that rectangle, so a zoomed preview needs no change in any of this arithmetic — but that
+    is a property worth pinning, because the tempting "fix" when a zoom bug is reported is to
+    add a division by the zoom somewhere, which would double-count it.
+  */
+  it('moves the clip half as far per screen pixel at 200%', () => {
+    // The same 100 px drag against a canvas drawn at twice the width.
+    const at100 = pixelsToFraction(100, 400);
+    const at200 = pixelsToFraction(100, 800);
+    expect(at100).toBeCloseTo(0.25, 10);
+    expect(at200).toBeCloseTo(0.125, 10);
+    expect(at200).toBeCloseTo(at100 / 2, 10);
+  });
+
+  it('keeps the snap distance at eight screen pixels however far in you are', () => {
+    /*
+      The threshold is a *screen* distance converted to a fraction by the drawn size, and
+      the drawn size grows with the zoom — so the two conversions cancel and the snap stays
+      8 px on screen. That is the reason `SNAP_PX` is documented as a screen measurement.
+    */
+    for (const zoom of [1, 2, 4, 8]) {
+      const drawn = 400 * zoom;
+      const threshold = snapThresholdPx(drawn);
+      expect(threshold * drawn).toBeCloseTo(SNAP_PX, 10);
+    }
   });
 });

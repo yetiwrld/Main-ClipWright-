@@ -140,16 +140,19 @@ Also found and fixed two real security holes along the way:
 ## What is left, in order
 
 **1. Finish Phase 4 ⚠️** — a preview that *reads* the frame cache it now writes instead
-of seeking `<video>` to show every frame, and the canvas zoom the pixel grid waits on.
-Canvas drag editing is otherwise
-complete, modifiers included, the preview plays proxies, coalesces its seeks, shows its
+of seeking `<video>` to show every frame, and §4's remaining toolbar tiles (the
+*Handles* toggle, preview quality, a hand tool). Canvas drag editing is otherwise
+complete, modifiers included, the preview plays proxies, coalesces its seeks, zooms
+about the cursor with `Ctrl`+wheel and back to Fit on `F`, shows its
 compliance overlays, snaps a dragged clip to the canvas, to its neighbours, to the
 safe-area edges and grid lines when those are showing and to the user's own guides, draws a
 labelled line on what it caught and equalises the gaps when a spacing nearly matches. The
 guides come from §8.8's menu — *Add horizontal*, *Add vertical*, *Lock*, *Clear* — or from
 `Ctrl`-dragging in from an edge, and `Shift`+`Ctrl`-drag takes one away; a locked guide is
 immune to both. The composition grid is the thirds or any N×M from 2 to 12, chosen in the
-same menu, and its lines are snap targets while it is showing. A selected clip's
+same menu, and its lines are snap targets while it is showing. The view zooms — Fit, Fill,
+25–400% from the dropdown and `Ctrl`+wheel up to 1600% about the cursor — and past 800%
+the pixel grid draws one line per canvas pixel. A selected clip's
 picture can be dragged to move it (`Shift` locks an axis), its edges
 dragged to crop it, its corners dragged to scale it about the opposite corner
 (`Shift` free-scales, `Alt` pivots on the centre), the handle above it dragged to

@@ -6,6 +6,7 @@ import {
   Minus,
   Pause,
   Play,
+  Search,
   SkipBack,
   SkipForward,
   Volume2,
@@ -47,6 +48,22 @@ import { UserGuides } from './UserGuides.js';
 import { GridDialog } from './GridDialog.js';
 import { addGuide, edgeAt, guideSnapTargets, guideToRemove, axisForEdge } from './user-guides.js';
 import { GRID_THIRDS, effectiveGrid, gridLabel, gridLines, type GridChoice } from './grid.js';
+import { PixelGrid } from './PixelGrid.js';
+import {
+  NO_PAN,
+  ZOOM_FIT,
+  ZOOM_PRESETS,
+  clampPan,
+  panToKeepPoint,
+  pixelGridSpacing,
+  fitAndFill,
+  previewScale,
+  stepZoom,
+  zoomLabel,
+  type Pan,
+  type ZoomChoice,
+  PIXEL_GRID_ZOOM,
+} from './view-transform.js';
 import { itemBounds, targetsForLines, targetsForOverlayRect, type ItemBounds } from './snapping.js';
 import {
   OVERLAYS_OFF,
@@ -346,6 +363,93 @@ export function PreviewPane({
    */
   const [grid, setGrid] = useState<GridChoice>(GRID_THIRDS);
   const [gridDialogOpen, setGridDialogOpen] = useState(false);
+  /*
+    View zoom and pan (SPEC 10 §3.1, §4), which are UI state and are not saved with the
+    composition — the exported frame is decided by the canvas and the export settings, never
+    by how big the preview happens to be drawn.
+  */
+  const [zoom, setZoom] = useState<ZoomChoice>(ZOOM_FIT);
+  const [zoomMenuAt, setZoomMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [pan, setPan] = useState<Pan>(NO_PAN);
+  /**
+   * The frame's *untransformed* laid-out size, measured from the DOM.
+   *
+   * Needed because a numeric zoom is stated against canvas pixels and the panel has already
+   * scaled the frame to fit: without the fitted size there is no way to know what "100%"
+   * should be relative to. Kept in state rather than read during render, because reading
+   * `getBoundingClientRect()` in render is a layout read on every pass and jsdom has none.
+   */
+  const [fittedSize, setFittedSize] = useState({ widthCss: 0, heightCss: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const viewportRef = useRef<HTMLDivElement>(null);
+
+  /*
+    The frame's laid-out size, re-measured when the panel resizes.
+
+    Only the *untransformed* size is wanted — `offsetWidth`/`offsetHeight` are layout sizes
+    and are unaffected by the `transform` zoom applies — which is exactly why they are used
+    rather than the bounding rectangle. jsdom does no layout and has no `ResizeObserver`, so
+    the guard at the top keeps the tests on their existing path: `fittedSize` stays zero and
+    `previewScale` falls back to 1, which is the same as the pre-zoom behaviour.
+  */
+  useEffect(() => {
+    const element = canvasRef.current;
+    const viewport = viewportRef.current;
+    if (!element || !viewport || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
+      setFittedSize((current) =>
+        current.widthCss === width && current.heightCss === height
+          ? current
+          : { widthCss: width, heightCss: height },
+      );
+      /*
+        The viewport's *content* box, not its border box: the frame is centred inside the
+        padding, so the padding is what the pixel grid's position has to be measured from.
+      */
+      const vw = viewport.clientWidth;
+      const vh = viewport.clientHeight;
+      setViewportSize((current) =>
+        current.width === vw && current.height === vh ? current : { width: vw, height: vh },
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  /*
+    The scale to apply, and the pixel grid's spacing, both derived from the zoom.
+
+    `previewScale` returns a ratio against the fitted layout, so `fit` is exactly 1 and the
+    preview is pixel-identical to what it was before zoom existed.
+  */
+  /*
+    The panel's size for `previewScale`, in the same units as `fitAndFill` wants: the fitted
+    frame divided by the fit factor it was produced by. Derived rather than measured because
+    the panel's padded box is not the frame's box, and it is the *frame* the fit ratio is
+    about — using the padded panel would make 100% a few percent wrong.
+  */
+  const panel = (() => {
+    const fitted = { width: fittedSize.widthCss, height: fittedSize.heightCss };
+    const { fit } = fitAndFill(canvas, fitted);
+    if (fit <= 0) return { width: 0, height: 0 };
+    return { width: canvas.width * fit, height: canvas.height * fit };
+  })();
+  const scale = previewScale(zoom, fittedSize, canvas, panel, devicePixelRatio);
+  /*
+    Screen pixels per canvas pixel: the zoom itself, which is what the pixel grid's visibility
+    and spacing are stated in. Measured from the scale actually applied, not from the
+    requested zoom, so a numeric zoom the panel could not honour cannot claim 800%.
+  */
+  const screenPixelsPerCanvas = (() => {
+    if (fittedSize.widthCss <= 0 || canvas.width <= 0) return scale;
+    return (fittedSize.widthCss * scale) / canvas.width;
+  })();
+  const pixelSpacing = pixelGridSpacing(screenPixelsPerCanvas);
   const platformKey = platformKeyFor(canvas.aspect ?? '');
   const platformZone = platformKey ? (SAFE_AREAS.platforms[platformKey] ?? null) : null;
 
@@ -380,6 +484,54 @@ export function PreviewPane({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [platformZone, grid]);
   /*
+    `Ctrl`+wheel zooms the *view* about the cursor (SPEC 10 §4), and `F` returns to Fit.
+
+    Bound on the viewport rather than the document, and `passive: false` because the whole
+    point is to prevent the panel from scrolling. The listener is added in an effect rather
+    than as an `onWheel` prop for exactly that reason: React attaches wheel listeners
+    passively, so `preventDefault` inside one is a no-op and the page scrolls behind the
+    zoom.
+  */
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || typeof viewport.addEventListener !== 'function') return;
+    const onWheel = (event: WheelEvent) => {
+      // Only the modified wheel: an unmodified one scrolls the panel, as it always has.
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      /*
+        One notch is ~100 units in `deltaY` on most browsers, and trackpads send much
+        smaller deltas far more often — so the notches are fractional and the ratio is
+        applied exponentially. Rounding to whole notches would make a trackpad pinch do
+        nothing at all.
+      */
+      const notches = -event.deltaY / 100;
+      setZoom((current) => {
+        const resolved = typeof current === 'number' ? current : screenPixelsPerCanvas;
+        const next = stepZoom(resolved, notches);
+        /*
+          Zoom about the cursor: the point under the pointer must not move. Its position is
+          measured from the frame's centre, in the *fitted* space the scale multiplies.
+        */
+        const box = viewport.getBoundingClientRect();
+        const centre = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        const fromScale = previewScale(current, fittedSize, canvas, panel, devicePixelRatio);
+        const toScale = previewScale(next, fittedSize, canvas, panel, devicePixelRatio);
+        const point = { x: event.clientX - centre.x, y: event.clientY - centre.y };
+        setPan((currentPan) =>
+          clampPan(
+            panToKeepPoint(currentPan, fromScale, toScale, point),
+            { width: fittedSize.widthCss * toScale, height: fittedSize.heightCss * toScale },
+          ),
+        );
+        return next;
+      });
+    };
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, [canvas, fittedSize, panel, screenPixelsPerCanvas, devicePixelRatio]);
+
+  /*
     `A` toggles the crosshair (SPEC 10 §8.2). Bare, not `Ctrl`-modified, so it needs its
     own listener — the effect above returns early on anything without a modifier.
 
@@ -389,7 +541,23 @@ export function PreviewPane({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key.toLowerCase() !== 'a' || event.repeat) return;
+      const key = event.key.toLowerCase();
+      /*
+        `F` returns to Fit (SPEC 10 §4). It resets the pan as well as the scale: "Fit"
+        means the frame centred and whole, and leaving a pan offset behind would put the
+        fit frame somewhere off-panel with nothing to explain it.
+      */
+      if (key === 'f' && !event.repeat) {
+        const target = event.target as HTMLElement | null;
+        if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+          return;
+        }
+        event.preventDefault();
+        setZoom(ZOOM_FIT);
+        setPan(NO_PAN);
+        return;
+      }
+      if (key !== 'a' || event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
         return;
@@ -877,6 +1045,58 @@ export function PreviewPane({
   }, [userGuides, timeline, overlays.thirds]);
 
   /*
+    The zoom menu (SPEC 10 §3.1): *Fit*, *Fill* and the presets, plus the current value when
+    it is something a wheel produced. That last item is why this is built from the state
+    rather than from the preset list — a user who wheeled to 173% needs to be able to see
+    that number and to get back to it, and a menu that only offered the presets would make
+    every wheel step feel like it had lost the plot.
+  */
+  const zoomMenuItems = useMemo((): MenuItem[] => {
+    const choose = (next: ZoomChoice) => () => {
+      setZoom(next);
+      /*
+        A preset is an absolute size, so leaving the frame panned would keep it off-centre
+        for no visible reason. Choosing a zoom from the list therefore re-centres; a wheel
+        keeps its pan, because there the pan is what the user is aiming with.
+      */
+      setPan(NO_PAN);
+    };
+    const items: MenuItem[] = [
+      { id: 'zoom-fit', label: 'Fit', shortcut: 'F', onSelect: choose(ZOOM_FIT) },
+      { id: 'zoom-fill', label: 'Fill', onSelect: choose('fill') },
+    ];
+    for (const preset of ZOOM_PRESETS) {
+      items.push({
+        id: `zoom-${preset}`,
+        label: zoomLabel(preset),
+        separatorBefore: preset === ZOOM_PRESETS[0],
+        onSelect: choose(preset),
+      });
+    }
+    /*
+      The off-preset value, when there is one. 800% is offered explicitly because it is the
+      pixel grid's threshold (§9) and there is no other way to land on it but a wheel.
+    */
+    const current = typeof zoom === 'number' ? zoom : null;
+    if (current !== null && !ZOOM_PRESETS.includes(current as never)) {
+      items.push({
+        id: 'zoom-current',
+        label: `${zoomLabel(current)} (current)`,
+        separatorBefore: true,
+        onSelect: () => undefined,
+      });
+    }
+    if (current === null || current < PIXEL_GRID_ZOOM) {
+      items.push({
+        id: 'zoom-pixel-grid',
+        label: '800% (pixel grid)',
+        onSelect: choose(PIXEL_GRID_ZOOM),
+      });
+    }
+    return items;
+  }, [zoom]);
+
+  /*
     The snap targets, as bounds on each axis. A drag excludes its own item — snapping a
     clip to where it already is would pin it in place — so the map is of *every* item and
     the drag filters; doing it the other way round would need one map per dragged item.
@@ -912,14 +1132,22 @@ export function PreviewPane({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
+        ref={viewportRef}
+        data-testid="preview-viewport"
         style={{
           flex: 1,
           minHeight: 0,
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--surface-app)',
           padding: 'var(--space-3)',
+          /*
+            A zoomed frame is bigger than the panel by definition, so the viewport has to
+            clip it — otherwise a 400% preview draws over the transport bar and the inspector.
+          */
+          overflow: 'hidden',
         }}
       >
         <div
@@ -1031,6 +1259,28 @@ export function PreviewPane({
             borderRadius: 'var(--radius-md)',
             overflow: 'hidden',
             border: '1px solid var(--line-subtle)',
+            /*
+              Zoom and pan, as a transform rather than a layout change.
+
+              This is the load-bearing decision of the whole feature: every gesture in
+              `use-canvas-drag` divides a client-pixel delta by `getBoundingClientRect()`,
+              and a transformed element reports its *transformed* box — so move, crop, scale,
+              rotate and the guide arithmetic all keep working at any zoom with no change.
+              Setting an explicit width instead would have left them all dividing by the
+              unzoomed size, which fails as "drags are twice as fast at 200%" rather than as
+              a missing conversion.
+
+              `translate` before `scale` so the pan is in screen pixels, which is what a
+              pointer drag measures.
+            */
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+            transformOrigin: 'center center',
+            /*
+              At Fit there is nothing to smooth; above 100% the user is inspecting pixels and
+              wants hard edges, not interpolation. `pixelated` is the honest choice for a
+              frame that is being zoomed past its own resolution.
+            */
+            imageRendering: scale > 1.0001 ? 'pixelated' : undefined,
           }}
         >
           {/*
@@ -1318,6 +1568,38 @@ export function PreviewPane({
             </div>
           )}
         </div>
+        {/*
+          The pixel grid (SPEC 10 §9), drawn over the frame at 800% and above.
+
+          Outside the scaled canvas on purpose: its lines are one *screen* pixel wide, and a
+          line inside a `scale()` is scaled with it — at 800% a 1 canvas-pixel line is an
+          8-pixel bar, which is a chart rather than a grid. Positioning it against the
+          transformed frame means asking the DOM where the frame actually ended up, which is
+          what `pixelGridRect` does below.
+
+          It is centred in the viewport and offset by the pan, matching the canvas's own
+          transform: the frame's box is centred before the scale, so its centre is the
+          viewport's centre plus the pan.
+        */}
+        {pixelSpacing !== null && fittedSize.widthCss > 0 ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: pan.x + (viewportSize.width - fittedSize.widthCss * scale) / 2,
+              top: pan.y + (viewportSize.height - fittedSize.heightCss * scale) / 2,
+              width: fittedSize.widthCss * scale,
+              height: fittedSize.heightCss * scale,
+              pointerEvents: 'none',
+            }}
+          >
+            <PixelGrid
+              spacing={pixelSpacing}
+              width={fittedSize.widthCss * scale}
+              height={fittedSize.heightCss * scale}
+              canvas={canvas}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -1405,6 +1687,51 @@ export function PreviewPane({
               x={guideMenuAt.x}
               y={guideMenuAt.y}
               onClose={() => setGuideMenuAt(null)}
+            />
+          )}
+          {/*
+            The zoom dropdown (SPEC 10 §3.1). A `Menu` rather than a `<select>`: the strip is
+            40 px tall and a native select inside it renders at the platform's own height,
+            which breaks the row. `Menu` is what every other small chooser in this app uses.
+          */}
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <IconButton
+              label={`Preview zoom (${zoomLabel(zoom)})`}
+              shortcut="Ctrl+wheel, F to fit"
+              size={28}
+              active={zoom !== ZOOM_FIT}
+              icon={<Search size={14} />}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setZoomMenuAt((open) =>
+                  open ? null : { x: rect.left, y: rect.top - 4 },
+                );
+              }}
+            />
+            <span
+              /*
+                The numeric readout beside the icon. `aria-hidden` because the button's own
+                label already carries it — two places saying "200%" is one too many for a
+                screen reader.
+              */
+              aria-hidden="true"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--fs-xs)',
+                color: 'var(--text-secondary)',
+                minWidth: '34px',
+              }}
+            >
+              {zoomLabel(zoom)}
+            </span>
+          </span>
+          {zoomMenuAt && (
+            <Menu
+              items={zoomMenuItems}
+              x={zoomMenuAt.x}
+              y={zoomMenuAt.y}
+              onClose={() => setZoomMenuAt(null)}
             />
           )}
           <GridDialog

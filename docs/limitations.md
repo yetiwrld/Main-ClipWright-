@@ -12,16 +12,15 @@ This document tracks architectural scope boundaries and honest limitations per `
 4. **Text on a path / 3D text / gradient text fills (`specs/11` §11):** Text items support solid fills, strokes, shadows, backgrounds, and 12 keyframe-based animations; 3D extrusion, curved path text, and gradient text fills are out of scope in v1.
 5. **Animated GIF imports (`specs/04` §2, `specs/11` §12):** Imported `.gif` files render their first frame statically; use `.mp4` or `.webm` for animated overlays.
 6. **Audio-only composition export (`specs/12` §6.9):** v1 exports video containers (`.mp4`, `.webm`); an audio-only timeline exports as a video with the composition's canvas background colour.
-7. **Guides and safe areas cover everything except the pixel grid.** `Ctrl+;` cycles
-   title safe (90%), action safe (93%) and the 9:16 / 4:5 platform UI zones, and
-   `Ctrl+'` toggles the composition grid, the thirds by default or any N×M from 2 to 12
-   chosen in the Guides menu; the safe-area values come from `assets/safe-areas.json`,
-   so they can be tuned without a code change. The pixel grid is implemented but never
-   appears: SPEC 10 §9 shows it at 800% zoom and above, and the preview has no zoom —
-   the threshold is in place so the grid arrives with zoom rather than needing to be
-   remembered. The safe areas are not yet *crossing* guides: object snapping (above)
-   pulls a clip onto the canvas and onto other items, but not onto the title- and
-   action-safe edges.
+7. **Guides, safe areas and the pixel grid.** `Ctrl+;` cycles title safe (90%),
+   action safe (93%) and the 9:16 / 4:5 platform UI zones, and `Ctrl+'` toggles the
+   composition grid, the thirds by default or any N×M from 2 to 12 chosen in the Guides
+   menu; the safe-area values come from `assets/safe-areas.json`, so they can be tuned
+   without a code change. The **pixel grid** arrives with the view zoom: `Ctrl`+wheel
+   zooms about the cursor up to 1600%, `F` returns to Fit, and from 800% one line per
+   canvas pixel is drawn. The safe areas are not yet *crossing* guides: object snapping
+   (above) pulls a clip onto the canvas and onto other items, but not onto the title-
+   and action-safe edges.
 
 8. **4K 60 fps CPU export speed (`specs/14` §10):** On machines without a hardware encoder (NVENC/QSV/AMF), 4K 60 fps software encoding (`libx264`) runs slower than real-time while maintaining full frame accuracy and deterministic output.
 9. **Unsigned Windows installer (`specs/15` §6.4):** When built without a commercial Authenticode certificate (`CSC_LINK`), the Windows installer and portable executable are **unsigned**. Release notes, the README, the installer, and the in-app updater clearly label builds as **Unsigned** and verify authenticity via Ed25519-signed `release-manifest.json.sig` plus SHA-256/SHA-512 checksums.
@@ -122,14 +121,18 @@ This document tracks architectural scope boundaries and honest limitations per `
    serve both. Snapping does follow the safe-area edges, but
    **only while that overlay is showing**: a line a user cannot see must not pull their
    clip, so `Ctrl+;` switches the snap targets on along with the rectangle. The grid
-   works the same way under `Ctrl+'`, at whatever N×M is set. The **pixel grid** is the
-   one overlay still not a snap target, because it does not exist yet — it needs a zoom
-   the preview does not have (above). The **cap of four lines** is met by construction
-   rather than by a limit: one target is chosen per axis, so a dragged clip can draw two at
-   most. The pivot crosshair sits behind §8.2's
-   *Show anchor* toggle (`A`), but that is the only one of §4's toolbar view toggles
-   here: there is no **Handles** toggle (`H`), no zoom dropdown and no preview-quality
-   control. And the **four edge handles still crop rather than scaling one axis each**:
+   works the same way under `Ctrl+'`, at whatever N×M is set. The **pixel grid** now
+   exists (above) and is deliberately not a snap target: at 800% a target every eight
+   screen pixels would catch every drag and nothing else would ever snap, so the pixels
+   are a ruler for the eye rather than something to align to. The **cap of four lines**
+   is met by construction rather than by a limit: one target is chosen per axis, so a
+   dragged clip can draw two at most. The pivot crosshair sits behind §8.2's *Show
+   anchor* toggle (`A`), and the **zoom dropdown is in** — Fit, Fill, 25–400%, plus
+   `Ctrl`+wheel about the cursor up to 1600% — but that is not all of §4's toolbar view
+   toggles: there is still no **Handles** toggle (`H`), no **preview-quality** control,
+   and no hand tool — panning is wheel-driven, through the pan that zooming about the
+   cursor produces, and there is no `Space`+drag. And the **four edge handles still crop
+   rather than scaling one axis each**:
    crop is reachable along the whole edge, which keeps the gesture this app has always
    had, but it means SPEC 10 §8.2's per-axis scale has no pointer affordance.
 7. **The curve editor draws and shapes curves, but does not zoom or transform
