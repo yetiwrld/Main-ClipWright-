@@ -24,6 +24,7 @@ import {
   type MediaInfo as CoreMediaInfo,
 } from '@clipwright/media-core';
 import type { StorageService } from './storage/storage-service.js';
+import { recoverRoot, volumeIdentity } from './relocate.js';
 
 export interface IngestRequest {
   projectId: string;
@@ -214,11 +215,36 @@ export async function ingestMedia(
 
   const sizeBytes = statSync(managedPath).size;
 
+  /*
+    The volume a **reference** lives on (SPEC 04 §4.1). Recorded only for reference mode:
+    a managed copy is in the library, and its volume is the workspace's, which is a fact
+    about the app's own storage rather than about the user's footage. Storing it there too
+    would make every managed asset look relocatable when the workspace moved.
+  */
+  const recordedVolume =
+    request.storageMode === 'reference'
+      ? (() => {
+          const root = recoverRoot(managedPath);
+          if (!root) return undefined;
+          let dev: number | undefined;
+          try {
+            dev = statSync(managedPath).dev;
+          } catch {
+            // No serial available; the label fallback is not readable here either, so the
+            // record simply carries no identity and the relink dialog handles it.
+          }
+          return volumeIdentity({ dev, label: root.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop(), root });
+        })()
+      : undefined;
+
   storage.saveMedia({
     id: mediaId,
     kind: info.kind,
     storageMode: request.storageMode,
     path: managedPath,
+    ...(recordedVolume
+      ? { volumeId: recordedVolume.id, volumeRoot: recordedVolume.root }
+      : {}),
     originalName: basename(request.sourcePath ?? request.sourceUrl ?? managedPath),
     sizeBytes,
     sha256,

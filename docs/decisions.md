@@ -581,3 +581,39 @@ The honest limit, recorded in `limitations.md`: with no detector, this is the ca
 will use rather than a working auto-reframe button. What it replaces is nothing — the module had
 no counterpart at all — and what it makes possible is the review panel and the manual framing
 fallback, both of which need only keyframes.
+
+## 23. A reference is found by volume identity, not by path
+
+SPEC 04 §4.1 records a "volume serial / drive label" next to a referenced import's absolute path,
+and SPEC 03 §8's `media` table calls it `volumeId`. Nothing wrote it and nothing read it, so the
+ordinary external-drive failure — the drive comes back as `E:` instead of `D:`, or mounts at
+`/Volumes/Footage 1` because a stale copy is still mounted — left every clip missing with
+nothing actually lost.
+
+- **Identity and root are separate fields.** The identifier is what survives the move; the root
+  is where it was mounted, and it is what a new path is rebuilt from. An identifier alone says
+  "the right disk" without saying where on it the file sits, which is why recording one is what
+  made the other usable.
+- **`serial:` and `label:` are prefixed, deliberately.** A serial survives a remount at a new
+  mount point; a label survives a re-lettered drive or a new machine. They are not
+  interchangeable, and comparing one against the other must never match — a record stamped with
+  a guessed identifier would tell the user their file was found and hand them someone else's clip.
+- **Verify in cost order.** Size first, because a mismatch is proof; then the fingerprint, lazily,
+  so a card full of same-named files is not hashed before it can be rejected. Same length is not
+  the same file — that is the whole reason the fingerprint exists.
+- **A distinct reason per outcome.** "Not mounted", "not found", "found and rejected" and "never
+  told me the volume" lead to different user actions. Collapsing them into one "missing" sends
+  the user looking through folders for a file whose drive is unplugged.
+- **Managed media is never relocated.** Its bytes are in the library; a managed record that
+  cannot be read is a damaged workspace, and pointing it at an external file would silently turn
+  a managed asset into a reference.
+- **The destination decides the separator.** Neither `relativeWithin` returning POSIX form nor a
+  mismatched root may produce `/mnt/x\a\b.mp4`. This looks like a guard against a case that
+  cannot occur — and for this pass it mostly is, because a record and the volume it returns on
+  are the same platform — but "the destination decides" is the rule that stays true when a
+  workspace is synced between machines, so it is the rule written down.
+
+Two bugs the tests caught, both of which the type system would not have: the same string is a
+valid path on two platforms and a broken one on the third, and a mount helper that stops one
+directory too early matches a *different* drive. Path arithmetic is one of the few places where
+the failure is silent and the output still looks like a path.

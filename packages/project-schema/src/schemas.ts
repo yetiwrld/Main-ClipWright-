@@ -504,7 +504,21 @@ export const MediaRecordSchema = z
     sizeBytes: z.number().int().min(0),
     sha256: z.string().optional(),
     fingerprint: z.string(),
+    /**
+     * Which volume the file was imported from, and where it was mounted at the time
+     * (SPEC 04 §4.1).
+     *
+     * The identifier survives the volume coming back at a different mount point — the
+     * ordinary external-drive failure — and the root is what a relocated path is rebuilt
+     * from: `E:\` plus the relative path the record already carries. Without the root the
+     * identifier alone says "the right disk" but not where on it the file sits, which is
+     * why recording one is what made the other usable.
+     *
+     * Only **reference** imports set these. A managed copy lives in the library, and its
+     * volume is the workspace's rather than the user's footage.
+     */
     volumeId: z.string().optional(),
+    volumeRoot: z.string().optional(),
     createdAt: z.string(),
     info: MediaInfoSchema,
     status: z.enum(['ok', 'missing', 'changed']).default('ok'),

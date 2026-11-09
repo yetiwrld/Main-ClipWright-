@@ -149,8 +149,15 @@ describe('the proxy path survives a save', () => {
       join(dirname(fileURLToPath(import.meta.url)), '..', 'media-pipeline.ts'),
       'utf8',
     );
+    /*
+      The window runs to the *end of the call*, not to the first `}`. Slicing at the first
+      closing brace was fine while the record literal held no nested braces; the moment
+      anything nested slipped in — a conditional spread, here — the test started reading
+      two lines of the literal and could fail on a correct file or pass on a broken one.
+    */
     const saveCall = pipeline.slice(pipeline.indexOf('storage.saveMedia({'));
-    expect(saveCall.slice(0, saveCall.indexOf('}'))).toContain('proxyPath');
+    const end = saveCall.indexOf('\n  });');
+    expect(saveCall.slice(0, end === -1 ? saveCall.length : end)).toContain('proxyPath');
   });
 
   it('is chosen by the preview once it is stored', () => {
