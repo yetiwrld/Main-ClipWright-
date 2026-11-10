@@ -4,8 +4,16 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen, project-menu and IPC-surface slices. 3568 automated tests,
-all passing.
+Last updated after commit `f8efdb2`. 3568 automated tests, all passing.
+
+**The last seven commits repaired the app's connections to itself rather than adding features.** Every
+one was a value, a name or a channel that two files disagreed about: the start screen sent settings
+keys the schema does not have (so it could not create a project at all), four project actions existed
+in the store and in no window, a refactor deleted 36 IPC channels including the whole AI and moments
+surface, and the ducking settings on every track were read by nothing. The features were written;
+what was missing was the join. `docs/decisions.md` §51–55 records each one, and the recurring shape —
+a name in two files that no test reads from both sides — is why `ipc-surface.test.ts` now compares
+the bridge's channel list against main's in both directions.
 
 ---
 
