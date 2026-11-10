@@ -1995,3 +1995,29 @@ tests passed.
 The panel cannot reach an empty selection by clicking — the state keeps whatever was checked, and
 unticking both leaves `[]`, which the export honours. That is deliberate: the toggle is the off
 switch, and having two ways to express "write nothing" only creates a way for them to disagree.
+
+## 57. The subtitle file was wrapped for a frame nobody was looking at
+
+The transcript editor's export button passed `'16:9'` — a literal — as the aspect, and that
+argument is what decides how cues are line-wrapped in the SRT and WebVTT files it writes. So every
+project exported subtitles laid out for a landscape frame. This app's default project is 9:16
+portrait; a cue that takes two lines across a 1920-wide frame needs three at 1080 wide, and a file
+wrapped for the wrong shape breaks in the wrong place everywhere it is opened.
+
+It is the smallest bug of this run and it belongs to the same family: a value that exists in one
+place (the project's `settings.aspect`), is needed in another (the wrapper), and is replaced by a
+literal in between. The literal is not even visibly wrong — `'16:9'` is the function's own default,
+so the call site and the callee agreed, and only the *project* disagreed.
+
+**Why it survived.** The transcript editor had no test. It is a 400-line component with search,
+selection, inline edit and four export buttons, and every one of those was reachable and untested —
+which is also why the literal could be there from the first commit without ever looking wrong.
+
+The fix is one prop threaded from the stage that already had the project. The test asserts the
+aspect reaches the bridge, that all four of §9's formats do, that the fallback applies only when no
+aspect is supplied, and that a WebVTT export is not named `.srt`. Four mutations bite, including
+putting the literal back.
+
+The general note, since this is the seventh instance: **a default at a call site is a claim that
+the caller has nothing to say.** Sometimes that is true. Here the caller had the project in scope
+and had already used it for everything else on the screen.

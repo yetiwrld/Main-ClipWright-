@@ -328,7 +328,11 @@ function TranscribeStage({
           background: 'var(--surface-card)', border: '1px solid var(--line-subtle)',
           borderRadius: 'var(--radius-lg)', overflow: 'hidden',
         }}>
-          <TranscriptEditor transcript={result.transcript as TranscriptPayload} />
+          <TranscriptEditor
+            transcript={result.transcript as TranscriptPayload}
+            /* The project's own ratio, so a portrait project's subtitles wrap for a portrait frame. */
+            aspect={typeof project?.settings?.aspect === 'string' ? project.settings.aspect : undefined}
+          />
         </div>
       </div>
     );

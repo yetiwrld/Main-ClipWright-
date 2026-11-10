@@ -4,6 +4,15 @@ import { api, describeError } from '../api.js';
 
 interface Props {
   transcript: TranscriptPayload;
+  /**
+   * The composition's aspect ratio, which decides how SRT/VTT cues are line-wrapped (SPEC 05 §9).
+   *
+   * It was hardcoded `'16:9'` at the call site, so a 9:16 project — the default for every new
+   * project — exported subtitle files wrapped for a landscape frame. The wrapping is not cosmetic:
+   * a cue that fits a 16:9 frame in two lines needs three in a 1080-wide portrait frame, and a
+   * file that wraps for the wrong shape shows the wrong break in every player.
+   */
+  aspect?: string;
   /** Called with the updated transcript whenever the user edits text. */
   onChange?: (next: TranscriptPayload) => void;
   onSeek?: (us: number) => void;
@@ -11,7 +20,7 @@ interface Props {
 
 type ExportFormat = 'txt' | 'srt' | 'vtt' | 'json';
 
-export function TranscriptEditor({ transcript, onChange, onSeek }: Props) {
+export function TranscriptEditor({ transcript, aspect = '16:9', onChange, onSeek }: Props) {
   const [words, setWords] = useState(transcript.words);
   const [search, setSearch] = useState('');
   const [matchIndex, setMatchIndex] = useState(0);
@@ -75,7 +84,7 @@ export function TranscriptEditor({ transcript, onChange, onSeek }: Props) {
       const result = await api.exportTranscript(
         { ...transcript, words },
         format,
-        '16:9',
+        aspect,
         `transcript.${format === 'txt' ? 'txt' : format}`
       );
       setExportState(result ? 'done' : 'idle');
@@ -84,7 +93,7 @@ export function TranscriptEditor({ transcript, onChange, onSeek }: Props) {
       setExportState('error');
       setExportMessage(describeError(err));
     }
-  }, [transcript, words]);
+  }, [transcript, words, aspect]);
 
   const editedCount = words.filter((w) => w.edited).length;
 
