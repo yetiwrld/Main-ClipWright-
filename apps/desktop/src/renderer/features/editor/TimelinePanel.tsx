@@ -62,6 +62,9 @@ import {
 } from '@clipwright/timeline-engine';
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
+import { TrackMeter } from './TrackMeter.js';
+import { useTrackMeters } from './use-track-meters.js';
+import { useTrackTapsWithContext } from './track-taps-store.js';
 import { usePlayback } from './use-playback.js';
 import {
   useMediaPeaks,
@@ -88,6 +91,12 @@ type DragState =
 
 export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
   const { state, fps, selection } = timeline;
+  /*
+    Per-track meters (SPEC 12 §6.3). The nodes come from the preview graph through a small store
+    rather than down the component tree, because the graph lives beside this panel, not above it.
+  */
+  const { context: audioContext, taps: trackTaps } = useTrackTapsWithContext();
+  const trackMeters = useTrackMeters(audioContext, trackTaps);
 
   const [pxPerSecond, setPxPerSecond] = useState(state?.viewState?.pxPerSecond ?? 80);
   const [scrollX, setScrollX] = useState(state?.viewState?.scrollX ?? 0);
@@ -992,6 +1001,19 @@ export function TimelinePanel({ timeline }: { timeline: TimelineApi }) {
               >
                 {track.name}
               </span>
+              {/*
+                The per-track level meter (SPEC 12 §6.3). Drawn only when the preview graph
+                published a node for this track: a meter that is always present and always dark
+                is indistinguishable from a broken one, and the graph knows exactly which tracks
+                can make sound.
+
+                Placed after the name and before the controls, so the row still reads
+                name → level → the buttons a user presses. The controls stay at the right end
+                because that is where a hand goes.
+              */}
+              {trackMeters.get(track.id) && (
+                <TrackMeter meter={trackMeters.get(track.id)!} trackName={track.name} />
+              )}
               {track.locked && <Lock size={11} color="var(--text-muted)" />}
               {track.role === 'main' && (
                 <IconButton

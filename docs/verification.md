@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  139 passed (139)
-     Tests  3368 passed (3368)
+Test Files  142 passed (142)
+     Tests  3390 passed (3390)
 ```
 
 | Area | Tests | What they actually check |
@@ -117,7 +117,7 @@ Test Files  139 passed (139)
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 24 | Component contracts; the eyedropper's three non-picked outcomes and the recent-colours ordering (newest first, move-not-duplicate, no half-typed colour, re-capped on merge) |
 | `packages/brand-kits` | 109 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, capturing a kit from the current clip by measuring geometry back into percentages, and missing-font substitution that keeps a serif a serif |
-| **Total** | **3368** | 139 files |
+| **Total** | **3390** | 142 files |
 
 ### Tests that run real processes
 
@@ -626,6 +626,55 @@ anchor) were real test gaps, now covered. Eight tests on the wiring, driven thro
 `requestAnimationFrame` so "a frame was dropped" is a claim a test can make. Five mutations of the
 hook's rate handling all bite: never applying the rate, not clamping it, not preserving pitch,
 ignoring a rate change mid-playback, and a clock that reports zero.
+
+### A meter per track, from one timer and one arithmetic
+
+SPEC 12 §6.3's last sentence asks for "per-track meters in the track headers when headers are wide
+enough". The graph slice made that a UI job by giving the plan a `trackId` and the graph a summing
+node per track; this slice draws them.
+
+**The meter is a tap, so it lives beside the graph and not in it.** The header's analysers connect
+to the track's summing node and to nothing else. That separation is what keeps "adding a meter"
+from being "changing what is played", which is the class of bug that makes a feature that measures
+*a* signal alter it.
+
+**One timer, not one per header.** Twelve headers each running a 30 Hz `setInterval` and reading
+two analysers is 720 analyser reads a second, and the cost grows with the number of tracks — the
+cost of the feature scaling with the thing the feature helps you watch. So `useTrackMeters` takes
+the whole tap map and runs a single interval. A test counts the intervals asked for.
+
+**Two 3 px bars, not a small `LevelMeter`.** The master meter is 96 px with labelled channels, a
+scale, a peak hold and a latching clip light. A header is 184 px shared with a name, a lock, a
+magnet, a mute and a solo. Carrying the whole master meter into it would either not fit or push the
+controls a user presses off the row — and a control that is merely *present* is not reachable, which
+is the lesson this project keeps relearning. So the track meter keeps the scale and the three
+colour thresholds (from the same module, so the two meters cannot disagree about "hot") and drops
+the hold and the clip light. Clipping is still reported, by the master meter, where there is room
+for a light that latches until clicked.
+
+Three decisions in the hook that only a test can see:
+
+| Decision | What the bug looks like |
+|---|---|
+| The held state lives in a **ref**, not in state | `updateMeter` needs the *previous* reading to hold a peak; reading it from state inside the interval closure captures the value from the render the effect ran in, so no peak ever holds. A mutation that uses `SILENT_METER` every frame is caught. |
+| Left and right are read from **their own** analysers | Reading the left channel twice draws two full bars that move together — which looks entirely correct on screen. The fake analysers carry different values so a test can name the channel, and this was a mutation that **survived the first pass**. |
+| `setMeters` only when a reading **changed** | The timer runs at 30 Hz whatever is happening, so an unconditional update re-renders every header 30 times a second for a bar a pixel wide. The test counts renders and demands zero in the steady state; the first pass allowed three, which let the unconditional version through. |
+
+**Eight tests on the component, nine on the hook, five on the store.** Six mutations of the
+component all bite (a single bar from the louder channel, no warn threshold, a label without the
+track name, `valuenow` from the left channel only). Three mutations of the hook: the peak hold and
+the re-render bound both bit after the fixtures were tightened; the third — removing the
+`has(trackId)` guard in the analyser build loop — is **equivalent**, because that loop runs once
+per effect run and not per tick, so no fixture can tell the two apart. The guard stays (a re-run
+would otherwise add a second analyser pair to the same node) and the test's comment now says
+exactly that rather than claiming a proof it does not have.
+
+**A test that hung the worker.** The first version of the hook fixture created a new fake
+`AudioContext` on every render. A new context is a new effect dependency, so the effect re-ran, the
+effect sets state, the state re-rendered — and the test allocated until the process died with
+`Ineffective mark-compacts near heap limit`. The fixture now holds one context per test. That is a
+mistake a **caller** can make too, so the comment in the test says why the object must be stable
+rather than just doing it.
 
 ### A graph per item, so the preview sounds like the file
 

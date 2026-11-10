@@ -224,10 +224,14 @@ describe('the preview audio graph', () => {
     );
     expect(mediaElementSources).toBe(2);
     expect(api!.ready).toBe(true);
-    /* A source, a gain and a pan per item, plus the bus. */
     expect(recorded.filter((node) => node.kind === 'source')).toHaveLength(2);
-    expect(recorded.filter((node) => node.kind === 'gain')).toHaveLength(3);
     expect(recorded.filter((node) => node.kind === 'panner')).toHaveLength(2);
+    /*
+      A gain for each item's envelope, one for each track's summing point, and the bus.
+      The track nodes are what the headers' meters read — two items on two tracks means two.
+    */
+    expect(recorded.filter((node) => node.kind === 'gain')).toHaveLength(5);
+    expect(api!.trackTaps.size).toBe(2);
   });
 
   it('does not rebuild a chain when the same item is planned again', () => {
@@ -273,12 +277,21 @@ describe('the preview audio graph', () => {
       />,
     );
     seek(0);
-    const before = recorded.filter((node) => node.kind === 'gain')[1]!.targets.length;
+    const counts = () => recorded.filter((node) => node.kind === 'gain').map((node) => node.targets.length);
+    const before = counts();
     seek(1_000_000);
     seek(1_500_000);
-    const after = recorded.filter((node) => node.kind === 'gain')[1]!.targets.length;
-    /* One scheduling call per frame, and the value moves as the fade does. */
-    expect(after).toBeGreaterThan(before);
+    const after = counts();
+
+    /*
+      Every item's envelope gain is scheduled per frame and nothing else is — the bus follows a
+      slider and the track nodes are unity summing points. So comparing the *whole* vector rather
+      than one index is what makes this a claim about which node moved: exactly one gain node is
+      the envelope of the single clip here, and it must have gained two entries.
+    */
+    const moved = after.filter((count, index) => count > before[index]!).length;
+    expect(moved).toBe(1);
+    expect(Math.max(...after)).toBeGreaterThan(2);
   });
 
   it('requests nothing for an item on a muted track', () => {

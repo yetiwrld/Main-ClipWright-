@@ -33,6 +33,15 @@ import { gainAt, type FadeCurve, type GainEnvelopeInput } from './envelope.js';
 /** One audible item, as the graph should build it. */
 export interface PreviewAudioRequest {
   itemId: string;
+  /**
+   * The track the item is on.
+   *
+   * The graph needs it to give each track a summing node, which is what the headers' per-track
+   * meters read (SPEC 12 §6.3). Carried out of the plan rather than looked up by the caller,
+   * because the caller would have to map a track id back to a timeline the plan was derived
+   * from — the exact coupling the pure module exists to avoid.
+   */
+  trackId: string;
   mediaId: string;
   /**
    * Where the item sits on the timeline, which is also where its element's `currentTime` runs
@@ -186,6 +195,7 @@ export function previewAudioRequests(timeline: PreviewAudioTimeline): PreviewAud
 
     requests.push({
       itemId: item.id,
+      trackId: item.trackId,
       mediaId: item.mediaId,
       startUs: item.startUs,
       durationUs: item.durationUs,

@@ -1,25 +1,25 @@
 /**
- * The preview's audio graph, in as much as it exists (SPEC 12 §6.3).
+ * The transport's master meter (SPEC 12 §6.3, `10 §3.2`).
  *
- * This is deliberately the *smallest* graph that can feed a meter: one `MediaElementSource`
- * on the preview's `<video>`, one splitter into two analysers, and the source connected to
- * the destination so sound keeps coming out. It exists so the transport's peak meter reads
- * something real rather than a synthesised number.
+ * It reads whatever `usePreviewAudio` built. When the preview graph exists the source is its
+ * **mix bus** — the node every item is summed into — so the reading is the level a listener
+ * hears rather than one layer of it. When no graph could be built (no Web Audio, or a standalone
+ * preview with no timeline) it falls back to tapping the `<video>` element, which only carries
+ * the bottom picture layer; that fallback is the old behaviour kept deliberate, and the reading
+ * is labelled "quiet" rather than presented as a mix.
  *
- * What it is **not** yet: the full graph the spec describes. Pan, per-item gain automation
- * and the audio-mastered playback clock all want per-item nodes rather than one node on the
- * bottom layer, and this slice does not pretend otherwise — see `docs/limitations.md` §3.1.
- * Building the meter first is the useful order: the meter is what makes the rest of the
- * graph *checkable*, since every later change can be heard and seen instead of trusted.
+ * The arithmetic — the −60…0 dB scale, the 1.5 s hold, the latching clip light, the K-weighted
+ * momentary loudness — lives in `audio-meter.ts` and `audio-core`'s `loudness.ts` as pure
+ * functions. This file is only the wiring: analysers, a 30 Hz timer, and the same `MeterState`
+ * every other meter in the app uses.
  *
- * Two constraints shape the code:
+ * Two constraints shape it:
  *
- * - `createMediaElementSource` may be called **once per element**, ever. A second call
- *   throws, so the graph is created once and kept in a ref rather than rebuilt when the
- *   source changes.
- * - jsdom has no `AudioContext` at all. Everything here is behind a feature check, and a
- *   missing graph means the meter reads silence instead of the component throwing — the
- *   same "never silently broken" rule the rest of the preview follows.
+ * - An `AnalyserNode` can only connect to a node in **its own** `AudioContext`, so the analysers
+ *   are built against the tap's context rather than one of the meter's own.
+ * - jsdom has no `AudioContext` at all. Everything here is behind a feature check, and a missing
+ *   graph means the meter reads silence instead of the component throwing — the same "never
+ *   silently broken" rule the rest of the preview follows.
  */
 
 import { useEffect, useRef, useState } from 'react';

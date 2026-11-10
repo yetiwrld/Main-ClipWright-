@@ -97,6 +97,19 @@ export interface PreviewAudioApi {
    * the drift the whole exercise is about.
    */
   clock: () => number | null;
+  /**
+   * One node per track that has something audible on it, for the track headers' meters
+   * (SPEC 12 §6.3: "per-track meters in the track headers when headers are wide enough").
+   *
+   * A `Map` rather than an array because the header looks its track up by id, and an array would
+   * make every header search it. Replaced wholesale when the plan changes, so a consumer that
+   * compares identity sees a change exactly when the set of audible tracks does.
+   *
+   * A track with nothing audible on it is **absent**, not present at silence: a meter that is
+   * always there and always dark is indistinguishable from a broken meter, and the header can
+   * draw nothing instead.
+   */
+  trackTaps: ReadonlyMap<string, AudioNode>;
   /** Start or resume the context. Must be called from a user gesture (play). */
   resume: () => void;
   /** Suspend the context, so a paused preview is not spinning a clock. */
@@ -142,6 +155,7 @@ export function usePreviewAudio(
 ): PreviewAudioApi {
   const [ready, setReady] = useState(false);
   const [tap, setTap] = useState<{ context: AudioContext; node: AudioNode } | null>(null);
+  const [trackTaps, setTrackTaps] = useState<ReadonlyMap<string, AudioNode>>(new Map());
   const contextRef = useRef<AudioContext | null>(null);
   /*
     Read by `createContext` for the bus's starting gain. A ref rather than a dependency: the
@@ -153,6 +167,14 @@ export function usePreviewAudio(
   const busRef = useRef<GainNode | null>(null);
   const chainsRef = useRef<Map<string, Chain>>(new Map());
   const elementsRef = useRef<Map<string, HTMLMediaElement>>(new Map());
+  /*
+    One summing gain per track, between the item chains and the bus. Kept for the life of the
+    context and never torn down while the track exists, because an `AnalyserNode` in a header is
+    connected to it: disconnecting a track node and building a new one would leave the header's
+    analyser listening to a node nothing reaches any more, and the meter would read silence
+    forever with no error to explain it.
+  */
+  const trackNodesRef = useRef<Map<string, GainNode>>(new Map());
 
   /*
     The plan, recomputed when the timeline changes. It is memoised on the *whole* timeline
@@ -270,12 +292,24 @@ export function usePreviewAudio(
       let chain = chainsRef.current.get(request.itemId);
       if (!chain) {
         try {
+          /*
+            Every item's panner feeds its **track's** node rather than the bus directly, so the
+            headers' meters can read a track without reading the mix. A track node is a plain
+            unity gain: it exists to be a summing point, not to change the sound, and putting the
+            volume here instead of on the item's own gain would apply it twice.
+          */
+          let trackNode = trackNodesRef.current.get(request.trackId);
+          if (!trackNode) {
+            trackNode = context.createGain();
+            trackNode.connect(bus);
+            trackNodesRef.current.set(request.trackId, trackNode);
+          }
           const source = context.createMediaElementSource(element);
           const gain = context.createGain();
           const panner = context.createStereoPanner();
           source.connect(gain);
           gain.connect(panner);
-          panner.connect(bus);
+          panner.connect(trackNode);
           chain = { request, element, source, gain, panner, loadedMediaId: request.mediaId };
           chainsRef.current.set(request.itemId, chain);
         } catch {
@@ -289,6 +323,21 @@ export function usePreviewAudio(
       }
       chain.request = request;
     }
+
+    /*
+      Publish the nodes the headers read, dropping any track that no longer has a requested item.
+
+      The node itself is kept in `trackNodesRef` even when it is dropped from the published map:
+      a track whose last item is muted is still on screen, its header meter should read silence
+      rather than disappear, and an item un-muted a moment later must land back on the same node.
+      Disconnecting the node would be the thing that broke the header's analyser.
+    */
+    const audibleTracks = new Set(requests.map((request) => request.trackId));
+    const published = new Map<string, AudioNode>();
+    for (const [trackId, node] of trackNodesRef.current) {
+      if (audibleTracks.has(trackId)) published.set(trackId, node);
+    }
+    setTrackTaps(published);
   }, [createContext, elementFor, enabled, requests]);
 
   /* Gain and pan, whenever the plan changes. */
@@ -397,6 +446,7 @@ export function usePreviewAudio(
       }
       chainsRef.current.clear();
       elementsRef.current.clear();
+      trackNodesRef.current.clear();
       if (contextRef.current) void contextRef.current.close().catch(() => undefined);
       contextRef.current = null;
       busRef.current = null;
@@ -419,7 +469,7 @@ export function usePreviewAudio(
     up as "the preview gets slower the longer I leave it open".
   */
   return useMemo(
-    () => ({ ready, tap, clock, resume, suspend, seekTo }),
-    [ready, tap, clock, resume, suspend, seekTo],
+    () => ({ ready, tap, clock, trackTaps, resume, suspend, seekTo }),
+    [ready, tap, clock, trackTaps, resume, suspend, seekTo],
   );
 }

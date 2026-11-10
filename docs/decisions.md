@@ -1520,3 +1520,62 @@ applies exactly here: a 2× button that moved the playhead twice as fast while t
 1× would produce the one thing a preview must never do — a picture that disagrees with the file.
 `preservesPitch` is set unconditionally in both spellings, after a bug where guarding it with `in`
 made the assignment vanish in precisely the environment the test ran in.
+
+## 48. A meter is a tap, and the arithmetic is the part worth sharing
+
+**The graph had the nodes; the meters were a UI job, so they became a store.** The preview graph
+lives in `PreviewPane` and the track headers live in `TimelinePanel`, which are siblings. Threading
+a map of `AudioNode`s down through the components between them would carry a Web Audio type through
+half a dozen files that have no use for it. `trackTapsStore` publishes instead — the same shape
+`playheadStore` already uses for the same kind of reason — and a header that is not rendered costs
+nothing because nothing subscribes. The store holds what the graph published, never a copy: the
+graph decides when the set of audible tracks changed.
+
+**The store's identity check includes the context, because the map alone is not enough.** Publishing
+the same map with a new `AudioContext` looks like a no-op and is not: the headers would keep building
+analysers in a closed context, and every meter would read silence for the rest of the session with
+nothing logged. Both fields are compared, and a test pins the case.
+
+**A meter must be a tap.** The header's analysers connect to a track's summing node and to nothing
+else — no gain, no routing, no side effect on the sound. This is a rule rather than an observation:
+the one bug class that makes a *measuring* feature change what it measures is putting a node in the
+signal path, and it is how the master meter would have silenced the preview when it was first built
+(an `AnalyserNode` must be connected *through* to the destination, not substituted for it).
+
+**One timer for every track.** Twelve headers each running a 30 Hz interval and reading two analysers
+is 720 reads a second, and it scales with the number of tracks — the cost of the feature growing with
+the thing the feature is for. So the hook takes the whole map and runs one interval. A test counts
+the intervals requested, which is a claim about the code's shape rather than about its output.
+
+**Two 3 px bars is not a shrunken master meter.** The master meter earns its size: 96 px, labelled
+channels, a scale, a peak hold and a latching clip light, because it is what you consult when judging
+a mix. A header has 184 px shared with a name, a lock, a magnet, a mute and a solo button. Carrying
+all of it in would either not fit or push the controls off the row, and a control that is present but
+off the row is not reachable — the failure this project has now hit often enough to treat as a
+principle. So the track meter keeps the things that make it comparable to the master — the same
+−60…0 scale and the same three colour thresholds, from the same module — and drops the hold (a hold
+marker would cover the bar it marks at that height) and the clip light (no room). Clipping is still
+reported, by the master, where there is room for a light that latches until it is clicked.
+
+**The held state had to be a ref, and that is not a style choice.** `updateMeter` computes a peak
+hold from the *previous* reading. Inside a `setInterval` callback, reading that from React state
+captures the value from the render the effect ran in, so the peak would never advance past the first
+frame's — a hold that is permanently stuck at whatever the first tick saw. The previous map lives in
+a ref beside a mirror used for the change test, and both are declared above the effect because a
+`const` is only initialised at its own line.
+
+**Three mutations were written and only two of them were real.** The peak hold and the "do not
+re-render when nothing moved" bound both bit, but only after the fixtures were tightened: the first
+version of the render bound allowed three updates, which is exactly what an unconditional `setMeters`
+produces over three ticks. The third — removing the `has(trackId)` guard in the analyser build loop —
+cannot be distinguished by any fixture, because that loop runs once per effect run rather than per
+tick. The guard stays, because the effect *is* re-entered when the tap map changes and a re-entry
+without it would add a second analyser pair to the same node; but the test says "this does not prove
+the guard" rather than pretending otherwise. A test that claims more than it checks is worse than no
+test, because it retires the question.
+
+**A fixture leaked a context per render and killed the worker.** The first hook fixture built a new
+fake `AudioContext` on every render, so the effect re-ran every render, and the effect sets state —
+a render loop that allocated until `Ineffective mark-compacts near heap limit`. The fix is one
+context per test, and the comment explains why it must be stable, because a *caller* can make the
+same mistake with a real context and get the same hang.

@@ -86,9 +86,14 @@ This document tracks architectural scope boundaries and honest limitations per `
      a listener hears rather than the bottom layer. The `<video>`-element tap is still the
      fallback when no graph can be built (no Web Audio in the environment), and it still means
      the bottom layer; the hook says so where it falls back.
-   What is still true: **per-track meters** in the track headers are not built. The graph now has
-   the nodes they need, but a meter per track means an analyser per track and a place in the
-   header to draw it, which is a UI slice rather than a graph one.
+   **Per-track meters are in.** Each track that has something audible on it gets a summing node in
+   the graph, and its header draws two 3 px bars on the same −60…0 dB scale and the same three
+   colours as the master meter, read from an `AnalyserNode` at 30 Hz — the same arithmetic module,
+   so the two cannot disagree about what "hot" looks like. Two things the header meter deliberately
+   does *not* have: the **peak hold** (at that height a hold marker would cover the bar it marks)
+   and the **clip light** (a header has 184 px shared with a name, a lock, a magnet, a mute and a
+   solo button). Clipping is still reported — by the master meter, which is where there is room
+   for a light that latches until clicked.
    Two honest gaps in the graph itself: it builds one chain per *item*, not per track, so an
    edit that re-plans the whole graph on every timeline change is cheap at this scale and would
    not be at a thousand clips; and the graph is rebuilt from a plan on each edit rather than

@@ -267,9 +267,10 @@ never previewed. The meter now taps the bus, so both it and the LUFS readout mea
 mix instead of one layer. The preview now runs on **the audio device's clock** (SPEC 09 §23): the
 playhead is derived from `AudioContext.currentTime` through an anchor taken on the first frame
 of playback, so a dropped frame costs picture rather than sound, and playback rate
-(0.5×–2×, pitch preserved) is in the transport. What is still missing from the audio system
-is **per-track meters** in the track headers, which the graph has made a UI job rather than a
-graph one. **Text and shape items are in**, which closes the biggest
+(0.5×–2×, pitch preserved) is in the transport. **Per-track meters are in** (§6.3): a summing node per audible track in the graph, and two 3 px
+bars in the header on the master meter's own scale and colours, from the same arithmetic module.
+What is still missing from the audio system is the *rest* of §6: ducking, normalisation and
+noise reduction. **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without

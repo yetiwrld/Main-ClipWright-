@@ -59,6 +59,7 @@ import { LevelMeter } from './LevelMeter.js';
 import { AudioMetersPopover } from './AudioMetersPopover.js';
 import { useAudioMeter } from './use-audio-meter.js';
 import { usePreviewAudio } from './use-preview-audio.js';
+import { trackTapsStore } from './track-taps-store.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import {
   scrubFrameUrl,
@@ -455,6 +456,14 @@ export function PreviewPane({
     layer. The hook falls back to the `<video>` element when no graph could be built.
   */
   const audioMeter = useAudioMeter(videoRef, true, previewAudio.tap);
+  /*
+    Publish the per-track nodes for the track headers' meters (SPEC 12 §6.3). An effect rather than
+    a render-time call: writing to a store during render would notify subscribers mid-commit, and
+    React would warn about an update to another component while rendering this one.
+  */
+  useEffect(() => {
+    trackTapsStore.set(previewAudio.trackTaps, previewAudio.tap?.context ?? null);
+  }, [previewAudio.trackTaps, previewAudio.tap]);
   /**
    * The Guides menu's anchor, in viewport coordinates, or `null` while closed.
    *
