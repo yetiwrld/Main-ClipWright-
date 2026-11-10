@@ -67,11 +67,15 @@ This document tracks architectural scope boundaries and honest limitations per `
    * **Pan is not previewed.** `pan` is stored, drawn in the inspector and applied by the
      mixer, but a `<video>` element has no pan control; without a graph the preview is
      always centred. The export is not.
-   * **The master meter reads the bottom picture layer only**, and there is no momentary
-     LUFS readout yet. The stereo peak meter itself — −60…0 dB, 1.5 s hold, a latching clip
-     light — is built, on a small graph that taps the preview's `<video>` through two
-     `AnalyserNode`s at 30 Hz. Because the tap is on that one element it inherits the first
-     limitation: it meters what the preview actually plays, which is the bottom layer.
+   * **The master meter reads the bottom picture layer only.** The stereo peak meter itself —
+     −60…0 dB, 1.5 s hold, a latching clip light — is built, on a small graph that taps the
+     preview's `<video>` through two `AnalyserNode`s at 30 Hz. Because the tap is on that one
+     element it inherits the first limitation: it meters what the preview actually plays, which
+     is the bottom layer. The **momentary LUFS readout** is built (BS.1770 K-weighting over a
+     400 ms gate) and shown in the *Audio meters* popover, which the transport's meter opens —
+     and for the same reason it measures that one layer too.
+   * **Per-track meters** in the track headers (SPEC 12 §6.3, "when headers are wide enough")
+     are not built: a per-track meter needs a node per track, which is the same missing graph.
    The full graph is the fix for all three at once, and it is the next piece of audio work
    rather than three separate ones. The meter came first because it makes the rest
    checkable: once the graph grows per-item nodes, the meter shows whether it is working.

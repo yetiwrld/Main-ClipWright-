@@ -46,6 +46,7 @@ import {
 } from '@clipwright/compositor';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { LevelMeter } from './LevelMeter.js';
+import { AudioMetersPopover } from './AudioMetersPopover.js';
 import { useAudioMeter } from './use-audio-meter.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import {
@@ -412,6 +413,12 @@ export function PreviewPane({
   const canvasRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  /*
+    The Audio meters popover (SPEC 12 §6.3). Closed by default: the transport is a strip of
+    controls and a popover that opened with the editor would cover the timeline. The meter itself
+    is the toggle, which is where a user already looks when they want to know the level.
+  */
+  const [metersOpen, setMetersOpen] = useState(false);
   /*
     The master meter (SPEC 12 §6.3). Its graph is a tap on the preview's own `<video>`, so
     it measures what the user hears rather than a model of it, and it is created lazily by
@@ -2696,7 +2703,38 @@ export function PreviewPane({
             onClick={() => setMuted((value) => !value)}
           />
           {/* Right end of the transport, where `10 §3.2` puts it. */}
-          <LevelMeter meter={audioMeter.meter} onClearClip={audioMeter.clearClip} />
+          <div style={{ position: 'relative' }}>
+            {/*
+              `role="button"` rather than a wrapping `<button>`: the meter already contains a
+              clickable clip light, and a button inside a button is invalid markup that swallows
+              the inner click. The keyboard path is on the wrapper instead.
+            */}
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Show audio meters"
+              aria-expanded={metersOpen}
+              onClick={() => setMetersOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setMetersOpen((open) => !open);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              <LevelMeter meter={audioMeter.meter} onClearClip={audioMeter.clearClip} />
+            </div>
+            {metersOpen && (
+              <div style={{ position: 'absolute', bottom: '100%', right: 0, zIndex: 20, marginBottom: 6 }}>
+                <AudioMetersPopover
+                  meter={audioMeter.meter}
+                  loudness={audioMeter.loudness}
+                  onClose={() => setMetersOpen(false)}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

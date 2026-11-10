@@ -25,3 +25,22 @@ export {
   type FadeCurve,
   type GainEnvelopeInput,
 } from './envelope.js';
+
+export {
+  EMPTY_LOUDNESS_WINDOW,
+  LOUDNESS_FLOOR_LUFS,
+  MOMENTARY_WINDOW_MS,
+  SILENT_READING,
+  ZERO_BIQUAD,
+  ZERO_K_WEIGHT,
+  channelMeanSquare,
+  describeLoudness,
+  gateSamples,
+  kWeight,
+  loudnessOf,
+  pushLoudness,
+  type BiquadState,
+  type KWeightState,
+  type LoudnessReading,
+  type LoudnessWindow,
+} from './loudness.js';

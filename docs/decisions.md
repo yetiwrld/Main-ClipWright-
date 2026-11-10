@@ -1307,3 +1307,45 @@ the button ignored it. That is worth recording as a pattern: a control that rend
 changes nothing is invisible to every test that checks rendering, and the fix was to make the
 control's *effect* the subject of a test — the id of the clip that got written.
 
+## 44. Loudness is measured before the log, and a partial gate says so
+
+**A peak meter and a loudness meter answer different questions and the transport needs both.** A
+peak says "will this clip?"; a loudness says "how loud does this sit?". A quiet mix with one door
+slam clips, and a mix with no peaks at all can be ten LU too quiet for a platform. The popover
+shows them together for exactly that reason — the pair teaches the distinction that either alone
+would hide.
+
+**BS.1770 anchors a full-scale 1 kHz sine at −3.01 LUFS, not 0.** A sine's mean square is half its
+peak square and the K-weighting shelf adds back about 0.7 dB. Anyone whose intuition says 0 will
+"fix" the arithmetic until it reads 0, and then every reading is 3 LU loud — which is how a clip
+normalised to −16 arrives at −13. The anchor is therefore asserted at the standard's value,
+hundredth included.
+
+**The average is taken before the log.** Two frames at equal duration average to half the energy —
+3 LU down — and to about 30 LU down if you average their decibels. Speech is syllables and gaps,
+so averaging decibels makes every voice-over read too quiet, and no test that measures a steady
+tone can see it.
+
+**An analyser window is a ninth of the gate, so the gate is assembled.** 2048 samples is ~43 ms
+against the standard's 400 ms. The window is rolled forward each frame and the reading reports how
+much of it is real — and the popover says "filling the 400 ms average" only while that is true. A
+permanent caveat reads as a broken meter; no caveat lets someone normalise against a number that
+is still climbing.
+
+**Two quantities that look comparable and are not.** `complete` compared a frame's *sample* count
+against the gate's *millisecond* length, so every reading claimed finality after 400 samples. The
+lesson is the same one the timeline's half-open ranges teach: a count and a duration have to be
+brought into the same unit by the sample rate, explicitly, not by a constant that happens to be
+near both.
+
+**Silence and "nothing measured yet" are the same number and different facts.** Both are the
+floor, so the reading carries `samples` and `complete` rather than leaving a caller to infer it,
+and the popover prints "No audio yet" or "Silence". The floor exists at all because a fade
+approaching silence measures −80, −120, −200 LUFS — real numbers, meaningless ones, and a readout
+that prints −200 is reporting arithmetic rather than sound.
+
+**The clip light stops its own click.** The meter is the popover's toggle, and the clip light is a
+button inside it; without `stopPropagation` one click would clear the light *and* open a panel.
+That is the second time in this project a nested control has needed saying out loud, which is
+worth recording as a pattern rather than an isolated fix.
+

@@ -122,7 +122,15 @@ export function LevelMeter({ meter, onClearClip, width = 96 }: LevelMeterProps) 
       */}
       <button
         type="button"
-        onClick={onClearClip}
+        /*
+          The clear stops its own propagation. The meter is wrapped in a control that opens the
+          Audio meters popover (SPEC 12 §6.3), and without this a click on the clip light would
+          clear the light *and* open a panel — two things for one click, one of them unasked for.
+        */
+        onClick={(event) => {
+          event.stopPropagation();
+          onClearClip();
+        }}
         data-testid="meter-clip"
         aria-label={meter.clipped ? 'Clipping detected, click to clear' : 'No clipping, click to clear'}
         aria-pressed={meter.clipped}

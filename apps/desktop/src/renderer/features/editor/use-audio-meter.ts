@@ -24,6 +24,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  EMPTY_LOUDNESS_WINDOW,
+  SILENT_READING,
+  channelMeanSquare,
+  loudnessOf,
+  pushLoudness,
+  type KWeightState,
+  type LoudnessReading,
+  type LoudnessWindow,
+} from '@clipwright/audio-core';
+import {
   SILENT_METER,
   channelPeakDb,
   updateMeter,
@@ -39,6 +49,15 @@ const ANALYSER_FFT = 2048;
 export interface AudioMeterApi {
   /** What the transport's meter draws. Silence while no graph exists. */
   meter: MeterState;
+  /**
+   * Momentary loudness over the last 400 ms (SPEC 12 §6.3), for the Audio meters popover.
+   *
+   * Separate from `meter` because it answers a different question and changes on a different
+   * timescale: the peak meter jumps with every sample, this settles over a gate. Deriving one
+   * from the other would be wrong in both directions — a peak does not tell you loudness, and
+   * a loudness does not tell you whether anything clipped.
+   */
+  loudness: LoudnessReading;
   /** Clear the latched clip light. Called by a click on it. */
   clearClip: () => void;
   /**
@@ -63,9 +82,20 @@ export function useAudioMeter(
   active: boolean,
 ): AudioMeterApi {
   const [meter, setMeter] = useState<MeterState>(SILENT_METER);
+  const [loudness, setLoudness] = useState<LoudnessReading>(SILENT_READING);
   const contextRef = useRef<AudioContext | null>(null);
   const leftRef = useRef<AnalyserNode | null>(null);
   const rightRef = useRef<AnalyserNode | null>(null);
+  /*
+    The K-weighting filters carry state between frames *and* between channels, and both are
+    ordinary refs rather than React state: they are read and written once per frame, and a state
+    update per sample would re-render the transport sixty times a second to no visible effect.
+  */
+  const loudnessWindowRef = useRef<LoudnessWindow>(EMPTY_LOUDNESS_WINDOW);
+  const channelStateRef = useRef<KWeightState[]>([
+    { shelf: { x1: 0, x2: 0, y1: 0, y2: 0 }, rlb: { x1: 0, x2: 0, y1: 0, y2: 0 } },
+    { shelf: { x1: 0, x2: 0, y1: 0, y2: 0 }, rlb: { x1: 0, x2: 0, y1: 0, y2: 0 } },
+  ]);
   /*
     `Float32Array<ArrayBuffer>` explicitly: `getFloatTimeDomainData` will not accept the
     `ArrayBufferLike` that a bare `new Float32Array(n)` is inferred as, because the DOM
@@ -138,13 +168,36 @@ export function useAudioMeter(
       const buffer = bufferRef.current;
       left.getFloatTimeDomainData(buffer);
       const leftDb = channelPeakDb(buffer, 0, 1);
+      /*
+        Loudness needs the samples *after* this line reads them into the buffer, so it is
+        computed here rather than in a second pass — one copy of the analyser's window per
+        channel per frame, which is what the mono buffers above already are.
+      */
+      const leftEnergy = channelMeanSquare(buffer, 0, 1, channelStateRef.current[0]!);
+      channelStateRef.current[0] = leftEnergy.state;
       right.getFloatTimeDomainData(buffer);
       const rightDb = channelPeakDb(buffer, 0, 1);
-      setMeter((current) => updateMeter(current, { leftDb, rightDb }, performance.now()));
+      const rightEnergy = channelMeanSquare(buffer, 0, 1, channelStateRef.current[1]!);
+      channelStateRef.current[1] = rightEnergy.state;
+
+      const now = performance.now();
+      setMeter((current) => updateMeter(current, { leftDb, rightDb }, now));
+      /*
+        `filled` is the analyser's window length, not the sample rate's — the buffer holds what
+        it holds, whatever the source's rate is. Reporting the gate's own sample count here
+        instead would claim a full 400 ms from the first frame on.
+      */
+      loudnessWindowRef.current = pushLoudness(
+        loudnessWindowRef.current,
+        [leftEnergy.meanSquare, rightEnergy.meanSquare],
+        now,
+        buffer.length,
+      );
+      setLoudness(loudnessOf(loudnessWindowRef.current, context.sampleRate));
     }, METER_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
   }, [active, videoRef]);
 
-  return { meter, clearClip, resume };
+  return { meter, loudness, clearClip, resume };
 }
