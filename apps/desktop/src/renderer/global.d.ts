@@ -558,7 +558,6 @@ export interface ClipwrightBridge {
   listModels(): Promise<WhisperModelEntry[]>;
   installModel(modelName: string): Promise<{ queued: boolean; needsBytes: number }>;
   deleteModel(modelName: string): Promise<boolean>;
-  onModelProgress(callback: (p: { modelName: string; percent: number }) => void): () => void;
 
   // AI providers (SPEC 06)
   aiListProviders(): Promise<ProviderListPayload>;

@@ -1892,3 +1892,52 @@ Twelve mutations, eleven biting first pass and the twelfth after the archive tes
 Two initially reported `MISS` because the mutation's search string did not match the file's
 whitespace — a reminder that a mutation report has three outcomes, not two, and `MISS` is a bug in
 the harness rather than evidence the code is safe.
+
+## 54. A refactor deleted the AI surface, and nothing was positioned to notice
+
+Every window in the app talks to main over `ipcRenderer.invoke`. The preload bridge offered 122
+channels; `registerIPC` answered 86. The 36 it did not answer were the whole AI section — providers,
+the model manager, Ollama, consent, the privacy panel — and all six moments channels. A user adding
+a provider, downloading a model, or opening the moments screen got
+`Error: No handler registered for 'ai:providers:list'`, in whichever page they had opened.
+
+It was a **collateral deletion**. `git log -S 'ai:providers:list'` points at `8418bfe`, "one model
+catalogue for setup, settings and the manager", which meant to replace three `models:*` handlers
+with delegating versions: 160 lines removed, 21 added. The replaced range extended well past the
+three it was aimed at, and took the `ai:*` block, the `moments:*` block and both progress sinks.
+
+**Why nothing caught it.** This is the same question as the start screen and the project menu, and
+the answer is the same shape — no test crossed the boundary — but the boundary is different, so the
+check has to be:
+
+- The services were still constructed and the `require*()` helpers still existed, so `tsc` was
+  happy. A handler that is never registered is not a type error.
+- An unhandled channel is not a boot error either. Electron only complains when a renderer invokes
+  it, and it complains into a rejected promise in a page.
+- The 36 channel names appear in exactly one place — the preload file — so `grep` for a dead symbol
+  finds nothing. A deleted registration leaves no reference behind.
+- The AI tests are good and they all pass: every one constructs `MomentsService` and calls it
+  directly. That is the right way to test the scoring, and it says nothing about whether a window
+  can reach the scoring.
+
+**The guard is a comparison, not a call.** `ipc-surface.test.ts` reads the preload file and `main.ts`
+and asserts the sets line up — invoked ⊆ handled, listened ⊆ pushed, handled ⊆ invoked. Reading
+source is weaker than invoking a channel, and it is the claim that would have failed on `8418bfe`,
+which is what a guard is for. Both directions matter: the third check catches a handler registered
+under a misspelled name, which answers nobody while looking like work.
+
+**Three states of "dead channel", and they need different answers:**
+
+- *Offered, never handled* — 36 channels, restored from the commit before the deletion. The services
+  were intact, so the fix was the registration, not the code.
+- *Called by a page, never handled* — `ai:models:deleteAll`. `ModelService.deleteAllDownloaded`
+  existed and was never registered; the Models page's "Delete all" had always failed. Added.
+- *Listened to, never sent* — `onModelProgress` on `models:progress`, which main has never sent.
+  **Deleted rather than repointed:** nothing in the renderer called it, and `onModelDownloadProgress`
+  already listens on `ai:modelProgress`, the channel the manager does push. Repointing would have
+  left two listeners on one channel and a progress bar updated twice.
+
+The general lesson is one this project keeps meeting from different angles: a name that appears in
+two files is a promise neither file can keep on its own. Where that promise matters — channel lists,
+settings keys, option names — it needs a test that reads both sides. Writing one after the fact is
+how you find out how many you had already broken: thirty-six.

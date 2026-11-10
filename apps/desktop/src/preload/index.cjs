@@ -112,11 +112,13 @@ contextBridge.exposeInMainWorld('clipwright', {
   listModels: () => ipcRenderer.invoke('models:list'),
   installModel: (modelName) => ipcRenderer.invoke('models:install', modelName),
   deleteModel: (modelName) => ipcRenderer.invoke('models:delete', modelName),
-  onModelProgress: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on('models:progress', listener);
-    return () => ipcRenderer.removeListener('models:progress', listener);
-  },
+  /*
+    There was an `onModelProgress` here listening on `models:progress`, a channel main has never
+    sent to — the model manager reports through `ai:modelProgress`, which `onModelDownloadProgress`
+    below already subscribes to. So this was dead in three places: no sender, no caller in the
+    renderer, and a second listener that would have duplicated the one that works. Deleted rather
+    than repointed, because two listeners on one channel is a progress bar updated twice.
+  */
 
   // ---- AI providers (SPEC 06) ----
   aiListProviders: () => ipcRenderer.invoke('ai:providers:list'),

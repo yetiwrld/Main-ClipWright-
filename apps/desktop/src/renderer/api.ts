@@ -234,9 +234,6 @@ export const api = {
   async deleteModel(modelName: string) {
     return requireBridge('Deleting that model').deleteModel(modelName);
   },
-  onModelProgress(callback: (p: { modelName: string; percent: number }) => void) {
-    return getBridge()?.onModelProgress(callback) ?? (() => undefined);
-  },
 
   // ---- AI providers (SPEC 06) ----
   async listProviders() {

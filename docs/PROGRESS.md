@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen and project-menu slices. 3562 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen, project-menu and IPC-surface slices. 3566 automated tests,
 all passing.
 
 ---
@@ -65,6 +65,13 @@ was a grid of cards that navigated into a project and nothing else. It has a ⋯
 building it found a second bug: the delete option was declared `deleteMedia` and the store reads
 `deleteExclusiveManagedMedia`, so ticking "also delete the copied media" would have deleted the
 project and kept every file, with no error.
+
+And then the largest one: **36 of the 122 channels the preload bridge offers had no handler in
+main** — the entire AI surface (providers, models, Ollama, consent, privacy) and every moments
+channel. Commit `8418bfe`, a refactor of three model handlers, deleted 160 lines from the IPC
+registration and took the rest of the block with them. The services were still built and the file
+still compiled, so nothing failed until a user opened a page. A test now compares the bridge's
+channel list against main's in both directions, which is the check that had never existed.
 
 ---
 
@@ -396,7 +403,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3562 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3566 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.
