@@ -2305,3 +2305,30 @@ as success. `gh run view --log-failed` and the job-logs API both returned `EOF`.
 was local reproduction under the CI condition — one `mv` — which should have been the first move
 after the first red run rather than the third. A skip count that matches the last green run's skip
 count tells you where to look: at whatever is *not* gated.
+
+## 66. A guard for the mistake I made twice
+
+§64 and §65 were the same mistake twice, and both times the failure was invisible in the place I
+looked. A `check-repo` rule now makes the second one a build failure instead of a red CI run.
+
+The rule is deliberately narrow: **a test file that mentions a media binary — or starts an export —
+must contain a gate.** No attempt to prove the call is safe; that is undecidable from source. It
+catches the shape that bit: a test file with `service.start(...)` or `ffmpegPath()` and no
+`skipIf`/`runIf`/`usableBinary`/`hasFfmpeg` anywhere in it.
+
+Three things shaped it, each learned from a false positive on the first attempt:
+
+1. **It flagged two files that were already correct.** `audio-enhance` uses `describe.runIf(hasFfmpeg)`
+   — a different spelling of the same idea. A lint that cries wolf gets deleted, so the gate pattern
+   matches the idioms, not one name.
+2. **It flagged `release-roundtrip`, which only runs `process.execPath`.** Node exists wherever the
+   test runs; flagging it would be noise. The trigger is now the media binaries specifically.
+3. **My first mutation test didn't fire, and that mattered.** Loosening the `skipIf` in
+   `export-service.test.ts` left `ffmpegPath` in its import, so the file still counted as gated — a
+   guard that cannot be shown to fire on the real bug is decoration. The confirmed version removes
+   the import too, and then the rule names the file.
+
+**What this does and does not cover.** It cannot catch a test that reaches a binary through a helper
+with an innocuous name. It does catch the specific thing that happened here, twice, in files where
+the gate was a deliberate design choice — which is exactly where the two failures came from. A guard
+for a mistake you have actually made is worth more than a general rule you have not.

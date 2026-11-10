@@ -464,6 +464,49 @@ for (const file of workflowFiles) {
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * An ungated test must not reach a binary.
+ *
+ * CI has no ffmpeg; this checkout bundles one in `resources/bin`. A test that starts a render
+ * therefore passes locally and fails in CI, and it fails in the *worst* way: the spawn rejection
+ * arrives after the assertion, as an unhandled error, so the report says "0 failed" and the build
+ * says exit 1. That cost two red runs to diagnose (`docs/decisions.md` §64–65).
+ *
+ * The static rule is narrow on purpose: a test file that never mentions the ffmpeg gate must not
+ * start an export or invoke a binary. It cannot prove a call is safe — `start()` is the interesting
+ * one and it is spelled plainly — so it checks the two things that are reliably visible:
+ *
+ *  - a file that calls `service.start(` / `startExport(` must carry a gate; and
+ *  - a file that spawns or execs a binary must carry one too.
+ *
+ * A gate is `skipIf(!HAS_FFMPEG)`, `describe.skipIf`, or an explicit `usableBinary(...)` guard —
+ * anything that makes the file honest about needing the binary.
+ * ------------------------------------------------------------------ */
+/*
+  Every shape of gate this repo actually uses: vitest's `skipIf`/`runIf`, the shared
+  `usableBinary` helper, the per-file `HAS_FFMPEG` constant, and a local `hasFfmpeg`-style probe.
+  Matching the *idioms* rather than one name is what keeps the check from flagging files that are
+  already correct — two of the first three hits were, and a lint that cries wolf gets disabled.
+*/
+const GATE = /skipIf\(|\brunIf\(|usableBinary\(|HAS_FFMPEG|hasFfmpeg|hasBinary/i;
+/*
+  Only the *media* binaries, not every child process: `release-roundtrip` runs `process.execPath`
+  (node itself), which exists wherever the test runs. Flagging it would be the false positive that
+  gets this check deleted.
+*/
+const STARTS_WORK = /\b(?:service|runner|queue)\.start\(|\bstartExport\(|\bffmpegPath\(|\bffprobePath\(|\bFFMPEG\b|\bFFPROBE\b/;
+for (const file of tracked) {
+  if (!file.endsWith('.test.ts') && !file.endsWith('.test.tsx')) continue;
+  const source = readFileSync(join(ROOT, file), 'utf8');
+  if (!STARTS_WORK.test(source)) continue;
+  if (GATE.test(source)) continue;
+  problems.push(
+    `${file} starts an export or a binary but has no gate. CI has no ffmpeg, so this passes locally ` +
+      `and fails there as an unhandled "spawn ffmpeg ENOENT" after the assertions (see ` +
+      `docs/decisions.md §65). Gate it, or call the pure decision function instead.`,
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 if (problems.length > 0) {
