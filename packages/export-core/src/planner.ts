@@ -287,7 +287,19 @@ export interface ExportSettings {
   backgroundColor?: string;
   /** Timeline range to export: [startUs, endUs]. */
   rangeUs: [number, number];
-  /** Composition fps for re-sampling checks. */
+  /**
+   * The composition's own fps at the time of export.
+   *
+   * **Carried, not read.** SPEC 14 §4.3 says the planner re-samples the timeline when the export
+   * fps differs from the composition's, evaluating keyframes at the new frame times. The planner
+   * does that unconditionally — it evaluates every keyframe at the export grid regardless — so the
+   * difference never needs computing here.
+   *
+   * The field stays because it is the only place a plan records what the editor was running at, and
+   * a stale value there would be the kind of thing a later re-sampling rule would trip over. This
+   * note replaced "for re-sampling checks", which described a check that did not exist and read as
+   * though the value were doing work.
+   */
   compositionFps: number;
   /** Composition duration in microseconds. */
   compositionDurationUs: number;

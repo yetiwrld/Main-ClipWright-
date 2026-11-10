@@ -2164,3 +2164,34 @@ association on the first change. There is a test for that specifically.
 the app's default project shape. Hiding the control until a timeline exists would be worse; a
 default that is visible and wrong for a given project is a control the user can fix, and a control
 that is absent is not.
+
+## 62. The frame rate, one line below the aspect ratio
+
+§61 fixed the export panel's aspect ratio. Directly below it in the same panel sat the frame rate,
+with the same fault: the dialog received the composition's `fps` as a prop and used it only when
+building the plan, while the *panel* — whose `fps` is what the encoder is actually told — started
+from `DEFAULT_EXPORT_STATE.fps`, a constant 30.
+
+SPEC 14 §4.3 lists the options as **30, 60 and "Match project" (default = the composition's fps)**.
+A 60 fps composition therefore exported at 30: every other frame dropped, no warning, and the
+summary line said "30 fps" so the one place that would have told you was the place showing the
+mistake as if it were the choice.
+
+The fix seeds the control to the composition's rate rather than adding a third option. "Match
+project" as a *value* would mean the encoder receiving something that is not 30 or 60 and having to
+resolve it — a second vocabulary for the same thing, which is the fault §58 was about. Seeding
+expresses the same intent in the vocabulary that already exists: the control starts on the project's
+rate, and the user can change it to a real number at any time.
+
+**Two fixes, one panel, and I only found the second because the first one's test pointed at the
+field next door.** That is the argument for writing the test even when the bug is already understood:
+`getByLabelText('Aspect ratio')` failing is what exposed the unlabelled selects (§61), and reading
+the code around that assertion is what exposed this.
+
+**A non-bug, checked while here:** `compositionFps` is threaded through four layers and read by
+nothing. Its comment claimed it was "for re-sampling checks" — a confident description of work that
+does not exist, since the planner evaluates every keyframe at the export grid unconditionally. The
+field stays, because a plan that does not record the editor's rate is a plan you cannot diagnose
+later; the comment now says it is *carried, not read*, and why that is correct rather than an
+oversight. A doc comment that describes imaginary behaviour is worse than no comment: it is a
+plausible reason to stop looking.

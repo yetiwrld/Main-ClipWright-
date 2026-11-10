@@ -490,3 +490,47 @@ describe('every export control is named for assistive technology', () => {
     expect(screen.getByLabelText('Audio bitrate: 256 kbps')).toBeTruthy();
   });
 });
+
+describe('the export frame rate matches the composition by default', () => {
+  /*
+    SPEC 14 §4.3: the panel offers 30 and 60 plus "Match project" (default = the composition's fps).
+    The dialog received the composition's fps and used it only for the plan, while the *panel* —
+    whose `fps` is what the encoder is told — started at a constant 30.
+    So a 60 fps composition exported at 30: half the frames, dropped with no warning and nothing on
+    screen to explain it. Seeding the control is how "Match project" is expressed without adding a
+    third option the encoder would have to interpret.
+  */
+  function renderAt(fps: 30 | 60) {
+    bridge.desktop = false;
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={fps}
+        durationUs={5_000_000}
+        canvas={{ width: 1080, height: 1920 }}
+      />,
+    );
+  }
+
+  it('starts at 60 for a 60 fps composition', () => {
+    renderAt(60);
+    expect((screen.getByLabelText('Frame rate') as HTMLSelectElement).value).toBe('60');
+  });
+
+  it('starts at 30 for a 30 fps composition', () => {
+    renderAt(30);
+    expect((screen.getByLabelText('Frame rate') as HTMLSelectElement).value).toBe('30');
+  });
+
+  it('still lets the user choose a different frame rate', () => {
+    /* Dropping to 30 is legitimate; doing it without being asked is not. */
+    renderAt(60);
+    fireEvent.change(screen.getByLabelText('Frame rate'), { target: { value: '30' } });
+    expect((screen.getByLabelText('Frame rate') as HTMLSelectElement).value).toBe('30');
+  });
+});

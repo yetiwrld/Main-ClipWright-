@@ -66,17 +66,24 @@ export function ExportDialog({
   canvas,
   captionStyles,
 }: ExportDialogProps) {
-  const [panel, setPanel] = useState<ExportPanelState>(() =>
-    canvas
+  const [panel, setPanel] = useState<ExportPanelState>(() => ({
+    ...DEFAULT_EXPORT_STATE,
+    /*
+      SPEC 14 §4.3's "Match project" is the panel's default, and it is expressed by seeding rather
+      than by an extra option: the control offers 30 and 60, and starting on the composition's own
+      value *is* matching it until the user says otherwise. A 60 fps composition used to export at
+      30 — half the frames, dropped silently — because the default was a constant.
+    */
+    fps: fps === 60 ? 60 : 30,
+    ...(canvas
       ? {
-          ...DEFAULT_EXPORT_STATE,
           aspect: aspectFromCanvas(canvas.width, canvas.height),
           /* The shortest side is what a resolution preset means, so a 1080p portrait canvas and a
              1080p landscape one want the same preset id. */
           preset: presetForShortSide(Math.min(canvas.width, canvas.height)),
         }
-      : DEFAULT_EXPORT_STATE,
-  );
+      : {}),
+  }));
   const [rangeChoice, setRangeChoice] = useState<RangeChoice>(workAreaUs ? 'work-area' : 'whole');
   const [message, setMessage] = useState('');
   const [detailsFor, setDetailsFor] = useState<ExportJobPayload | null>(null);
