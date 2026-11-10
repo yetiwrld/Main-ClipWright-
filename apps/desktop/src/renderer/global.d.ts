@@ -16,6 +16,18 @@ export interface ProjectRecord {
   settings: Record<string, unknown>;
 }
 
+/**
+ * What a caller may send to update a stored project.
+ *
+ * `settings` is partial because `StorageService.updateProject` merges it field by field — a page can
+ * write the one setting it owns without reading and re-spreading the rest. The main process has the
+ * same type in `@clipwright/project-schema`; the renderer keeps its own copy because it must not
+ * import the schema package's root (that pulls Zod into the bundle for no gain).
+ */
+export type ProjectPatch = Partial<Omit<ProjectRecord, 'settings'>> & {
+  settings?: Partial<ProjectRecord['settings']>;
+};
+
 export interface MediaInfo {
   mediaId: string;
   kind: 'video' | 'audio' | 'image';
@@ -450,7 +462,12 @@ export interface ClipwrightBridge {
   listProjects(): Promise<ProjectRecord[]>;
   createProject(settings: { name: string; sourceMediaIds?: string[]; settings?: Record<string, unknown> }): Promise<ProjectRecord>;
   getProject(projectId: string): Promise<ProjectRecord | undefined>;
-  updateProject(projectId: string, patch: Partial<ProjectRecord>): Promise<ProjectRecord>;
+  /**
+   * `settings` merges field by field, so a caller may send one setting without disturbing the rest
+   * (`StorageService.updateProject` does the merge). Everything else replaces. The shape lives in
+   * the schema package so the renderer, the bridge and the store cannot drift apart.
+   */
+  updateProject(projectId: string, patch: ProjectPatch): Promise<ProjectRecord>;
   duplicateProject(projectId: string): Promise<ProjectRecord>;
   /** Opens the project's own folder in the OS file manager (SPEC 03 §10). */
   revealProject(projectId: string): Promise<string>;

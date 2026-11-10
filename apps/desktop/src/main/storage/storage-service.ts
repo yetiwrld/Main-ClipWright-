@@ -11,6 +11,7 @@ import {
   PROJECT_MIGRATIONS,
   readValidatedRows,
   CURRENT_SCHEMA_VERSION,
+  ProjectPatch,
   ProjectRecord,
   ProjectRecordSchema,
   CompositionRecord,
@@ -371,12 +372,25 @@ export class StorageService {
     return { projects: filtered, recoveredWithProblems: res.recoveredWithProblems };
   }
 
-  public updateProject(projectId: string, patch: Partial<ProjectRecord>): ProjectRecord {
+  public updateProject(projectId: string, patch: ProjectPatch): ProjectRecord {
     const existing = this.getProject(projectId);
     if (!existing) throw new Error(`Project ${projectId} not found`);
+    /*
+      `settings` merges field by field, everything else replaces.
+
+      It used to be a plain `{...existing, ...patch}`, and `AppSettingsSchema` gives every field a
+      default — so a caller writing one setting (`{ settings: { contentType } }`) silently reset
+      every other one to its default: the aspect ratio, the caption style, the clip length range.
+      Nothing threw and nothing logged; the settings were simply gone on the next read.
+
+      Merging here rather than asking every call site to spread is the difference between a rule
+      that can be forgotten and one that cannot. A caller that genuinely wants to clear a setting
+      passes the whole object, which is what spreading already produces.
+    */
     const updated = ProjectRecordSchema.parse({
       ...existing,
       ...patch,
+      settings: { ...existing.settings, ...(patch.settings ?? {}) },
       id: projectId,
       updatedAt: new Date().toISOString(),
     });

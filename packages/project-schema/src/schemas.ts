@@ -71,6 +71,17 @@ export const ProjectRecordSchema = z
 
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 
+/**
+ * What a caller may send to update a stored project.
+ *
+ * `settings` is *partial* on purpose: `StorageService.updateProject` merges it field by field, so a
+ * page can write the one setting it owns without first reading and re-spreading the rest. Expressing
+ * that in the type is what keeps the merge honest — with `Partial<ProjectRecord>`, every caller had
+ * to pass a complete settings object or accept the schema defaults silently replacing the fields it
+ * omitted.
+ */
+export type ProjectPatch = Partial<Omit<ProjectRecord, 'settings'>> & { settings?: Partial<AppSettings> };
+
 export const KeyframeEasingPresetSchema = z.enum([
   'linear',
   'easeIn',

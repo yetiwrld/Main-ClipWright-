@@ -2058,3 +2058,42 @@ other needs. Where the compiler can check it, a cast is how it stops being check
 test (§54), the settings-key module (§52) and this translation are three answers to one question —
 which file owns the name — and the answer is always "the one that has the other file's vocabulary in
 front of it", never a cast.
+
+## 59. A toast that said "saved", and a merge that was shallower than its name
+
+The Moments screen's content-type control had three faults stacked in six lines.
+
+**It said "saved" and saved nothing.** The handler called `setContentType(value)` and pushed the
+toast. The value went into React state and out again on the next mount, so the dropdown quietly
+reverted — the screen looked like it worked because the control showed what you had picked until the
+page reloaded.
+
+**It offered a value the project schema rejects.** The options listed `talking_head`, which is
+ai-core's spelling of the profile. Projects store `talking`. Nothing failed, because nothing was
+written; the moment the save was wired up, the schema would have thrown on it. This is the same
+split from §58 seen from the other side: the analyser translates `talking` → `talking_head` at its
+boundary, so the UI must speak the *project's* vocabulary, not the analyser's.
+
+**And the save it needed would have destroyed the project's other settings.**
+`StorageService.updateProject` merged the record with `{...existing, ...patch}`. `AppSettingsSchema`
+defaults every field. So `{ settings: { contentType } }` did not update one setting — it replaced the
+object, and `aspect`, `captionStyleId`, `clipLengthRangeSec` and eight others came back as their
+defaults on the way through the parse. The write would have succeeded, the toast would have been
+right about the field it named, and the user's portrait project would have been landscape by the
+time they exported.
+
+That last one is the reason the fix is not in the page. The page could spread `project.settings`
+before patching — that is what I first wrote — but a spread at a call site is a rule that the next
+caller has to know. The merge moved into the store, and `ProjectPatch` now expresses it:
+`settings?: Partial<AppSettings>` rather than `Partial<ProjectRecord>`. The type and the code say the
+same thing, so a caller that sends one setting is not relying on a convention it cannot see.
+
+**What the tests assert.** The store tests check the fields *around* the one being written — aspect,
+caption style, clip length range — because a test that asserts `contentType === 'tutorial'` passes
+against the broken merge. They also assert that falsy values still replace (`saveSubtitles: false`),
+since a merge written with `??` or a truthiness check would make a setting impossible to turn off.
+The page tests drive the design system's listbox rather than a native `<select>`: `fireEvent.change`
+on a button does nothing, and a test written that way would have passed on a page that saved
+nothing — which is exactly the bug's shape.
+
+Seven mutations bite, including all three original faults.

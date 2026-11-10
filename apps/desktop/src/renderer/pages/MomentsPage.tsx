@@ -27,10 +27,16 @@ import type {
 
 type SortId = 'score' | 'time' | 'duration';
 
+/*
+  The values are the project schema's (`talking`, not `talking_head`), because this list is written
+  *into the project* as well as sent to the analyser. It used to offer `talking_head`, which the
+  schema rejects — so the "Content type saved" toast was the only place that value ever went. The
+  analyser translates at its own boundary (see `contentTypeFromProject`).
+*/
 const CONTENT_TYPES: Array<{ value: string; label: string }> = [
   { value: 'auto', label: 'Auto' },
   { value: 'podcast', label: 'Podcast / interview' },
-  { value: 'talking_head', label: 'Talking head' },
+  { value: 'talking', label: 'Talking head' },
   { value: 'tutorial', label: 'Tutorial' },
   { value: 'gaming', label: 'Gaming' },
   { value: 'lecture', label: 'Lecture' },
@@ -463,8 +469,33 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
             <Select
               value={contentType}
               onChange={(value) => {
+                /*
+                  The toast said "saved" before this wrote anything: the value went into React state
+                  and out again on the next mount, so the dropdown silently reverted — and the
+                  content type is a project setting (SPEC 07 §6.2), not a per-run argument.
+
+                  One field on purpose: `updateProject` merges `settings` field by field, so this
+                  cannot disturb the aspect ratio, caption style or clip length range the project
+                  already holds. (It could not before — the record merge was shallow and the schema
+                  defaults would have refilled everything else — which is why the merge moved into
+                  the store.)
+                */
+                const previous = contentType;
                 setContentType(value);
-                pushToast({ message: 'Content type saved — re-rank to apply the new weights.', tone: 'neutral' });
+                void api
+                  .updateProject(projectId, { settings: { contentType: value } })
+                  .then((updated) => {
+                    /* Keep the local copy in step: the next save spreads it, and a stale object
+                       would write yesterday's settings back. */
+                    setProject(updated);
+                    pushToast({ message: 'Content type saved — re-rank to apply the new weights.', tone: 'neutral' });
+                  })
+                  .catch((err: unknown) => {
+                    /* Put the control back where it was: a dropdown that keeps a value the project
+                       does not hold is the same lie as the toast was. */
+                    setContentType(previous);
+                    pushToast({ message: `The content type was not saved: ${describeError(err)}`, tone: 'error' });
+                  });
               }}
               ariaLabel="Content type"
               options={CONTENT_TYPES}

@@ -81,7 +81,7 @@ async function openMenu() {
 }
 
 describe('the project menu exists and names its project', () => {
-  it('shows the five actions from SPEC 03 §10', async () => {
+  it('shows all six actions from SPEC 03 §10, in its order', async () => {
     await openMenu();
     /* SPEC 03 §10's six, in its order. "Show in folder" was the one that had no IPC channel. */
     for (const label of ['Open', 'Rename', 'Duplicate', 'Archive', 'Show in folder', 'Delete']) {
