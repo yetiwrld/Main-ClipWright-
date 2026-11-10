@@ -579,6 +579,24 @@ being written passes against the bug; four page tests drive the design system's 
 is one field, that the option is `talking`, and that a failed write puts the control back. Seven
 mutations bite, including all three original bugs.
 
+### "Keep files where they are", and an import that copied them anyway
+
+The start screen records a `downloadQuality` and a `storageMode` in the project. `ImportStage` sent
+`quality: '1080p'` and `storageMode: 'managed'` — both literals — so neither choice reached the
+pipeline. `media-pipeline.ts:152` branches on the storage mode: `reference` leaves the file where it
+is, `managed` copies it into the library. A user who chose *keep files where they are* had their
+video copied, and nothing on screen said so. For a screen recording that is gigabytes the app was
+told not to take.
+
+Worth noting where the bug was **not**: the pipeline handles both modes correctly and always has,
+`startSettings` translates the page's `copy` into `managed` correctly, and the start screen stores
+both fields. Every layer was right; the one component between them replaced both values with
+constants. Five tests assert the arguments `startIngest` receives — including the fallback for
+projects created before these settings existed, which must behave exactly as the literals did — and
+that a hand-edited `downloadQuality` outside the API's enum is rejected rather than forwarded. The
+allowlist mutation only dies against a test that supplies an out-of-enum value, which is why one is
+there.
+
 ---
 
 ## 4. Updates (SPEC 15)
