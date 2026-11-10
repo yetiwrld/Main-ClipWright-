@@ -55,6 +55,21 @@ export const api = {
     return requireBridge('Updating the project').updateProject(projectId, patch);
   },
 
+  /**
+   * Export a brand kit as a `.cwbrand` file (SPEC 13 §8.2).
+   *
+   * The renderer names the kit; main shows the dialog, reads the kit's assets from the media
+   * library and writes the archive. A kit whose logo this machine does not have exports without
+   * it and says which — a file that silently lost its logo is one the recipient finds broken.
+   */
+  async exportBrandKit(kit: unknown, defaultName: string) {
+    return requireBridge('Exporting the kit').exportBrandKit(kit, defaultName);
+  },
+  /** Open a `.cwbrand` file. Resolves null when the user cancels. */
+  async importBrandKit() {
+    return requireBridge('Importing a kit').importBrandKit();
+  },
+
   async getComposition(projectId: string, compId: string) {
     return requireBridge('Opening the clip').getComposition(projectId, compId) as Promise<
       { id: string; name: string; version: number; payload: unknown } | null

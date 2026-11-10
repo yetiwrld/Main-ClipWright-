@@ -46,6 +46,13 @@ contextBridge.exposeInMainWorld('clipwright', {
   listJobs: () => ipcRenderer.invoke('workspace:listJobs'),
 
   // ---- Packages ----
+  /*
+    Brand kits as files. The dialogs live in main, so these take no path and return none: the
+    renderer asks "export this kit" and gets a path or null, and asks "import a kit" and gets the
+    kit plus its assets. Neither can be pointed at an arbitrary file, which is the point.
+  */
+  exportBrandKit: (kit, defaultName) => ipcRenderer.invoke('brandKit:export', kit, defaultName),
+  importBrandKit: () => ipcRenderer.invoke('brandKit:import'),
   exportPackage: (projectId, destPath, opts) =>
     ipcRenderer.invoke('workspace:exportPackage', projectId, destPath, opts),
   importPackage: (packPath, opts) => ipcRenderer.invoke('workspace:importPackage', packPath, opts),

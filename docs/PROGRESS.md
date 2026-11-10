@@ -82,10 +82,15 @@ character — a serif falls back to a serif — and the sentence naming both rea
 report.
 A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
 without a dependency and verified in the tests with `unzip`, including a checksum check
-that a flipped byte fails. Applying a kit produces ordinary items tagged
+that a flipped byte fails. The file **travels**: the panel exports a kit to a `.cwbrand`
+archive and imports one back. Both the save dialog and the asset reads happen in the main
+process — a media id is not a path, and no bridge call returns bytes, by design — so the
+renderer names a kit and never a file. A missing asset is named in the notice and the archive
+is still written; a kit whose id is already in the project is re-minted on import rather than
+overwriting the one in use; and the dialog is shown *before* the archive is built, so
+cancelling costs no disk reads and raises no error. Applying a kit produces ordinary items tagged
 `aiProvenance: {tool: 'brand-kit'}`, which is what makes "delete the kit, keep its work" a
-property of the design rather than a promise. What is missing is the list, the editor, the
-buttons and the `.cwbrand` zip. Three entries left this list
+property of the design rather than a promise.  Three entries left this list
 rather than being rephrased. The **shape row** is in — a shape offers its kind, an icon
 offers its stroke width, and neither appears for the other. **Re-picking** an icon on an
 existing item is in too: the picker gained the caller it never had, so its `value` and

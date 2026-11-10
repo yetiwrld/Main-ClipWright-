@@ -474,11 +474,15 @@ context menus, in-editor import, the fill lock).
     The **editor** is built too: a kit can be created from scratch or from the current clip,
     edited, and saved, with every problem reported at once and a part switched on but not yet
     chosen treated as a problem rather than a silent omission.
-    What is *not* built: the export/import buttons (the file picker lives in the main process
-    and no `brandKit:export` channel exists), and building a composition from a
-    `compositionTemplateId` — so a template-based intro is planned and then refused rather than
-    inserted empty. Text and shape items cannot be captured, because the kit's schema has no
-    field for them, and a `custom` logo placement becomes the nearest corner when edited,
+    A kit **travels as a file**: export writes a `.cwbrand` archive from the panel (the save
+    dialog and the asset reads both happen in the main process, and the file name gains the
+    extension even if the user types a bare name), and import reads one back, telling the user
+    by name about any asset the file did not contain and re-identifying a kit whose id is
+    already in the project rather than overwriting it.
+    What is *not* built: building a composition from a `compositionTemplateId` — so a
+    template-based intro is planned and then refused rather than inserted empty — plus the
+    rest of the kit's form. Text and shape items cannot be captured, because the kit's schema
+    has no field for them, and a `custom` logo placement becomes the nearest corner when edited,
     because the form has four corners and no way to express a dragged point. The colour picker
     is the shared `ColourPicker` — *recent colours* and *pick from logo* (SPEC 13 §8.2) are not
     built, and neither is the batch apply across several clips (the panel applies to the

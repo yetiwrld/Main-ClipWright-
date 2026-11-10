@@ -506,6 +506,27 @@ export interface ClipwrightBridge {
   openFolderDialog(): Promise<string[]>;
   saveFileDialog(defaultName: string, filters?: FileFilter[]): Promise<string | null>;
 
+  /**
+   * Write a `.cwbrand` archive (SPEC 13 §8.2). Main shows the save dialog, reads the kit's assets
+   * from the media library and writes the file. Resolves `null` when the user cancels, and
+   * reports any asset that could not be found so the caller can say which one.
+   */
+  exportBrandKit(
+    kit: unknown,
+    defaultName: string
+  ): Promise<{ path: string; missingAssets: string[] } | null>;
+
+  /**
+   * Read a `.cwbrand` archive. Main shows the open dialog, parses the zip and returns the kit
+   * with its assets as base64. Resolves `null` when cancelled; rejects with a readable message
+   * when the file is not a kit.
+   */
+  importBrandKit(): Promise<{
+    kit: unknown;
+    assets: Array<{ name: string; data: string }>;
+    missingAssets: string[];
+  } | null>;
+
   // Media operations
   probeMedia(filePath: string): Promise<MediaInfo>;
   probeUrl(url: string): Promise<MediaInfo | { title: string; durationUs: number }>;

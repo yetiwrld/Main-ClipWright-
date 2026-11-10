@@ -10,7 +10,7 @@
  * definition that could drift from it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { applyPatches, enablePatches } from 'immer';
 import {
   CwbrandFormat,
@@ -124,6 +124,28 @@ const kitsApi = (kits: BrandKit[], overrides: Partial<BrandKitsApi> = {}): Brand
   loading: false,
   error: '',
   ...overrides,
+});
+
+/**
+ * A fake preload bridge. The export/import path is the only part of the panel that talks to main,
+ * so installing one is the only way to reach it from a jsdom test — and the panel must ask
+ * `isDesktop()` first, because the same renderer runs in a plain browser during UI work.
+ */
+function installBridge(overrides: Record<string, unknown> = {}) {
+  const bridge = {
+    exportBrandKit: vi.fn(async () => null as { path: string; missingAssets: string[] } | null),
+    importBrandKit: vi.fn(
+      async () =>
+        null as { kit: unknown; assets: Array<{ name: string; data: string }>; missingAssets: string[] } | null,
+    ),
+    ...overrides,
+  };
+  (window as unknown as { clipwright: unknown }).clipwright = bridge;
+  return bridge;
+}
+
+afterEach(() => {
+  delete (window as unknown as { clipwright?: unknown }).clipwright;
 });
 
 describe('playhead-independent decisions', () => {
@@ -628,5 +650,134 @@ describe('kit editor', () => {
     expect(screen.getByDisplayValue('bold-creator')).toBeTruthy();
     // The note about the clip's lack of a corner image is shown above the form.
     expect(screen.getByRole('status').textContent).toMatch(/logo|caption/i);
+  });
+});
+
+describe('export and import (SPEC 13 §8)', () => {
+  const panel = (kits: BrandKit[], overrides: Partial<BrandKitsApi> = {}) =>
+    render(
+      <BrandKitPanel
+        state={timelineWithClips()}
+        timeline={api()}
+        brandKits={kitsApi(kits, overrides)}
+        canvas={CANVAS}
+        captionStyleIds={new Set()}
+        assetIds={new Set(['logo-1'])}
+        media={[]}
+      />,
+    );
+
+  it('names the extension when main asks for a file name, so nobody types it', async () => {
+    // Electron returns the typed name unchanged. A user who types "Studio" must still get a
+    // .cwbrand file — one their colleague's machine offers to open.
+    const bridge = installBridge({ exportBrandKit: vi.fn(async () => ({ path: '/tmp/Studio.cwbrand', missingAssets: [] })) });
+    panel([kit({ logo: LOGO })]);
+    fireEvent.click(screen.getByRole('button', { name: /export studio/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Exported to \/tmp\/Studio\.cwbrand/));
+    expect(bridge.exportBrandKit).toHaveBeenCalledWith(expect.objectContaining({ id: 'kit-1' }), 'Studio.cwbrand');
+  });
+
+  it('reports assets that could not go into the file, by name', async () => {
+    // A file with a note beats no file, but silently dropping the logo would give the recipient
+    // a kit that references a picture it does not contain.
+    installBridge({
+      exportBrandKit: vi.fn(async () => ({ path: '/tmp/Studio.cwbrand', missingAssets: ['logo.png'] })),
+    });
+    panel([kit({ logo: LOGO })]);
+    fireEvent.click(screen.getByRole('button', { name: /export studio/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/logo\.png/));
+  });
+
+  it('says nothing at all when the save dialog is cancelled', async () => {
+    // Cancelling is not an outcome. "Export cancelled." under a kit a second later looks like a
+    // failure the user has to reason about; nothing happening is what they asked for.
+    installBridge({ exportBrandKit: vi.fn(async () => null) });
+    panel([kit({ logo: LOGO })]);
+    fireEvent.click(screen.getByRole('button', { name: /export studio/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /export studio/i })).toBeTruthy());
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('stays silent in a browser, where there is no file to write', () => {
+    panel([kit({ logo: LOGO })]);
+    fireEvent.click(screen.getByRole('button', { name: /export studio/i }));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('imports a kit and saves it with the file’s own id', async () => {
+    const bridge = installBridge({
+      importBrandKit: vi.fn(async () => ({ kit: kit({ id: 'studio-x', name: 'Studio X' }), assets: [], missingAssets: [] })),
+    });
+    const save = vi.fn<BrandKitsApi['save']>(async () => true);
+    panel([], { save });
+    fireEvent.click(screen.getByRole('button', { name: /import a brand kit/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Imported “Studio X”/));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: 'studio-x' }));
+    expect(bridge.importBrandKit).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-ids an imported kit that collides, because importing is an add and not a replace', async () => {
+    // Overwriting would silently move every item the existing kit had applied to the new one's
+    // provenance — and delete, reapply, and the "comes from" label all key on that id.
+    installBridge({
+      importBrandKit: vi.fn(async () => ({ kit: kit({ id: 'kit-1' }), assets: [], missingAssets: [] })),
+    });
+    const save = vi.fn<BrandKitsApi['save']>(async () => true);
+    panel([kit({ id: 'kit-1' })], { save });
+    fireEvent.click(screen.getByRole('button', { name: /import a brand kit/i }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const saved = save.mock.calls[0]![0];
+    expect(saved.id).not.toBe('kit-1');
+    expect(saved.id).toMatch(/^studio-imported/);
+  });
+
+  it('imports into a project with no kits at all', () => {
+    // The empty state is where importing matters most — a fresh project — so the button must be
+    // in that branch too, not only next to the cards.
+    installBridge({
+      importBrandKit: vi.fn(async () => ({ kit: kit({ id: 'studio-x', name: 'Studio X' }), assets: [], missingAssets: [] })),
+    });
+    panel([]);
+    expect(screen.getByText('No brand kits yet')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /import a brand kit/i })).toBeTruthy();
+  });
+
+  it('tells the user which assets the file did not contain', async () => {
+    installBridge({
+      importBrandKit: vi.fn(async () => ({
+        kit: kit({ id: 'studio-x', name: 'Studio X' }),
+        assets: [],
+        missingAssets: ['intro.mp4'],
+      })),
+    });
+    panel([]);
+    fireEvent.click(screen.getByRole('button', { name: /import a brand kit/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/intro\.mp4/));
+  });
+
+  it('explains a file that is not a kit instead of crashing on it', async () => {
+    // Picking the wrong file is a user mistake, not a broken app. The schema's own summary names
+    // the field that is wrong, which is more use than "invalid file".
+    installBridge({ importBrandKit: vi.fn(async () => ({ kit: { name: 42 }, assets: [], missingAssets: [] })) });
+    const save = vi.fn<BrandKitsApi['save']>(async () => true);
+    panel([], { save });
+    fireEvent.click(screen.getByRole('button', { name: /import a brand kit/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/format|version|name|id/i));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('shows the message main sent, not the Electron wrapper around it', async () => {
+    // Electron prefixes rejections with "Error invoking remote method 'brandKit:import': Error:",
+    // which is noise the user cannot act on. `describeError` strips it.
+    installBridge({
+      importBrandKit: vi.fn(async () => {
+        throw new Error("Error invoking remote method 'brandKit:import': Error: The file is not a .cwbrand archive.");
+      }),
+    });
+    panel([]);
+    fireEvent.click(screen.getByRole('button', { name: /import a brand kit/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe('The file is not a .cwbrand archive.'),
+    );
   });
 });

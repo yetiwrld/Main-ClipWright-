@@ -696,6 +696,98 @@ function registerIPC(): void {
     }
   );
 
+  /*
+    Brand kits as files (SPEC 13 §8.2: "Export/Import (`.cwbrand` zip with assets)").
+
+    The archive is built and read in `@clipwright/brand-kits`, which is pure; what belongs here is
+    the two things only the main process can do — put a save dialog in front of the user and touch
+    the disk. The renderer sends a path-free request and gets a path-free answer, so the file
+    picker never has to be reachable from the renderer at all.
+
+    The renderer names the kit and the media ids it uses; **main reads the files**, from the same
+    media records the library is built from. That is what makes the archive's contents and the
+    library the user is looking at the same thing — and it keeps a renderer request from naming a
+    path, which is the whole reason the dialog lives here.
+  */
+  ipcMain.handle(
+    'brandKit:export',
+    async (
+      _event,
+      kit: unknown,
+      defaultName: string
+    ) => {
+      const { writeBrandKitArchive } = await import('@clipwright/brand-kits');
+      const { dialog } = await import('electron');
+      const { readFile, writeFile } = await import('node:fs/promises');
+      const storage = requireStorage();
+
+      /*
+        The dialog comes **first**. Building the archive before it would read every logo and intro
+        off disk for a user who then types a name and cancels — and a kit with a damaged field
+        would raise an error before they had even chosen where to put it. Ask, then do the work.
+      */
+      const picked = await dialog.showSaveDialog({
+        defaultPath: defaultName,
+        filters: [{ name: 'Brand kit', extensions: ['cwbrand'] }],
+      });
+      if (picked.canceled || !picked.filePath) return null;
+
+      /*
+        A missing file is not an error here: `fetchAsset` returns `undefined`, and the archive
+        reports the id in `missingAssets` so the caller can say which one. Throwing instead would
+        make one unplugged drive stop a user exporting a kit that is otherwise complete.
+      */
+      const fetchAsset = async (assetId: string): Promise<Uint8Array | undefined> => {
+        const record = storage.getMedia(assetId);
+        if (!record) return undefined;
+        try {
+          return new Uint8Array(await readFile(record.path));
+        } catch {
+          return undefined;
+        }
+      };
+      const written = await writeBrandKitArchive(kit as never, { fetchAsset });
+
+      // Electron's dialog returns a path without the extension when the user types a bare name,
+      // and a file called `studio` is not one another machine will offer to open.
+      const filePath = picked.filePath.toLowerCase().endsWith('.cwbrand')
+        ? picked.filePath
+        : `${picked.filePath}.cwbrand`;
+      await writeFile(filePath, written.bytes);
+      logger?.info('Brand kit exported', { path: filePath, missing: written.missingAssets.length });
+      return { path: filePath, missingAssets: written.missingAssets };
+    }
+  );
+
+  ipcMain.handle('brandKit:import', async () => {
+    const { readBrandKitArchive } = await import('@clipwright/brand-kits');
+    const { dialog } = await import('electron');
+    const { readFile } = await import('node:fs/promises');
+
+    const picked = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Brand kit', extensions: ['cwbrand'] }],
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return null;
+
+    const bytes = new Uint8Array(await readFile(picked.filePaths[0]!));
+    /*
+      Read here, not in the renderer: the archive's reader is async and uses
+      `DecompressionStream`, and returning bytes over IPC only to decode them there would copy a
+      megabyte of logo twice for no benefit. The kit and its assets come back as JSON-safe values.
+    */
+    const imported = await readBrandKitArchive(bytes);
+    logger?.info('Brand kit imported', { path: picked.filePaths[0], missing: imported.missingAssets.length });
+    return {
+      kit: imported.kit,
+      assets: [...imported.assets.entries()].map(([name, data]) => ({
+        name,
+        data: Buffer.from(data).toString('base64'),
+      })),
+      missingAssets: imported.missingAssets,
+    };
+  });
+
   // ---- Long-running jobs (import + transcription) */
   ipcMain.handle('job:startIngest', async (event, jobId: string, request: IngestRequest) => {
     const storage = requireStorage();

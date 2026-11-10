@@ -1231,3 +1231,42 @@ warning its whole purpose.
 **Two guards against false alarms.** A caller with no font catalogue gets no check rather than one
 invented from an empty list, and fonts belong to the `textDefaults` part, so an apply that
 switches text defaults off says nothing about fonts.
+
+## 42. Main owns both the dialog and the asset read; the renderer names ids and nothing else
+
+**The archive cannot be built in the renderer, and the first draft proved it.** Export needs the
+bytes of every logo and intro a kit references. A media id is not a path, and no call on the bridge
+returns bytes for one — deliberately, since the media layer is the main process's. The draft that
+passed `{assetId, data}` down from the panel was abandoned rather than given a new renderer-facing
+"read any file" call, because that call is the one thing the whole bridge design refuses to have.
+
+**So `brandKit:export` takes the kit, `brandKit:import` returns one, and no path crosses.** Main
+shows the dialog, reads each asset through `storage.getMedia(id).path`, writes the archive, and on
+import does the reverse and encodes the assets as base64. The renderer never learns where a file
+lives, which keeps the trust boundary where the rest of the app already puts it: a compromised
+renderer can name a kit, not a directory.
+
+**The dialog comes before the work.** Building the archive first would read every asset off disk
+for a user who then cancels — and a malformed kit would raise an error before they had chosen a
+destination at all. Ask, then do.
+
+**A missing asset is reported, not thrown.** `fetchAsset` yields `undefined` for a record that is
+gone or a file that will not open, the archive lists the id in `missingAssets`, and the panel names
+the assets it left out. Throwing would make one unplugged drive stop an export that is otherwise
+complete; saying nothing would hand the recipient a kit that references a picture it does not
+contain.
+
+**The extension is normalised in main, not trusted from the dialog.** Electron returns the typed
+name unchanged, so a user typing `Studio` would get a file that no machine offers to open. Main
+appends `.cwbrand` unless it is already there — a small thing that is the difference between a file
+that works on the colleague's machine and one that has to be renamed by hand.
+
+**Importing is an add, so a colliding id is re-minted.** Overwriting would silently move every item
+the existing kit had applied to the new one's provenance, and the provenance is what delete,
+reapply and the "comes from" label all key on. The imported kit becomes `<name>-imported` through
+the same `mintKitId` the form uses, so there is one naming rule rather than two.
+
+**Import lives in the empty state too.** A project with no kits is the one that most needs an
+import, and the panel's first draft put the button only above the cards — the same shape of bug as
+the shared editor dialog, and recorded for the same reason.
+

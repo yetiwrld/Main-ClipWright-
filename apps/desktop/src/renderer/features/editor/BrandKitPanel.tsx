@@ -20,12 +20,13 @@
  * not need a DOM to check the parts that matter.
  */
 import React, { useMemo, useState } from 'react';
-import { Layers, Pencil, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Download, Layers, Pencil, Plus, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
 import { Button, Card, Chip, Dialog, EmptyState, SegmentedControl, Toggle } from '@clipwright/design-system';
 import {
   ALL_KIT_PARTS,
   findKitAppliedItems,
   planKitApplication,
+  tryParseBrandKit,
   type BrandKit,
   type CapturableItem,
   type CapturableStyle,
@@ -41,9 +42,11 @@ import {
   removeKitItems,
   type TimelineState,
 } from '@clipwright/timeline-engine';
+import { api, describeError, isDesktop } from '../../api.js';
 import type { TimelineApi } from './use-timeline.js';
 import type { BrandKitsApi } from './use-brand-kits.js';
 import { BrandKitEditor, type EditorMediaOption } from './BrandKitEditor.js';
+import { mintKitId } from './brand-kit-draft.js';
 
 /** What the apply button covers: the spec's "This clip · Selected clips · All clips". */
 export type ApplyScope = 'this-clip' | 'selected-clips' | 'all-clips';
@@ -227,6 +230,7 @@ function KitCard({
   onDetach,
   onDelete,
   onEdit,
+  onExport,
 }: {
   kit: BrandKit;
   state: TimelineState;
@@ -235,6 +239,7 @@ function KitCard({
   onDetach: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onExport: () => void;
 }) {
   const footprint = useMemo(() => kitFootprint(state, kit.id), [state, kit.id]);
   const swatches = [kit.colors.primary, kit.colors.secondary, kit.colors.accent, kit.colors.background];
@@ -281,6 +286,9 @@ function KitCard({
         <Button size={28} variant="ghost" onClick={onEdit} aria-label={`Edit ${kit.name}`}>
           <Pencil size={12} /> Edit
         </Button>
+        <Button size={28} variant="ghost" onClick={onExport} aria-label={`Export ${kit.name}`}>
+          <Download size={12} /> Export
+        </Button>
         <Button size={28} variant="ghost" onClick={onDelete} aria-label={`Delete ${kit.name}`}>
           <Trash2 size={12} /> Delete
         </Button>
@@ -323,6 +331,8 @@ export function BrandKitPanel({
     otherwise be the same value.
   */
   const [editing, setEditing] = useState<{ kit?: BrandKit } | null>(null);
+  /** The last export/import result, shown until the next action. */
+  const [notice, setNotice] = useState('');
   /*
     Kits are shown a page at a time because a project can accumulate dozens, and a left panel
     with forty cards in it is worse than one with a button. The count grows; nothing is hidden
@@ -361,6 +371,62 @@ export function BrandKitPanel({
   if (brandKits.loading) {
     return <div style={{ padding: 'var(--space-2)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>Loading kits…</div>;
   }
+
+  /*
+    Export asks main to write the file and reports what could not go into it. A kit whose logo is
+    missing from this machine still exports — a file with a note beats no file — but the user is
+    told which asset was left out, because the recipient would otherwise find a kit that
+    references a file it does not contain.
+  */
+  const exportKit = async (kit: BrandKit) => {
+    if (!isDesktop()) return;
+    try {
+      const result = await api.exportBrandKit(kit, `${kit.name || 'brand-kit'}.cwbrand`);
+      if (!result) return;
+      setNotice(
+        result.missingAssets.length === 0
+          ? `Exported to ${result.path}`
+          : `Exported to ${result.path}. These assets were not found and are not in the file: ${result.missingAssets.join(', ')}.`,
+      );
+    } catch (err) {
+      setNotice(describeError(err));
+    }
+  };
+
+  /*
+    Import has to be able to say "no" clearly: a file that is not a kit, or one whose JSON is
+    damaged, is a plain error the user caused by picking the wrong file — not a crash.
+  */
+  const importKit = async () => {
+    if (!isDesktop()) return;
+    try {
+      const result = await api.importBrandKit();
+      if (!result) return;
+      const parsed = tryParseBrandKit(result.kit);
+      if (!parsed.ok) {
+        setNotice(parsed.message);
+        return;
+      }
+      /*
+        A kit that is already in this project gets a new id rather than overwriting: importing is
+        an *add*, and silently replacing a kit someone has been using would also move every item
+        the old one had applied to the new one's provenance.
+      */
+      const taken = new Set(brandKits.kits.map((entry) => entry.id));
+      const kit = taken.has(parsed.kit.id)
+        ? { ...parsed.kit, id: mintKitId(`${parsed.kit.name}-imported`, taken) }
+        : parsed.kit;
+      const saved = await brandKits.save(kit);
+      if (!saved) return;
+      setNotice(
+        result.missingAssets.length === 0
+          ? `Imported “${kit.name}”.`
+          : `Imported “${kit.name}”. These assets were not in the file: ${result.missingAssets.join(', ')}.`,
+      );
+    } catch (err) {
+      setNotice(describeError(err));
+    }
+  };
 
   /*
     The editor and the delete confirm are one element shared by **both** branches below. A first
@@ -417,6 +483,23 @@ export function BrandKitPanel({
     </>
   );
 
+  /*
+    The import button and the status line are shared by *both* branches. A project with no kits is
+    the one that most needs to import one — it is a fresh project, exactly where a studio's saved
+    kit is worth having — and a first draft put Import only in the list branch, so the empty state
+    offered no way in at all. Same shape as the editor/shared-dialog fix above.
+  */
+  const importButton = (
+    <Button size={28} variant="ghost" onClick={() => void importKit()} aria-label="Import a brand kit">
+      <Upload size={12} /> Import
+    </Button>
+  );
+  const noticeLine = notice ? (
+    <p role="status" style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+      {notice}
+    </p>
+  ) : null;
+
   /* A project with no kits says what a kit is for, and offers a way to make one. */
   if (brandKits.kits.length === 0) {
     return (
@@ -426,12 +509,16 @@ export function BrandKitPanel({
           title="No brand kits yet"
           explanation="A kit holds a caption look, colours, a logo and an intro. Make one from the clip you are editing, and applying it puts the same branding on every clip."
         />
-        <Button size={28} variant="secondary" onClick={() => setEditing({})}>
-          <Plus size={12} /> New kit
-        </Button>
+        <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+          <Button size={28} variant="secondary" onClick={() => setEditing({})}>
+            <Plus size={12} /> New kit
+          </Button>
+          {importButton}
+        </div>
+        {noticeLine}
         <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-          Kits are stored with this project, so they travel with it and are not shared between
-          projects yet.
+          Kits are stored with this project, so they travel with it. To move one to another
+          project, export it to a file and import it there.
         </p>
         {brandKits.error && (
           <p role="alert" style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
@@ -451,6 +538,7 @@ export function BrandKitPanel({
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
         <Sparkles size={14} aria-hidden />
         <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, flex: 1 }}>Brand kits</span>
+        {importButton}
         <Button size={28} variant="ghost" onClick={() => setEditing({})} aria-label="New brand kit">
           <Plus size={12} /> New
         </Button>
@@ -517,6 +605,8 @@ export function BrandKitPanel({
         </Card>
       ) : null}
 
+      {noticeLine}
+
       {visible.map((entry) => (
         <KitCard
           key={entry.id}
@@ -527,6 +617,7 @@ export function BrandKitPanel({
           onDetach={() => timeline.run('Detach kit items', (current) => detachKitItems(current, entry.id))}
           onDelete={() => setConfirmingDelete(entry)}
           onEdit={() => setEditing({ kit: entry })}
+          onExport={() => void exportKit(entry)}
         />
       ))}
 
