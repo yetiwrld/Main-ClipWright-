@@ -317,3 +317,120 @@ describe('kitSwatches', () => {
     ]);
   });
 });
+
+/**
+ * Intro and outro (SPEC 13 §8: "intro/outro inserted at start/end").
+ *
+ * The plan does not place these — it describes a clip of a given length, because an intro is
+ * *inserted*, not dropped on a track. What it does own is the two things that can be wrong
+ * about one: it can be missing, and it can be the wrong shape for the composition.
+ */
+describe('intro and outro', () => {
+  const canvas = { widthPx: 1920, heightPx: 1080 };
+
+  it('plans the intro and outro as clips of their stated duration', () => {
+    const plan = planKitApplication(
+      kit({
+        intro: { assetId: 'logo-1', durationSec: 2.5 },
+        outro: { assetId: 'mark-1', durationSec: 4 },
+      }),
+      canvas,
+      10_000_000,
+      everything,
+    );
+    expect(plan.intro).toEqual({ assetId: 'logo-1', durationUs: 2_500_000 });
+    expect(plan.outro).toEqual({ assetId: 'mark-1', durationUs: 4_000_000 });
+  });
+
+  it('carries a template id when the kit names a template instead of a file', () => {
+    // A kit may build its intro from a composition template — a title card, say — and a
+    // template has no asset to look up, so no media check is possible or wanted.
+    const plan = planKitApplication(
+      kit({ intro: { compositionTemplateId: 'tpl-card', durationSec: 3 } }),
+      canvas,
+      10_000_000,
+      nothing,
+    );
+    expect(plan.intro).toEqual({ compositionTemplateId: 'tpl-card', durationUs: 3_000_000 });
+    // Nothing reported: the project supplies the template, so it cannot be "missing from the
+    // media library".
+    expect(plan.report).toEqual([]);
+  });
+
+  it('reports a missing intro rather than planning an empty one', () => {
+    const plan = planKitApplication(
+      kit({ intro: { assetId: 'gone', durationSec: 2 } }),
+      canvas,
+      10_000_000,
+      everything,
+    );
+    expect(plan.intro).toBeUndefined();
+    expect(plan.report.join(' ')).toContain('intro');
+    expect(plan.report.join(' ')).toContain('missing');
+  });
+
+  it('does not report an intro when the part is switched off', () => {
+    const plan = planKitApplication(
+      kit({ intro: { assetId: 'gone', durationSec: 2 } }),
+      canvas,
+      10_000_000,
+      everything,
+      { ...ALL_KIT_PARTS, introOutro: false },
+    );
+    expect(plan.intro).toBeUndefined();
+    expect(plan.report).toEqual([]);
+  });
+
+  it('warns when the intro is the wrong shape, and still plans it', () => {
+    /*
+      SPEC 13 §8's case: "intro/outro assets in the wrong aspect → fit with the canvas fill
+      option and a warning". A warning that dropped the clip would be a refusal wearing a
+      warning's clothes, so the clip is planned *and* the sentence is written.
+    */
+    const plan = planKitApplication(
+      kit({ intro: { assetId: 'logo-1', durationSec: 2 } }),
+      canvas,
+      10_000_000,
+      { ...everything, assetSizes: new Map([['logo-1', { widthPx: 1080, heightPx: 1920 }]]) },
+    );
+    expect(plan.intro).toBeDefined();
+    const sentence = plan.report.join(' ');
+    expect(sentence).toContain('1080×1920');
+    expect(sentence).toContain('1920×1080');
+  });
+
+  it('says nothing about the shape when it matches or is unknown', () => {
+    // A caller that has not probed its media gets no invented warning, and a clip that fits
+    // gets none either — a warning that fires on correct input is noise the user learns to
+    // ignore, which costs more than the warning is worth.
+    const matching = planKitApplication(
+      kit({ intro: { assetId: 'logo-1', durationSec: 2 } }),
+      canvas,
+      10_000_000,
+      { ...everything, assetSizes: new Map([['logo-1', { widthPx: 1920, heightPx: 1080 }]]) },
+    );
+    expect(matching.report).toEqual([]);
+
+    const unknown = planKitApplication(
+      kit({ intro: { assetId: 'logo-1', durationSec: 2 } }),
+      canvas,
+      10_000_000,
+      everything,
+    );
+    expect(unknown.report).toEqual([]);
+  });
+
+  it('plans an intro longer than the composition', () => {
+    // SPEC 13 §8 lists this as an allowed case, not an error: a five-second intro on a
+    // three-second clip is a legitimate thing to build, and clipping it would silently
+    // shorten what the user asked for.
+    const plan = planKitApplication(
+      kit({ intro: { assetId: 'logo-1', durationSec: 5 } }),
+      canvas,
+      3_000_000,
+      everything,
+    );
+    expect(plan.intro?.durationUs).toBe(5_000_000);
+    expect(plan.report).toEqual([]);
+  });
+});

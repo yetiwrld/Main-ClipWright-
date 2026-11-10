@@ -975,3 +975,35 @@ the only kit operation that applying the kit again cannot undo.
 **An empty plan fails.** If every part is off, or every asset is missing, the command returns
 `invalid` rather than succeeding with no patches. A success with nothing to show is
 indistinguishable from a broken button, and the plan's `report` already carries the reason.
+
+## 34. An intro/outro is inserted with a full-track ripple, not dropped on a gap
+
+**Insert mode's rule, borrowed rather than restated.** SPEC 09 §13.2 already defines what
+happens when a clip is inserted into an occupied span: items at or after the point shift right
+by its duration. An intro is exactly that case at time 0, and an outro is its mirror at the
+composition's end — so the kit command follows the rule the editor's own Insert mode follows,
+instead of inventing a "kit placement" with its own semantics for the same gesture.
+
+**Every unlocked track ripples, and that is the decision worth defending.** The obvious
+implementation moves the track the clip lands on. But an intro plays alone at the start: if
+only the main track moves, every caption, title, logo and music bed now sits two seconds
+earlier against the picture. Rippling the tracks the clip does not occupy is the only reading
+that leaves the *edit* intact, and "insert an intro" is a statement about the edit, not about a
+track. A locked track is skipped rather than refusing the operation, consistent with every
+other kit command — the user's lock is about that track, and a kit that cannot apply anywhere
+because one track is locked is a kit that appears broken.
+
+**An outro never ripples.** It is appended after `compositionEndUs`; moving things right of a
+point at the very end would move nothing, and writing a ripple there would be code that only
+looks symmetrical. The command takes `compositionEndUs` from the caller rather than deriving
+it, because "where the project ends" is a query over tracks with their own rules about hidden
+and disabled items (SPEC 09 §3) and belongs in `selectors.ts`, not here.
+
+**A missing main track is created, magnetic.** Applying a kit to an empty composition is a
+legitimate first action, and a main track's purpose is to stay closed up when clips are
+inserted — which is precisely what the intro just did.
+
+**A template intro is planned and then refused.** The plan carries a `compositionTemplateId`
+so a caller that can build a composition from a template has what it needs. The command cannot,
+and returns `invalid` with a sentence rather than placing a media-less clip that would draw
+nothing and be selectable — the failure mode the rest of this feature exists to avoid.

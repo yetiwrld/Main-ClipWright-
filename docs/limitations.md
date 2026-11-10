@@ -474,8 +474,12 @@ context menus, in-editor import, the fill lock).
     (`specs/13` §2: an unfinished tool is never shown as a teaser). The project schema's
     `brandKits: string[]` and the `BrandKits/` directory are still empty placeholders until
     the UI lands. Two parts of the spec remain unimplemented in the commands themselves:
-    intro/outro clips (the plan does not emit them yet) and the missing-font substitution
-    flag, since the caption style is assigned by id and resolution happens elsewhere.
+    the missing-font substitution flag, since the caption style is assigned by id and
+    resolution happens elsewhere. Intro and outro *planning and insertion* are built — a
+    clip's own duration is inserted at the start and every unlocked track ripples, or at the
+    end with nothing moving — but an intro that is a **composition template** is planned and
+    then refused by the insert command: building a composition from a template is a separate
+    feature, and placing an empty clip would be worse than saying so.
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on

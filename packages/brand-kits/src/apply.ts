@@ -189,6 +189,16 @@ export interface KitApplicationPlan {
     endUs: number;
   };
   lowerThird?: { templateId: string; fields: Record<string, string>; startUs: number; endUs: number };
+  /**
+   * The intro clip, inserted at the start; `durationUs` is what the timeline must grow by.
+   *
+   * `compositionTemplateId` is carried alongside `assetId` rather than resolved here: a kit may
+   * name a template instead of a file, and only the caller knows how to build one. Whichever is
+   * present is what it uses.
+   */
+  intro?: { assetId?: string; compositionTemplateId?: string; durationUs: number };
+  /** The outro clip, appended after everything. Same shape as the intro. */
+  outro?: { assetId?: string; compositionTemplateId?: string; durationUs: number };
   /** The music bed, with the ducking and normalisation the kit asks for. */
   music?: { assetId: string; volumeDb: number; duckUnderSpeech: boolean; targetLufs?: number };
   /**
@@ -205,6 +215,12 @@ export interface KitAvailability {
   assetIds: ReadonlySet<string>;
   /** `.cwstyle` ids that exist. */
   captionStyleIds: ReadonlySet<string>;
+  /**
+   * Pixel dimensions of known assets, so an intro or outro in the wrong aspect can be
+   * flagged. Optional: a caller that has not probed its media reports no warning rather than
+   * inventing one, and a template has no dimensions at all.
+   */
+  assetSizes?: ReadonlyMap<string, { widthPx: number; heightPx: number }>;
 }
 
 /**
@@ -282,6 +298,54 @@ export function planKitApplication(
       startUs: Math.round(kit.lowerThird.showAtSec * 1_000_000),
       endUs: Math.round((kit.lowerThird.showAtSec + kit.lowerThird.forSec) * 1_000_000),
     };
+  }
+
+  /*
+    Intro and outro are the only parts that change the composition's *length*, so both are
+    planned with the duration the timeline will need, not with a placement. A kit's intro is
+    allowed to be longer than the clip (SPEC 13 §8's cases): it is inserted, never trimmed to
+    fit, and the plan says nothing about it — the command inserts whatever the duration says.
+  */
+  for (const which of ['intro', 'outro'] as const) {
+    if (!parts.introOutro) break;
+    const ref = kit[which];
+    if (!ref) continue;
+    const namedByAsset = ref.assetId !== undefined;
+    if (namedByAsset && !availability.assetIds.has(ref.assetId!)) {
+      plan.report.push(`The kit's ${which} clip is missing from the media library, so none was inserted.`);
+      continue;
+    }
+    /*
+      A template needs no media check: it is built from the project's own settings, and
+      reporting it missing would be complaining about a thing the project supplies.
+    */
+    const durationUs = Math.max(Math.round(ref.durationSec * 1_000_000), 1);
+    plan[which] = {
+      ...(ref.assetId !== undefined ? { assetId: ref.assetId } : {}),
+      ...(ref.compositionTemplateId !== undefined
+        ? { compositionTemplateId: ref.compositionTemplateId }
+        : {}),
+      durationUs,
+    };
+
+    /*
+      Wrong aspect is a warning, not a refusal: the clip is fitted to the canvas when drawn
+      (SPEC 13 §8 lists "fit with the canvas fill option and a warning"), so the kit still
+      applies and the user is told what they will see. Only assets with known dimensions can
+      be judged, and a square canvas never mismatches.
+    */
+    const size = ref.assetId !== undefined ? availability.assetSizes?.get(ref.assetId) : undefined;
+    if (size && size.widthPx > 0 && size.heightPx > 0) {
+      const assetAspect = size.widthPx / size.heightPx;
+      const canvasAspect = canvas.widthPx / canvas.heightPx;
+      // A tenth of a percent is a rounding difference, not bars: rotate 16:9 by 90° and the
+      // aspect is off by 3×, so nothing sensible sits near this line.
+      if (Math.abs(assetAspect - canvasAspect) / canvasAspect > 0.001) {
+        plan.report.push(
+          `The kit's ${which} is ${size.widthPx}×${size.heightPx} but the composition is ${canvas.widthPx}×${canvas.heightPx}, so it was fitted and may show bars.`,
+        );
+      }
+    }
   }
 
   if (parts.music && kit.audio?.musicAssetId !== undefined) {

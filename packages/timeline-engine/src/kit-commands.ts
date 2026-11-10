@@ -21,6 +21,7 @@ import type { BrandKit, KitApplicationPlan } from '@clipwright/brand-kits';
 import { findKitAppliedItems, kitProvenance } from '@clipwright/brand-kits';
 import { createMediaItem, nextId } from './factory.js';
 import { quantizeUs, type Fps } from './time.js';
+import { itemEndUs } from './selectors.js';
 import type { CommandResult, TimelineState } from './commands.js';
 
 /** Where a kit's graphics go when the project has no graphics track yet. */
@@ -42,7 +43,7 @@ export interface ApplyBrandKitParams {
 /** One item a kit created, so the caller can select or report them. */
 export interface AppliedKitItem {
   itemId: string;
-  kind: 'logo' | 'watermark';
+  kind: 'logo' | 'watermark' | 'intro' | 'outro';
 }
 
 /**
@@ -332,5 +333,149 @@ export function detachKitItems(state: TimelineState, kitId: string): CommandResu
     inverse,
     affectedItemIds: [...ids],
     notes: [],
+  };
+}
+
+/**
+ * Insert a kit's intro at the front or its outro at the back, rippling the rest of the
+ * project.
+ *
+ * This is SPEC 09 §13.2's **Insert** mode, not a placement: a clip at time 0 would cover the
+ * first shot, and a clip pushed to the nearest gap would appear at some unrelated moment. So
+ * everything at or after the insertion point moves right by the new clip's duration, on every
+ * unlocked track — the whole project grows by exactly that much, and the user's cuts stay
+ * where they were relative to the picture.
+ *
+ * Three decisions the spec leaves open, decided here:
+ *
+ * - **It ripples every unlocked track, not just the main one.** An intro plays alone at the
+ *   start of the composition; if only the main track moved, every caption, logo, title and
+ *   music bed would now sit `durationUs` earlier against the picture. Rippling the tracks the
+ *   clip does not occupy is the only reading that keeps the edit intact.
+ * - **A locked track is skipped, not a refusal** — the same rule the rest of the kit commands
+ *   follow. That does mean a locked main track's clips end up under the intro. Refusing
+ *   instead would make "apply a kit" fail on any project with a locked track, and the spec's
+ *   locked-track rule is about not editing the track, which this honours.
+ * - **The main track is found by role, and created if the project has none.** A kit can be
+ *   applied to an empty composition, and failing there would be a kit that cannot be used
+ *   before the first clip is imported. A new main track is magnetic, because a main track's
+ *   whole purpose is to stay closed up (SPEC 09 §9.5).
+ */
+export function insertKitClip(
+  state: TimelineState,
+  params: {
+    kit: BrandKit;
+    kind: 'intro' | 'outro';
+    clip: { assetId?: string; compositionTemplateId?: string; durationUs: number };
+    fps: Fps;
+    appliedAt: string;
+    /** Where the composition currently ends. The outro goes at the end of *this*. */
+    compositionEndUs: number;
+  },
+): CommandResult & { itemId?: string } {
+  const { kit, kind, clip, fps, appliedAt } = params;
+  const durationUs = quantizeUs(clip.durationUs, fps);
+  if (durationUs < 1) {
+    return { ok: false, code: 'too_short', message: 'That clip is shorter than a frame.' };
+  }
+  const startUs = quantizeUs(kind === 'intro' ? 0 : Math.max(params.compositionEndUs, 0), fps);
+
+  /*
+    A template has no media, and the command does not know how to build one — that is a
+    separate feature. Refusing here rather than inserting a clip with no media is the honest
+    half-step: the plan carries the template id so a caller that *can* build one does, and
+    one that cannot says so instead of placing an empty clip.
+  */
+  const mediaId = clip.assetId;
+  if (mediaId === undefined) {
+    return {
+      ok: false,
+      code: 'invalid',
+      message: 'A composition template cannot be inserted as a clip yet.',
+    };
+  }
+
+  /*
+    The id is minted before the draft rather than inside it, so the command can name the item
+    it created without searching the new state for something matching the provenance tag — a
+    search that would also match a logo applied in the same second.
+  */
+  const id = nextId('kitclip');
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const tracks = draft.tracks;
+
+    let main = tracks.find((candidate) => candidate.role === 'main');
+    if (!main) {
+      const lowestOrder = tracks.reduce(
+        (lowest, candidate) => Math.min(lowest, candidate.order),
+        Number.MAX_SAFE_INTEGER,
+      );
+      main = {
+        id: `trk_kit_${kind}`,
+        role: 'main',
+        kind: 'video',
+        name: 'Main',
+        order: lowestOrder === Number.MAX_SAFE_INTEGER ? 0 : lowestOrder - 1,
+        hidden: false,
+        locked: false,
+        muted: false,
+        solo: false,
+        heightPx: 64,
+        magnetic: true,
+        auto: false,
+        itemIds: [],
+      } as (typeof tracks)[number];
+      tracks.push(main);
+    }
+    const mainTrackId = main.id;
+
+    /*
+      The ripple happens before the new clip is placed, and skips the track it will sit on
+      only for the item it is about to create — which does not exist yet, so nothing is
+      skipped at all. Items starting exactly at the insertion point move; items that merely
+      straddle it do not, because Insert mode's own rule is "items at/after the point", and a
+      clip crossing it is split by the *drop*, which is a gesture this command does not have.
+    */
+    for (const track of tracks) {
+      if (track.locked) continue;
+      for (const id of track.itemIds) {
+        const item = draft.items[id] as TimelineItem | undefined;
+        if (!item) continue;
+        if (item.startUs >= startUs) item.startUs = quantizeUs(item.startUs + durationUs, fps);
+      }
+    }
+
+    const item = createMediaItem({
+      id,
+      trackId: mainTrackId,
+      label: `${kit.name} ${kind}`,
+      mediaId,
+      type: 'video',
+      startUs,
+      durationUs,
+      sourceDurationUs: durationUs,
+    });
+    item.aiProvenance = kitProvenance(kit.id, appliedAt);
+    draft.items[id] = item;
+    const target = draft.tracks.find((candidate) => candidate.id === mainTrackId);
+    if (target) {
+      target.itemIds.push(id);
+      target.itemIds.sort((a, b) => {
+        const left = draft.items[a] as TimelineItem | undefined;
+        const right = draft.items[b] as TimelineItem | undefined;
+        return (left?.startUs ?? 0) - (right?.startUs ?? 0);
+      });
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [id],
+    notes: [],
+    itemId: id,
   };
 }

@@ -17,7 +17,7 @@ pnpm test:unit
 
 ```
 Test Files  124 passed (124)
-     Tests  3063 passed (3063)
+     Tests  3078 passed (3078)
 ```
 
 | Area | Tests | What they actually check |
@@ -111,13 +111,13 @@ Test Files  124 passed (124)
  **Linked selection** (SPEC 09 §9.6): a video and its detached audio share a `linkId` so the two travel together — and *none* of the five commands that must honour it expanded the ids they were given. Moving the picture left the sound behind, deleting it left audio playing over black, and splitting it left one long sound under two short clips. The schema carried the coupling and the `linkedSelection` toggle from the start; `linkedTrackIds` existed but was read only by the ripple paths. `withLinkedSelection` is now the one expansion, applied by `moveItems`, `trimItem`, `splitItems`, `deleteItems` and `duplicateItems`, and a new `setToggles` command plus a toolbar button make the flag reachable — it was document state with no control and no writer, so every project was permanently linked and could not say so. The rules that needed deciding: a partner moves by the **delta**, never to the same absolute position, or a deliberate offset closes on the first drag and the sound drifts against the lip; a trimmed partner trims its **own** edge by the delta, not to the picture's new end, which only an offset fixture can distinguish; a duplicated pair is re-linked to each other under a fresh shared id, since one id per copy would leave the copies unlinked and move the same bug onto them; a partner on a locked track is left behind rather than refusing the whole operation; and groups expand as a second, separate relation. Two real bugs were found by the tests while writing them: trimming a partner to the picture's absolute end collapsed an offset sound to one frame, and `closeMainGaps` pulled a linked group member back after it had correctly moved — the gap-closing pass only skipped the ids the *caller* named, not the partners the command had added. Nine mutations all bite, but one only after a fixture was fixed: every trim test had the pair starting together, where the two formulas agree to the microsecond. The **Auto** render ladder §5.1 also asks for is *not* built and is recorded as a limitation: the preview draws DOM layers at each element's own resolution, so there is no internal render scale to step down, and a "Preview ½" chip would describe a resolution nothing is rendered at. |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
-| `packages/timeline-engine` | 262 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation, and the curve editor's write path: bezier handles stored on a keyframe, handle x clamped to 0–1 while y is free to overshoot so ease-back stays expressible, setting handles also switching the key to bezier interpolation (storing them on a linear key would leave them ignored and the edit would silently do nothing), and a refusal when there is no key at that time (§09 §17), plus the brand kit commands: applying a kit as ordinary tagged items on their own track, replacing rather than duplicating on reapply, detach as a one-way door (§13 §8.2) |
+| `packages/timeline-engine` | 270 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation, and the curve editor's write path: bezier handles stored on a keyframe, handle x clamped to 0–1 while y is free to overshoot so ease-back stays expressible, setting handles also switching the key to bezier interpolation (storing them on a linear key would leave them ignored and the edit would silently do nothing), and a refusal when there is no key at that time (§09 §17), plus the brand kit commands: applying a kit as ordinary tagged items on their own track, replacing rather than duplicating on reapply, detach as a one-way door, and inserting an intro or outro with the whole project rippling right (§13 §8.2, §09 §13.2) |
 | `packages/audio-core` | 48 | The gain envelope: dB conversion, fade curves, keyframe interpolation and easing, and the preview/export agreement that SPEC 10 §7.1 requires |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 36 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, and what applying a kit reports |
-| **Total** | **3063** | 124 files |
+| `packages/brand-kits` | 43 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, and the intro/outro plan with its wrong-aspect warning |
+| **Total** | **3078** | 124 files |
 
 ### Tests that run real processes
 
@@ -708,9 +708,45 @@ load-bearing on the `captionItemIds` path, so the named list needed a non-captio
 reapply filtered by `tool` alone produced the right *items* and the wrong `removed` count, so
 the count for a two-kit project is asserted.
 
+### Brand kits: an intro is an insert, not a placement
+
+**The intro grows the project; it does not sit on top of it.** Dropping a two-second clip at
+time 0 covers two seconds of the user's first shot. Pushing it to the nearest gap puts it at
+some unrelated moment. So `insertKitClip` follows SPEC 09 §13.2's **Insert** mode: every item
+at or after the insertion point moves right by exactly the new clip's duration. Measured: a
+project with clips at 0 and 4 s and a caption at 1 s, after a 2 s intro, has them at 2 s, 6 s
+and 3 s — the gaps are unchanged to the microsecond.
+
+**It ripples every unlocked track, not just the main one.** An intro plays alone; if only the
+main track moved, every caption, title, logo and music bed would slide two seconds earlier
+against the picture. That is the one decision here the spec does not state outright, and it is
+the difference between inserting an intro and damaging an edit. A **locked** track is skipped
+rather than refused — the same rule the rest of the kit commands follow — even though that
+means its clips end up under the intro; refusing would make "apply a kit" fail on any project
+with a locked track.
+
+**The outro appends and ripples nothing,** because it goes after everything. **A missing main
+track is created,** magnetic, so a kit can be applied to an empty composition instead of
+failing until the first import.
+
+**The wrong aspect is a warning, not a refusal.** SPEC 13 §8 asks for "fit with the canvas
+fill option and a warning": the clip is planned *and* a sentence names both sizes. The
+comparison needs probed media, so a caller with none gets no invented warning, and the test
+asserts both directions — a mismatched clip warns and still gets planned, a matching one and
+an unprobed one say nothing. A **template** intro has no media to check and is carried as a
+`compositionTemplateId`; the insert command refuses it rather than placing an empty clip,
+because building a composition from a template is a separate feature and a silent empty item
+would be the worst possible answer.
+
+**Mutations.** 10, all bite. One needed a better value rather than a better test: mutating the
+intro's start by one *frame* was detected, while the microsecond value I tried first was not —
+because a 30 fps quantize rounds 33 µs to zero, making it an equivalent mutant, not a survivor.
+That is worth recording: a mutation surviving is a question about whether the mutant is
+*observable*, not only about whether the test suite is good.
+
 **Not built yet, and deliberately not claimed:** the kit editor UI, `.cwbrand` zip packaging
-with assets, and the "from the current clip" capture. They are recorded in `docs/limitations.md`
-rather than half-wired into the app.
+with assets, the "from the current clip" capture, and building a composition from a template.
+They are recorded in `docs/limitations.md` rather than half-wired into the app.
 
 **Mutations.** 19 were run against the arc maths, the parser, the tokeniser and the wiring;
 all bite. Two survived the first pass and were resolved rather than left: a `largeArc` delta

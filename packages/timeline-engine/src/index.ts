@@ -119,6 +119,7 @@ export {
   applyBrandKit,
   assetScale,
   detachKitItems,
+  insertKitClip,
   reapplyBrandKit,
   removeKitItems,
   type AppliedKitItem,

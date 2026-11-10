@@ -7,13 +7,16 @@ import {
   type BrandKit,
 } from '@clipwright/brand-kits';
 import {
+  addItem,
   addTextItem,
   applyBrandKit,
   assetScale,
   createDefaultTimeline,
   detachKitItems,
+  insertKitClip,
   reapplyBrandKit,
   removeKitItems,
+  createMediaItem,
   type TimelineState,
 } from '../index.js';
 
@@ -461,5 +464,154 @@ describe('assetScale', () => {
     // rather than at NaN or at zero — both of which draw nothing and look like a missing logo.
     expect(assetScale({}, { width: 200, height: 100 })).toEqual({ scaleX: 1, scaleY: 1 });
     expect(assetScale({ widthPx: 0, heightPx: 0 }, { width: 200, height: 100 })).toEqual({ scaleX: 1, scaleY: 1 });
+  });
+});
+
+/**
+ * Intro and outro (SPEC 13 §8: "intro/outro inserted at start/end").
+ *
+ * The interesting claim is not that a clip appears — it is that everything else stays where
+ * the user put it *relative to the picture*. These are Insert-mode tests (SPEC 09 §13.2) that
+ * happen to be run by a kit.
+ */
+describe('insertKitClip', () => {
+  function withMainClips(): TimelineState {
+    const base = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+    const main = base.tracks.find((track) => track.role === 'main')!;
+    let state = base;
+    for (const [index, id] of ['v-1', 'v-2'].entries()) {
+      const item = createMediaItem({
+        id,
+        trackId: main.id,
+        label: id,
+        mediaId: `media-${id}`,
+        type: 'video',
+        startUs: index * 4_000_000,
+        durationUs: 4_000_000,
+        sourceDurationUs: 4_000_000,
+      });
+      const result = addItem(state, { item, fps: 30 });
+      if (!result.ok) throw new Error(result.message);
+      state = result.state;
+    }
+    // A caption under the first second, which must move with the picture.
+    const caption = addTextItem(state, { id: 'cap-1', text: 'Hello', startUs: 1_000_000, fps: 30 });
+    if (!caption.ok) throw new Error(caption.message);
+    return { ...caption.state, items: { ...caption.state.items, 'cap-1': { ...caption.state.items['cap-1']!, type: 'caption' } } };
+  }
+
+  const clip = { assetId: 'intro-asset', durationUs: 2_000_000 };
+  const insertIntro = (state: TimelineState, overrides = {}) =>
+    insertKitClip(state, {
+      kit: kit(),
+      kind: 'intro',
+      clip,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 8_000_000,
+      ...overrides,
+    });
+
+  it('puts the intro at the very start', () => {
+    const result = insertIntro(withMainClips());
+    if (!result.ok) throw new Error(result.message);
+    const intro = result.state.items[result.itemId!]!;
+    expect(intro.startUs).toBe(0);
+    expect(intro.durationUs).toBe(2_000_000);
+    expect(intro.mediaId).toBe('intro-asset');
+    expect(intro.aiProvenance).toMatchObject({ tool: 'brand-kit', kitId: 'kit-1' });
+  });
+
+  it('pushes the whole project right by the intro, on every unlocked track', () => {
+    /*
+      This is the claim that matters. A new clip at 0 that did not ripple would put the intro
+      *on top of* the first shot — a two-second clip covering two seconds of the user's video.
+      And a ripple that moved only the main track would slide every caption and title two
+      seconds earlier against the picture.
+    */
+    const before = withMainClips();
+    const result = insertIntro(before);
+    if (!result.ok) throw new Error(result.message);
+    const after = result.state;
+
+    expect(after.items['v-1']!.startUs).toBe(2_000_000);
+    expect(after.items['v-2']!.startUs).toBe(6_000_000);
+    expect(after.items['cap-1']!.startUs).toBe(3_000_000);
+  });
+
+  it('preserves the spacing between clips', () => {
+    // The point of a ripple is the *gap* staying: a four-second gap is still four seconds.
+    const result = insertIntro(withMainClips());
+    if (!result.ok) throw new Error(result.message);
+    const gap = result.state.items['v-2']!.startUs - (result.state.items['v-1']!.startUs + result.state.items['v-1']!.durationUs);
+    expect(gap).toBe(0);
+  });
+
+  it('does not move a locked track', () => {
+    const base = withMainClips();
+    const captionTrack = base.tracks.find((track) => track.id === base.items['cap-1']!.trackId)!;
+    const locked = {
+      ...base,
+      tracks: base.tracks.map((track) => (track.id === captionTrack.id ? { ...track, locked: true } : track)),
+    };
+    const result = insertIntro(locked);
+    if (!result.ok) throw new Error(result.message);
+    // The caption stays, even though that means it now sits under the intro. Skipping is the
+    // rule the other kit commands follow, and refusing would fail the whole application on
+    // any project with a locked track.
+    expect(result.state.items['cap-1']!.startUs).toBe(1_000_000);
+    // And the picture still moved, so the lock did not quietly cancel the operation.
+    expect(result.state.items['v-1']!.startUs).toBe(2_000_000);
+  });
+
+  it('appends the outro after the composition end', () => {
+    const result = insertKitClip(withMainClips(), {
+      kit: kit(),
+      kind: 'outro',
+      clip: { assetId: 'outro-asset', durationUs: 3_000_000 },
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 8_000_000,
+    });
+    if (!result.ok) throw new Error(result.message);
+    const outro = result.state.items[result.itemId!]!;
+    expect(outro.startUs).toBe(8_000_000);
+    expect(outro.durationUs).toBe(3_000_000);
+    // Nothing moved: an outro is after everything, so there is nothing to ripple.
+    expect(result.state.items['v-1']!.startUs).toBe(0);
+    expect(result.state.items['v-2']!.startUs).toBe(4_000_000);
+  });
+
+  it('creates a main track when the project has none', () => {
+    // A kit applied to an empty composition: refusing here would be a kit you cannot use
+    // until you have imported a clip.
+    const empty: TimelineState = { ...createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 }), tracks: [] };
+    const result = insertIntro(empty);
+    if (!result.ok) throw new Error(result.message);
+    const main = result.state.tracks.find((track) => track.role === 'main');
+    expect(main).toBeDefined();
+    // A main track's purpose is to stay closed up, so the one the kit makes is magnetic.
+    expect(main?.magnetic).toBe(true);
+    expect(result.state.items[result.itemId!]?.trackId).toBe(main?.id);
+  });
+
+  it('is one undo step that puts every clip back', () => {
+    // An apply that could be half-undone would leave the project with an intro inserted into
+    // a timeline that had already closed up around it.
+    const result = insertIntro(withMainClips());
+    if (!result.ok) throw new Error(result.message);
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.items['v-1']!.startUs).toBe(0);
+    expect(undone.items['cap-1']!.startUs).toBe(1_000_000);
+    expect(undone.items[result.itemId!]).toBeUndefined();
+  });
+
+  it('refuses rather than inserting an empty clip for a template', () => {
+    const result = insertIntro(withMainClips(), {
+      clip: { compositionTemplateId: 'tpl-1', durationUs: 2_000_000 },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('invalid');
   });
 });
