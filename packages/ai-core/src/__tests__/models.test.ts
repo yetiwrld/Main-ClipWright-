@@ -244,7 +244,14 @@ describe('catalogue cards', () => {
     const after = whisperCards({ dir, machine }).find((card) => card.id === 'small');
     expect(after?.status).toBe('corrupt');
 
-    fs.writeFileSync(path.join(dir, small.fileName), Buffer.alloc(small.expectedBytes));
+    /*
+      Sparse again: `small` is 488 MB and the previous line wrote all of it to assert `status` and
+      `progress`, both of which read `stat.size`. Together with the `.part` file below this one test
+      file used to write over a gigabyte per run.
+    */
+    const installedPath = path.join(dir, small.fileName);
+    fs.writeFileSync(installedPath, '');
+    fs.truncateSync(installedPath, small.expectedBytes);
     const complete = whisperCards({ dir, machine }).find((card) => card.id === 'small');
     expect(complete?.status).toBe('installed');
     expect(complete?.progress).toBe(100);
@@ -258,7 +265,18 @@ describe('catalogue cards', () => {
     const target = whisperCards({ dir, machine }).find((card) => card.id === 'medium');
     expect(target).toBeDefined();
     if (!target) return;
-    fs.writeFileSync(path.join(dir, `${target.fileName}.part`), Buffer.alloc(Math.round(target.expectedBytes / 2)));
+    /*
+      A sparse file, not a real half-download.
+
+      `Buffer.alloc(round(expectedBytes / 2))` for the `medium` model allocates and writes roughly
+      750 MB — enough that this test failed once on a loaded CI runner and enough that running it
+      locally leaves the temp directory busy on disk. Both writers of this file (`whisperCards`
+      reads `stat.size`) only care about the length, so the length is all that has to be real.
+      `truncate` sets it in constant time and allocates nothing.
+    */
+    const partPath = path.join(dir, `${target.fileName}.part`);
+    fs.writeFileSync(partPath, '');
+    fs.truncateSync(partPath, Math.round(target.expectedBytes / 2));
     const card = whisperCards({ dir, machine }).find((c) => c.id === 'medium');
     expect(card?.status).toBe('paused');
     expect(card?.progress).toBeGreaterThanOrEqual(49);

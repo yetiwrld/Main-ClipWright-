@@ -1941,3 +1941,28 @@ The general lesson is one this project keeps meeting from different angles: a na
 two files is a promise neither file can keep on its own. Where that promise matters — channel lists,
 settings keys, option names — it needs a test that reads both sides. Writing one after the fact is
 how you find out how many you had already broken: thirty-six.
+
+## 55. A test that wrote 1.2 GB per run, and failed on a loaded CI runner
+
+`packages/ai-core/src/__tests__/models.test.ts` had two tests that allocated real model-sized
+buffers:
+
+- `Buffer.alloc(small.expectedBytes)` — 488 MB, to assert a card reads `installed`;
+- `Buffer.alloc(round(medium.expectedBytes / 2))` — 767 MB, to assert a card reads `paused` at 50%.
+
+Together, over 1.2 GB of temp-file writes per run — and one of them failed on CI with a bare
+`STACK_TRACE_ERROR` while passing locally, which is what a disk-backed test looks like when the
+runner is busy.
+
+Both functions read `stat.size` **and nothing else**. The length is the whole claim; the bytes were
+never looked at. So the files are now created empty and `fs.truncateSync`ed to the required size,
+which sets the length in constant time and allocates nothing. Same three assertions, same three
+statuses, 0.9 s instead of however long it takes to write a gigabyte.
+
+This is a small thing with a large lesson attached, and it is the same one as the mutation runs
+that report `MISS`: **a test's cost is part of its correctness**, because a test that fails for
+reasons unrelated to the code teaches people to re-run it rather than read it. A flaky test is
+worse than a missing one — the missing one is an honest gap.
+
+`Buffer.alloc(1024)` in the neighbouring test is left alone: it is the corrupt-file case, and 1 KB
+is both cheap and deliberate.
