@@ -1270,3 +1270,40 @@ the same `mintKitId` the form uses, so there is one naming rule rather than two.
 import, and the panel's first draft put the button only above the cards — the same shape of bug as
 the shared editor dialog, and recorded for the same reason.
 
+## 43. A batch is planned whole before it writes, and the open clip keeps its own undo
+
+**The other clips are documents this window never loaded, and that decides everything.** Their
+lengths cannot be measured with `projectDurationUs`, because that function needs the whole
+document and the document is not here. So a duration is **projected** from the media each item
+names, and projected *long*: an intro's footer shifts everything after it, so an outro that lands
+slightly after the content is a small bug, while one on top of the first frame is a broken clip.
+The next editor re-plans with the real duration; this figure only has to place the item.
+
+**Only the ids this window can see are offered to the plan.** A foreign clip's payload names
+media that may not be in this window's library. Claiming an id is present because another project
+once had it would place a graphic the next editor cannot find — which is exactly what the plan's
+`report` exists to prevent, so the honest answer is to offer nothing and let it say so.
+
+**Nothing is written until every clip has been planned.** `applyKitToClips` does no I/O, so
+all-or-nothing is a property of its shape rather than a promise in a comment. A half-applied
+batch across five clips is the one outcome a user cannot unpick by hand. This is why the
+template-intro refusal has to abort: it is a real "I cannot do this" from the engine, and
+treating it as "nothing to do" would leave one clip without its intro while the batch reported
+success.
+
+**One application, two undo routes — and the split is the feature.** The open clip goes through
+`timeline.run`, so `Ctrl+Z` undoes it like any other edit. The other clips have no history here;
+theirs belongs to whichever editor opens them next. So the batch records every other clip's
+previous payload and offers "Undo batch". Putting the open clip in that record too would make one
+press undo half of one application, and the half that remained would look like a ghost edit.
+
+**A successful command that changed nothing is not an application.** `applyBrandKit` returns a
+new state object whether or not it edited anything; counting that as applied told every
+captionless clip it had been branded. The check is identity against the input state, not the
+command's `ok`.
+
+**"All clips" was a sentence, not a behaviour, for three slices.** The scope control existed and
+the button ignored it. That is worth recording as a pattern: a control that renders correctly and
+changes nothing is invisible to every test that checks rendering, and the fix was to make the
+control's *effect* the subject of a test — the id of the clip that got written.
+

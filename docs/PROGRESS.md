@@ -65,6 +65,11 @@ export path:
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
+**All clips** in the kit panel is now a real batch: every composition in the project is read,
+planned and written, all-or-nothing, as one undo step for the clip that is open and an **Undo
+batch** for the others — the split exists because their history lives in whichever editor opens
+them next, not in this window.
+
 Still open in Phase 5: the colour eyedropper, the voiceover recorder and the equaliser. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
 format, the placement maths and the application plan live in `packages/brand-kits` (36
 tests), and the commands that apply, reapply, remove, detach and insert an intro or

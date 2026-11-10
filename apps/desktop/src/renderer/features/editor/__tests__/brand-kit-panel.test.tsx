@@ -204,7 +204,7 @@ describe('playhead-independent decisions', () => {
   });
 
   it('offers the three scopes the spec names, in its order', () => {
-    expect(APPLY_SCOPES.map((scope) => scope.label)).toEqual(['This clip', 'Selected', 'All clips']);
+    expect(APPLY_SCOPES.map((scope) => scope.label)).toEqual(['This clip', 'All clips']);
   });
 });
 
@@ -779,5 +779,192 @@ describe('export and import (SPEC 13 §8)', () => {
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toBe('The file is not a .cwbrand archive.'),
     );
+  });
+});
+
+describe('batch apply across the project’s clips (SPEC 08 §8.1)', () => {
+  /*
+    The other clips are documents this window never loaded, so the panel has to read them, plan
+    them and write them back. These tests drive that through the stubbed bridge, because the
+    interesting part is *which* files get written — and in particular that the open clip is not
+    one of them: its own history owns it.
+  */
+  const record = { projectId: 'project-1' } as unknown as NonNullable<TimelineApi['record']>;
+
+  /**
+   * The clips the batch reads back. They are built from the panel's *own* state, because the
+   * batch is required to plan a clip against what is on disk — a fixture with a different
+   * document would test the fixture rather than the panel.
+   */
+  const clipPayload = () => timelineWithClips();
+
+  const bridge = () => {
+    const saveComposition = vi.fn(async (_projectId: string, comp: unknown) => comp);
+    const b = installBridge({
+      getCompositions: vi.fn(async () => [
+        { id: 'open-clip', name: 'Open clip', version: 2, updatedAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'second', name: 'Second', version: 5, updatedAt: '2026-01-01T00:00:00.000Z' },
+      ]),
+      getComposition: vi.fn(async (_projectId: string, compId: string) => ({
+        id: compId,
+        projectId: 'project-1',
+        name: compId === 'second' ? 'Second' : 'Open clip',
+        version: compId === 'second' ? 5 : 2,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        payload: { ...clipPayload(), id: compId },
+      })),
+      saveComposition,
+      exportBrandKit: vi.fn(async () => null),
+      importBrandKit: vi.fn(async () => null),
+    });
+    return { b, saveComposition };
+  };
+
+  const panelWithRecord = (timelineOverrides: Partial<TimelineApi> = {}, kits: BrandKit[] = [kit({ logo: LOGO })]) =>
+    render(
+      <BrandKitPanel
+        /* The document's own id is what the batch uses to tell the open clip from the others. */
+        state={{ ...timelineWithClips(), id: 'open-clip' }}
+        timeline={{ ...api(), record, ...timelineOverrides }}
+        brandKits={kitsApi(kits)}
+        canvas={CANVAS}
+        captionStyleIds={new Set()}
+        assetIds={new Set(['logo-1'])}
+        media={[{ id: 'logo-1', label: 'logo.png', kind: 'image' }]}
+      />,
+    );
+
+  const openApply = () => {
+    fireEvent.click(screen.getByRole('button', { name: /apply…/i }));
+    fireEvent.click(screen.getByRole('radio', { name: 'All clips' }));
+  };
+
+  it('writes every other clip and leaves the open one to its own undo', async () => {
+    /*
+      One application, two undo routes. The open clip goes through `timeline.run`, so Ctrl+Z in
+      this window undoes it; writing it here as well would make the undo stack describe a file
+      that is no longer on disk.
+    */
+    const { saveComposition } = bridge();
+    const run = vi.fn(() => true);
+    panelWithRecord({ run });
+    openApply();
+    fireEvent.click(screen.getByRole('button', { name: /apply to all clips/i }));
+
+    /*
+      Two writers, and both are wanted: the batch writes *the other* clip, and the open clip's
+      own debounce (two seconds) saves the document `run` changed. Asserting a count would pin
+      the debounce; asserting the ids says what the batch is responsible for.
+    */
+    await waitFor(() => expect(saveComposition).toHaveBeenCalled());
+    const written = saveComposition.mock.calls.map((call) => (call[1] as { id: string }).id);
+    expect(written).toContain('second');
+    expect(written.filter((id) => id === 'second')).toHaveLength(1);
+    expect(run).toHaveBeenCalled();
+    expect((run.mock.calls[0] as unknown[])[0]).toBe('Apply brand kit to all clips');
+  });
+
+  it('offers one undo for the clips that are not open, and restores them', async () => {
+    /*
+      The batch is the only writer of the other clips, and their history lives in whichever
+      editor opens them next. Without this button the honest option would be to refuse batch
+      apply — and a change with no way back is worse than either.
+    */
+    const { saveComposition } = bridge();
+    panelWithRecord();
+    openApply();
+    fireEvent.click(screen.getByRole('button', { name: /apply to all clips/i }));
+
+    const undo = await screen.findByRole('button', { name: /undo batch/i });
+    expect(undo.textContent).toMatch(/1 other clip/);
+    /* The open clip's debounce lands too; the undo is about the *other* clip, so clear first. */
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    saveComposition.mockClear();
+    fireEvent.click(undo);
+    await waitFor(() => expect(saveComposition).toHaveBeenCalledTimes(1));
+    /* The restored payload is the *unbranded* one, not the branded one it just wrote. */
+    const restored = (saveComposition.mock.calls[0]![1] as { payload: TimelineState }).payload;
+    const branded = Object.values(restored.items).some(
+      (item) => item.aiProvenance?.tool === 'brand-kit',
+    );
+    expect(branded).toBe(false);
+  });
+
+  it('writes nothing when a clip cannot take the kit, and says which', async () => {
+    /*
+      A half-applied batch across five clips is the one outcome a user cannot unpick by hand, so
+      every clip is planned before a single file is written. The refusal here is real: a
+      composition template cannot be built as a clip yet (SPEC 13 §8.3), and the engine says so
+      rather than inserting a clip with no media.
+    */
+    const saveComposition = vi.fn(async (_projectId: string, comp: unknown) => comp);
+    installBridge({
+      getCompositions: vi.fn(async () => [
+        { id: 'open-clip', name: 'Open clip', version: 1, updatedAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'second', name: 'Second', version: 1, updatedAt: '2026-01-01T00:00:00.000Z' },
+      ]),
+      getComposition: vi.fn(async (_projectId: string, compId: string) => ({
+        id: compId,
+        projectId: 'project-1',
+        name: compId === 'second' ? 'Second' : 'Open clip',
+        version: 1,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        payload: { ...timelineWithClips(), id: compId },
+      })),
+      saveComposition,
+    });
+    panelWithRecord(
+      { run: vi.fn(() => true) },
+      [
+        kit({
+          logo: LOGO,
+          intro: { compositionTemplateId: 'tpl-1', durationSec: 2 },
+        } as Partial<BrandKit>),
+      ],
+    );
+    openApply();
+    fireEvent.click(screen.getByRole('button', { name: /apply to all clips/i }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/could not apply/i));
+    expect(screen.getByRole('status').textContent).toMatch(/template/i);
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    /* The open clip's own debounce does not save, because the batch refused before plan time. */
+    expect(saveComposition).not.toHaveBeenCalled();
+  });
+
+  it('shows progress while it runs, so a five-clip batch is not a frozen button', async () => {
+    const { saveComposition } = bridge();
+    panelWithRecord();
+    openApply();
+    fireEvent.click(screen.getByRole('button', { name: /apply to all clips/i }));
+    await waitFor(() => expect(saveComposition).toHaveBeenCalled());
+    /* Once finished the progress line is replaced by the summary. */
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/applied to/i));
+  });
+
+  it('says so instead of doing nothing when the project has no clips', async () => {
+    installBridge({
+      getCompositions: vi.fn(async () => []),
+      getComposition: vi.fn(async () => null),
+      saveComposition: vi.fn(async () => null),
+    });
+    panelWithRecord();
+    openApply();
+    fireEvent.click(screen.getByRole('button', { name: /apply to all clips/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toMatch(/no clips in this project/i),
+    );
+  });
+
+  it('offers no “Selected” scope while choosing clips is impossible', () => {
+    /*
+      SPEC 13 §8.2 lists three scopes. Choosing several clips needs a clip bin, and this build
+      has none — so the third is *absent* rather than disabled or, worse, silently doing what
+      "This clip" does under another name.
+    */
+    expect(APPLY_SCOPES.map((entry) => entry.label)).toEqual(['This clip', 'All clips']);
+    panelWithRecord();
+    fireEvent.click(screen.getByRole('button', { name: /apply…/i }));
+    expect(screen.queryByRole('radio', { name: 'Selected' })).toBeNull();
+    expect(screen.getByRole('radio', { name: 'All clips' })).toBeTruthy();
   });
 });

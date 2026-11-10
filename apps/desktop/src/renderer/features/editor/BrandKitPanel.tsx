@@ -20,7 +20,7 @@
  * not need a DOM to check the parts that matter.
  */
 import React, { useMemo, useState } from 'react';
-import { Download, Layers, Pencil, Plus, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Download, Layers, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
 import { Button, Card, Chip, Dialog, EmptyState, SegmentedControl, Toggle } from '@clipwright/design-system';
 import {
   ALL_KIT_PARTS,
@@ -42,7 +42,15 @@ import {
   removeKitItems,
   type TimelineState,
 } from '@clipwright/timeline-engine';
+import { CompositionPayloadSchema } from '@clipwright/project-schema/schemas';
 import { api, describeError, isDesktop } from '../../api.js';
+import {
+  applyKitToClips,
+  describeBatchOutcome,
+  revertBatch,
+  type BatchApplyResult,
+  type BatchClip,
+} from './kit-batch.js';
 import type { TimelineApi } from './use-timeline.js';
 import type { BrandKitsApi } from './use-brand-kits.js';
 import { BrandKitEditor, type EditorMediaOption } from './BrandKitEditor.js';
@@ -51,9 +59,17 @@ import { mintKitId } from './brand-kit-draft.js';
 /** What the apply button covers: the spec's "This clip · Selected clips · All clips". */
 export type ApplyScope = 'this-clip' | 'selected-clips' | 'all-clips';
 
+
+/**
+ * The scopes the panel offers.
+ *
+ * SPEC 13 §8.2 lists three. **"Selected clips" is absent**, not disabled: choosing several clips
+ * needs the clip bin, which this build does not have, and a control that looks like it widens
+ * the scope while applying to the same single clip is exactly the kind of quiet lie the rest of
+ * this panel refuses to tell. It returns when there is something to select them in.
+ */
 export const APPLY_SCOPES: Array<{ id: ApplyScope; label: string }> = [
   { id: 'this-clip', label: 'This clip' },
-  { id: 'selected-clips', label: 'Selected' },
   { id: 'all-clips', label: 'All clips' },
 ];
 
@@ -334,6 +350,18 @@ export function BrandKitPanel({
   /** The last export/import result, shown until the next action. */
   const [notice, setNotice] = useState('');
   /*
+    A batch's progress and its undo offer. `previous` is held here rather than in the result's
+    own state because "Undo batch" has to survive the notice being replaced: the offer is the
+    only way back for the clips that are not open in this window.
+  */
+  const [batch, setBatch] = useState<{
+    busy: boolean;
+    done: number;
+    total: number;
+    name: string;
+    result: BatchApplyResult | null;
+  }>({ busy: false, done: 0, total: 0, name: '', result: null });
+  /*
     Kits are shown a page at a time because a project can accumulate dozens, and a left panel
     with forty cards in it is worse than one with a button. The count grows; nothing is hidden
     permanently.
@@ -366,6 +394,145 @@ export function BrandKitPanel({
     const label = reapplying ? 'Reapply brand kit' : 'Apply brand kit';
     timeline.run(label, command);
     setApplying(null);
+  };
+
+  /*
+    Batch apply (SPEC 08 §8.1, SPEC 13 §8.2 "All clips"). The other clips are separate documents
+    this window never loaded, so they are read, planned and written here — and every one of them
+    is checked before a single file is touched.
+  */
+  const runBatch = async (kit: BrandKit) => {
+    if (!isDesktop()) return;
+    const projectId = timeline.record?.projectId;
+    if (!projectId) return;
+
+    setBatch({ busy: true, done: 0, total: 0, name: '', result: null });
+    setApplying(null);
+    try {
+      const listed = await api.getCompositions(projectId);
+      /*
+        Every clip is read back, the open one included, rather than reusing `state`: the batch
+        has to plan against the document as it is on disk — a half-typed edit in `state` would
+        otherwise be planned twice and written once.
+      */
+      const clips: BatchClip[] = [];
+      for (const summary of listed) {
+        const saved = await api.getComposition(projectId, summary.id);
+        if (!saved) continue;
+        clips.push({
+          record: {
+            id: summary.id,
+            name: summary.name,
+            version: summary.version,
+            updatedAt: summary.updatedAt,
+          },
+          payload: CompositionPayloadSchema.parse(saved.payload) as TimelineState,
+        });
+      }
+      if (clips.length === 0) {
+        setBatch({ busy: false, done: 0, total: 0, name: '', result: null });
+        setNotice('There are no clips in this project yet.');
+        return;
+      }
+
+      const result = applyKitToClips({
+        kit,
+        parts,
+        clips,
+        captionStyleIds,
+        assetIds,
+        readKind: (assetId) => media.find((entry) => entry.id === assetId)?.kind,
+        /*
+          The open clip is identified by the id this editor was *given*, with the document's own
+          id as the fallback. They are the same document — `use-timeline` loads it by `compId`
+          and the payload carries that id — but a mismatch would silently make the open clip one
+          of the "others", which is the one way the undo split can go wrong without anything
+          looking broken.
+        */
+        currentClipId: timeline.record?.id ?? state.id,
+        onProgress: (done, total, name) => setBatch({ busy: true, done, total, name, result: null }),
+      });
+
+      if (!result.ok) {
+        setBatch({ busy: false, done: 0, total: 0, name: '', result });
+        setNotice(describeBatchOutcome(result));
+        return;
+      }
+
+      /*
+        The open clip goes through the editor's own history, so it is one undo step there; the
+        rest are written directly and recorded in `previous`, which is what "Undo batch" restores.
+        One application, two undo routes — the split is the whole difficulty of batch apply and
+        is why the module returns the two separately rather than a flat list.
+      */
+      if (result.changed.some((entry) => entry.id === state.id)) {
+        const reapplying = kitFootprint(state, kit.id).count > 0;
+        /*
+          Planned against the *live* state, not the copy just read from disk. `timeline.run`
+          applies the command to the document in memory, and this window may have moved on since
+          the file was read — a clip placed a moment ago would not be here, and the kit's intro
+          would be planned for a composition that no longer exists.
+        */
+        timeline.run(reapplying ? 'Reapply brand kit to all clips' : 'Apply brand kit to all clips', (current) =>
+          applyKitCommand(kit, parts, {
+            canvas,
+            fps: timeline.fps,
+            captionStyleIds,
+            assetIds,
+            reapplying,
+          })(current),
+        );
+      }
+      for (const entry of result.changed) {
+        if (entry.id === state.id) continue;
+        const saved = clips.find((clip) => clip.record.id === entry.id);
+        if (!saved) continue;
+        await api.saveComposition(projectId, {
+          ...saved.record,
+          version: saved.record.version + 1,
+          payload: entry.payload,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      setBatch({ busy: false, done: result.changed.length, total: clips.length, name: '', result });
+      setNotice(describeBatchOutcome(result));
+    } catch (err) {
+      setBatch({ busy: false, done: 0, total: 0, name: '', result: null });
+      setNotice(describeError(err));
+    }
+  };
+
+  /*
+    Put the clips that are not open back the way they were. The open clip is *not* restored here:
+    its own Ctrl+Z undoes it, and doing both would make one press undo the batch and the next
+    press redo it.
+
+    Versions are re-read rather than remembered, because the batch's record is a snapshot and
+    anything the user did in this window since (a captions edit, say) has moved the version on —
+    writing a stale number would report a version that does not describe the file.
+  */
+  const undoBatch = async () => {
+    const projectId = timeline.record?.projectId;
+    const result = batch.result;
+    if (!isDesktop() || !projectId || !result) return;
+    try {
+      setBatch({ ...batch, busy: true });
+      for (const entry of revertBatch(result)) {
+        const saved = await api.getComposition(projectId, entry.id);
+        if (!saved) continue;
+        await api.saveComposition(projectId, {
+          ...saved,
+          version: (saved.version ?? 1) + 1,
+          payload: entry.payload,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      setBatch({ busy: false, done: 0, total: 0, name: '', result: null });
+      setNotice('The other clips were put back the way they were.');
+    } catch (err) {
+      setBatch({ ...batch, busy: false });
+      setNotice(describeError(err));
+    }
   };
 
   if (brandKits.loading) {
@@ -588,24 +755,39 @@ export function BrandKitPanel({
             <Button
               size={28}
               variant="secondary"
-              onClick={() => runApply(applying)}
-              disabled={!canApply(applying, state, parts, canvas, captionStyleIds, assetIds)}
+              onClick={() => (scope === 'all-clips' ? void runBatch(applying) : runApply(applying))}
+              disabled={
+                batch.busy || !canApply(applying, state, parts, canvas, captionStyleIds, assetIds)
+              }
             >
-              <Wand2 size={12} /> Apply
+              <Wand2 size={12} /> {scope === 'all-clips' ? 'Apply to all clips' : 'Apply'}
             </Button>
             <Button size={28} variant="ghost" onClick={() => setApplying(null)}>
               Cancel
             </Button>
           </div>
+          {batch.busy && (
+            <p role="status" style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+              Applying to {batch.done} of {batch.total}
+              {batch.name ? ` — ${batch.name}` : '…'}
+            </p>
+          )}
           <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
             {scope === 'all-clips'
-              ? 'All clips means this composition: a kit is applied to the clip you are editing, and the timeline is where the other clips live.'
+              ? 'Every clip in this project gets the kit. Each one is checked before anything is written, and you can undo the batch afterwards.'
               : 'Applied items are ordinary timeline items — they stay if you delete the kit.'}
           </p>
         </Card>
       ) : null}
 
       {noticeLine}
+
+      {batch.result?.ok && batch.result.previous.length > 0 && (
+        <Button size={28} variant="ghost" onClick={() => void undoBatch()} aria-label="Undo batch">
+          <RotateCcw size={12} /> Undo batch on {batch.result.previous.length}{' '}
+          {batch.result.previous.length === 1 ? 'other clip' : 'other clips'}
+        </Button>
+      )}
 
       {visible.map((entry) => (
         <KitCard

@@ -485,11 +485,14 @@ context menus, in-editor import, the fill lock).
     has no field for them, and a `custom` logo placement becomes the nearest corner when edited,
     because the form has four corners and no way to express a dragged point. The colour picker
     is the shared `ColourPicker` — *recent colours* and *pick from logo* (SPEC 13 §8.2) are not
-    built, and neither is the batch apply across several clips (the panel applies to the
-    composition being edited). A kit's **fonts** are resolved against what the machine has —
-    a missing family substitutes by *character*, so a serif falls back to a serif, and the
-    sentence naming both goes into the plan's report (SPEC 11 §10.2) — but the kit editor has no
-    font controls yet, so a kit's fonts arrive only from a capture or a `.cwbrand` file.
+    built. **All clips** is real: every composition in the project is read, planned and
+    written, all-or-nothing, with a progress line and an **Undo batch** for the clips that are
+    not the one open; **Selected clips** is *absent* rather than disabled, because choosing
+    clips needs a bin this build does not have. A kit's **fonts** are resolved against what the
+    machine has — a missing family substitutes by *character*, so a serif falls back to a serif,
+    and the sentence naming both goes into the plan's report (SPEC 11 §10.2) — but the kit
+    editor has no font controls yet, so a kit's fonts arrive only from a capture or a
+    `.cwbrand` file.
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on
