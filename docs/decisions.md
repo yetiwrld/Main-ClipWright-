@@ -1349,3 +1349,44 @@ button inside it; without `stopPropagation` one click would clear the light *and
 That is the second time in this project a nested control has needed saying out loud, which is
 worth recording as a pattern rather than an isolated fix.
 
+## 45. "Where supported" means the control is absent, and Esc is never an error
+
+**The eyedropper is a Chromium API and the picker is shared.** `EyeDropper` exists in Electron —
+the app's shipping renderer — and nowhere else. So the picker asks the environment and omits the
+button where the answer is no, rather than drawing it disabled: a disabled control is a promise
+the feature works somewhere, and per SPEC 13's rule about teasers the same reasoning applies to a
+control that can *never* work on that surface.
+
+**Four outcomes, three of them silent.** `picked` sets the colour. `unsupported` says nothing,
+because no button was drawn. `cancelled` — Esc — says **nothing at all**, because a red message on
+every Esc trains a user to distrust a control that is working exactly as asked. Only `failed` gets
+a sentence, and it is the API's own: a blocked screen capture is something the user can act on.
+
+**Both abort shapes are checked.** Chromium has reported the Esc cancellation as `AbortError` and,
+in some builds, only through a message. A cancellation that surfaced as a failure would be a bug
+nobody could reproduce on demand — it depends on remembering exactly what the cursor was over.
+
+**A non-colour result is a failure, not a cancellation.** The user did pick something; telling
+them nothing happened sends them back to the same spot.
+
+**The hex box owns a draft, because its caller validates.** A caption style's schema refuses a
+partial hex, so every keystroke on the way to `#FF7A00` is rejected upstream. A box that rendered
+from `value` would erase each character as it was typed. The draft is the control's, and it
+re-syncs when `value` changes from elsewhere so a swatch or a pick still appears in the text.
+
+**Recency is ordering, not membership.** Re-picking a colour moves it to the front rather than
+adding a duplicate — a duplicate would push genuinely older colours out first and leave the strip
+shorter than its own limit for no visible reason. And nothing half-typed enters, because the field
+commits per keystroke and six slots would otherwise be mostly `#F`, `#FF`, `#FF7`.
+
+**The style editor had its own copy of the colour row.** That duplication is *why* it was the one
+screen apologising for having no eyedropper: the shared picker existed and this screen did not
+use it. Two implementations of one control is the same failure shape as two implementations of a
+volume envelope, and the fix is the same one — delete the second.
+
+**A test file that ran nowhere.** The root vitest config collected `packages/**/*.test.ts` but
+`apps/**/*.test.tsx`, so a React test in a *package* was never run and the suite still reported
+green. The design system owns components, so this was a hole rather than an accident. Adding the
+missing pattern immediately failed two existing style-editor tests, which is the argument for the
+pattern: the hole had been hiding a label rename the shared control introduced.
+

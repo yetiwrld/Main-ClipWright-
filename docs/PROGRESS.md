@@ -75,8 +75,12 @@ opens: BS.1770 K-weighting over a 400 ms gate, averaged in energy rather than de
 against a target it names, and honest about a gate that has not filled. Per-track meters still
 need a node per track, which is the same missing graph as pan.
 
-Still open in Phase 5: the colour eyedropper, the voiceover recorder, the equaliser, and the full
-Web Audio graph. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
+The **colour eyedropper** (SPEC 01, §11 §8.2) is in the shared `ColourPicker`, together with
+recent colours: it is absent rather than disabled where Chromium's API is missing, Esc is silent,
+and the caption style editor — which had its own private copy of the colour row, and was
+therefore the screen apologising for the missing eyedropper — now uses the shared control.
+
+Still open in Phase 5: the voiceover recorder, the equaliser, and the full Web Audio graph. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
 format, the placement maths and the application plan live in `packages/brand-kits` (36
 tests), and the commands that apply, reapply, remove, detach and insert an intro or
 outro live in `packages/timeline-engine` (26 tests). An intro is an *insert*, not a

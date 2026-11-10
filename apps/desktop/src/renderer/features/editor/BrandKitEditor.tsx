@@ -15,7 +15,7 @@
  *   to look at.
  */
 import React, { useMemo, useState } from 'react';
-import { Button, ColourPicker, Dialog, Input, Select, Toggle } from '@clipwright/design-system';
+import { Button, ColourPicker, Dialog, Input, Select, Toggle, addRecentColour } from '@clipwright/design-system';
 import {
   BRAND_KIT_MAX_CUSTOM_COLOURS,
   DEFAULT_KIT_COLOURS,
@@ -112,6 +112,12 @@ export function BrandKitEditor({
     initial ? draftFromKit(initial) : emptyDraft(mintKitId('new-kit', takenIds)),
   );
   const [problems, setProblems] = useState<DraftProblem[]>([]);
+  /*
+    One recents list for all six colour fields. A kit is a set of colours chosen together — set
+    the primary, then reach for it again for the custom entry — which is exactly the case a
+    per-field list would make tedious. Session-scoped, as in the caption style editor.
+  */
+  const [recents, setRecents] = useState<readonly string[]>([]);
   const [captureNotes, setCaptureNotes] = useState<string[]>([]);
 
   const images = useMemo(() => media.filter((entry) => entry.kind === 'image'), [media]);
@@ -233,6 +239,8 @@ export function BrandKitEditor({
                 value={draft.colors[key]}
                 onChange={(hex) => update({ colors: { ...draft.colors, [key]: hex } })}
                 ariaLabel={`${key} colour`}
+                recents={recents}
+                onCommit={(hex) => setRecents((current) => addRecentColour(current, hex))}
               />
             </Field>
           ))}
@@ -266,6 +274,8 @@ export function BrandKitEditor({
             <ColourPicker
               value={entry.value}
               ariaLabel={`Extra colour ${index + 1}`}
+              recents={recents}
+              onCommit={(hex) => setRecents((current) => addRecentColour(current, hex))}
               onChange={(hex) => {
                 const custom = draft.colors.custom.map((item, at) =>
                   at === index ? { ...item, value: hex } : item,

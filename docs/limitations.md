@@ -488,8 +488,9 @@ context menus, in-editor import, the fill lock).
     rest of the kit's form. Text and shape items cannot be captured, because the kit's schema
     has no field for them, and a `custom` logo placement becomes the nearest corner when edited,
     because the form has four corners and no way to express a dragged point. The colour picker
-    is the shared `ColourPicker` — *recent colours* and *pick from logo* (SPEC 13 §8.2) are not
-    built. **All clips** is real: every composition in the project is read, planned and
+    is the shared `ColourPicker`, which now carries the **eyedropper** (SPEC 01, SPEC 11 §8.2)
+    and **recent colours**; *pick from logo* (SPEC 13 §8.2's k-means sampling) is not built, and
+    the eyedropper is absent rather than disabled where the Chromium API does not exist. **All clips** is real: every composition in the project is read, planned and
     written, all-or-nothing, with a progress line and an **Undo batch** for the clips that are
     not the one open; **Selected clips** is *absent* rather than disabled, because choosing
     clips needs a bin this build does not have. A kit's **fonts** are resolved against what the

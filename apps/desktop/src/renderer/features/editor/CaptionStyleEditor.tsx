@@ -14,7 +14,16 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Palette, RotateCcw } from 'lucide-react';
-import { Button, Dialog, Input, SegmentedControl, Slider, Toggle } from '@clipwright/design-system';
+import {
+  Button,
+  ColourPicker,
+  Dialog,
+  Input,
+  SegmentedControl,
+  Slider,
+  Toggle,
+  addRecentColour,
+} from '@clipwright/design-system';
 import {
   BUILT_IN_STYLES,
   DEFAULT_STYLE_ID,
@@ -211,6 +220,14 @@ export function CaptionStyleEditor({
   const [draft, setDraft] = useState<StyleDraft>(() => draftFromStyle(base));
   const [name, setName] = useState(base.name);
   const [editing, setEditing] = useState(false);
+  /*
+    Recent colours for **this dialog session**, shared by the three colour rows: a user who picks
+    a fill then wants an outline a shade darker can click back to the fill instead of retyping it.
+    Deliberately not persisted — SPEC 01 asks for "recent colours" and says nothing about where
+    they live, and a list that survived a restart would be a preference the user never set.
+  */
+  const [recents, setRecents] = useState<readonly string[]>([]);
+  const onCommitColour = (hex: string) => setRecents((current) => addRecentColour(current, hex));
 
   // Re-seed when the dialog opens on a different style, so a second open does not
   // show the previous style's values.
@@ -355,6 +372,8 @@ export function CaptionStyleEditor({
             value={draft.fillColor}
             onChange={(value) => patch({ fillColor: value })}
             ariaLabel="Fill colour"
+            recents={recents}
+            onCommit={onCommitColour}
           />
           <Labelled label={`Fill opacity — ${Math.round(draft.fillOpacity * 100)}%`}>
             <Slider
@@ -379,6 +398,8 @@ export function CaptionStyleEditor({
                 value={draft.outlineColor}
                 onChange={(value) => patch({ outlineColor: value })}
                 ariaLabel="Outline colour"
+                recents={recents}
+                onCommit={onCommitColour}
               />
               <Labelled label={`Outline width — ${draft.outlineWidth.toFixed(0)}% of the font`}>
                 <Slider
@@ -430,6 +451,8 @@ export function CaptionStyleEditor({
                 value={draft.highlightColor}
                 onChange={(value) => patch({ highlightColor: value })}
                 ariaLabel="Highlight colour"
+                recents={recents}
+                onCommit={onCommitColour}
               />
               <Labelled label={`Highlight scale — ${Math.round(draft.highlightScale * 100)}%`}>
                 <Slider
@@ -531,8 +554,8 @@ export function CaptionStyleEditor({
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <Palette size={14} />
           <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-            Colours are hex values. There is no eyedropper yet — pick one from the canvas by
-            eye.
+            Colours are hex values, or picked from anywhere on screen with the eyedropper beside
+            each swatch.
           </span>
           <span style={{ flex: 1 }} />
           <Button
@@ -596,37 +619,47 @@ function Labelled({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
+/**
+ * A labelled colour field.
+ *
+ * This used to be its own input pair, duplicating the shared `ColourPicker` — which is why the
+ * style editor was the screen that said "there is no eyedropper yet". It is now the shared
+ * control, so the eyedropper (SPEC 01, §11 §8.2) and the recent colours arrive here with it.
+ *
+ * The one rule kept from the old version is at the call site: a caption style's colour goes into
+ * the project's schema, and that schema refuses a partial hex — so `onChange` is only called with
+ * a complete colour, and a half-typed `#FF` leaves the style alone instead of failing its save.
+ */
 function ColourRow({
   label,
   value,
   onChange,
   ariaLabel,
+  recents,
+  onCommit,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   ariaLabel: string;
+  recents: readonly string[];
+  onCommit: (hex: string) => void;
 }) {
+  /*
+    The draft is the picker's own; this wrapper only decides what counts as a colour. `ColourRow`
+    keeps its `minWidth` label so the three colour rows line up with the sliders beside them.
+  */
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
       <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', minWidth: 96 }}>{label}</span>
-      <input
-        type="color"
-        aria-label={ariaLabel}
+      <ColourPicker
         value={value}
-        onChange={(event) => onChange(event.target.value.toUpperCase())}
-        style={{ width: 36, height: 28, border: '1px solid var(--line-default)', borderRadius: 'var(--radius-sm)', background: 'transparent' }}
-      />
-      <Input
-        value={value}
-        aria-label={`${ariaLabel} hex value`}
-        onChange={(event) => {
-          const next = event.target.value.trim();
-          // Only commit a complete colour: a half-typed `#FF` would be refused by
-          // the schema and the whole style would fail to save.
+        ariaLabel={ariaLabel}
+        recents={recents}
+        onCommit={onCommit}
+        onChange={(next) => {
           if (/^#[0-9A-Fa-f]{6}$/.test(next)) onChange(next.toUpperCase());
         }}
-        style={{ fontFamily: 'var(--font-mono)', maxWidth: 110 }}
       />
     </div>
   );

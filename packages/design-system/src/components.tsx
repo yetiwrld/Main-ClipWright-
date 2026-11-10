@@ -1,3 +1,5 @@
+import { Pipette } from 'lucide-react';
+import { canPickFromScreen, pickColour } from './eyedropper.js';
 import React, {
   useState,
   useRef,
@@ -1923,54 +1925,180 @@ export interface ColourPickerProps {
   value: string;
   onChange: (hex: string) => void;
   ariaLabel?: string;
+  /**
+   * The recent colours to show, newest first. Omit for a picker with no memory of its own —
+   * the Brand Kit's colour fields share one list (below), so a colour picked for the primary
+   * swatch is one click away for the accent.
+   */
+  recents?: readonly string[];
+  /**
+   * Reported after every committed colour, valid or not, so a caller can keep the shared list.
+   * Called with the raw input: the caller decides when it is a complete colour, through
+   * `addRecentColour`, which ignores anything half-typed.
+   */
+  onCommit?: (hex: string) => void;
 }
 
+/**
+ * A colour field: the platform's colour input, a hex box, preset swatches, *recent* colours and —
+ * in a Chromium build, which the desktop app is — the **eyedropper** (SPEC 01 §ColourPicker).
+ *
+ * The eyedropper is *absent* where the API does not exist rather than drawn disabled. A disabled
+ * button is a promise that the control works somewhere; on a surface with no `EyeDropper` it
+ * never will, and SPEC 13's rule about not showing unfinished tools as teasers applies to a
+ * control that can never work as much as to one that is half-wired.
+ */
 export const ColourPicker: React.FC<ColourPickerProps> = ({
   value,
   onChange,
   ariaLabel = 'Colour hex value',
+  recents = [],
+  onCommit,
 }) => {
+  const [notice, setNotice] = React.useState('');
+  const canPick = canPickFromScreen();
+  /*
+    The hex box keeps its own text while it is being typed in. Without a draft the box shows
+    `value`, and every keystroke that the caller refuses — a half-typed `#FF`, which a style
+    schema will not accept — would be erased under the cursor. The draft is re-synced whenever
+    `value` changes from outside, so a pick or a swatch still updates the text.
+  */
+  const [draft, setDraft] = React.useState(value);
+  React.useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const commit = (hex: string) => {
+    onChange(hex);
+    onCommit?.(hex);
+  };
+
+  /*
+    The pick runs on a click, which is a user gesture — the API requires one and throws without
+    it. Cancelling (Esc) says nothing at all, which is what the user asked for; only a genuine
+    failure gets a sentence.
+  */
+  const runEyedropper = async () => {
+    const result = await pickColour();
+    if (result.status === 'picked') {
+      setNotice('');
+      commit(result.hex);
+      return;
+    }
+    if (result.status === 'cancelled' || result.status === 'unsupported') {
+      setNotice('');
+      return;
+    }
+    setNotice(result.message);
+  };
+
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-      <input
-        type="color"
-        aria-label={ariaLabel}
-        value={value.startsWith('#') && value.length === 7 ? value : undefined}
-        onChange={(e) => onChange(e.target.value.toUpperCase())}
-        style={{
-          width: '32px',
-          height: '32px',
-          padding: 0,
-          border: '1px solid var(--line-default)',
-          borderRadius: 'var(--radius-sm)',
-          background: 'var(--surface-card)',
-          cursor: 'pointer',
-        }}
-      />
-      <Input
-        aria-label={`${ariaLabel} text`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ width: '88px', fontFamily: 'var(--font-mono)' }}
-      />
-      <div style={{ display: 'inline-flex', gap: 'var(--space-1)' }}>
-        {DEFAULT_SWATCHES.map((sw, i) => (
+    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <input
+          type="color"
+          aria-label={ariaLabel}
+          value={value.startsWith('#') && value.length === 7 ? value : undefined}
+          onChange={(e) => commit(e.target.value.toUpperCase())}
+          style={{
+            width: '32px',
+            height: '32px',
+            padding: 0,
+            border: '1px solid var(--line-default)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--surface-card)',
+            cursor: 'pointer',
+          }}
+        />
+        <Input
+          /*
+            "hex value", not "text". The label is what a screen reader announces and what the
+            style editor's own tests had always used; a box called "Fill colour text" says nothing
+            about what belongs in it, and two names for one control across two screens is how a
+            component ends up being reached differently by automation in each.
+          */
+          aria-label={`${ariaLabel} hex value`}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            /*
+              Every keystroke is reported — a caller that wants live updates gets them — but a
+              caller that validates (the caption style editor does, because its schema refuses a
+              partial hex and the whole style would then fail to save) simply ignores anything
+              incomplete. `addRecentColour` does the same, so half-typed prefixes never reach the
+              recents strip.
+            */
+            commit(e.target.value);
+          }}
+          style={{ width: '88px', fontFamily: 'var(--font-mono)' }}
+        />
+        {canPick && (
           <button
-            key={i}
             type="button"
-            aria-label={`Select preset swatch ${i + 1}`}
-            onClick={() => onChange(sw)}
+            aria-label={`Pick ${ariaLabel.toLowerCase()} from the screen`}
+            title="Pick a colour from anywhere on screen"
+            onClick={() => void runEyedropper()}
             style={{
-              width: '18px',
-              height: '18px',
-              borderRadius: 'var(--radius-xs)',
+              width: '28px',
+              height: '28px',
+              display: 'grid',
+              placeItems: 'center',
+              padding: 0,
+              background: 'var(--surface-card)',
               border: '1px solid var(--line-default)',
-              background: sw,
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-secondary)',
               cursor: 'pointer',
             }}
-          />
-        ))}
+          >
+            <Pipette size={14} />
+          </button>
+        )}
+        <div style={{ display: 'inline-flex', gap: 'var(--space-1)' }}>
+          {DEFAULT_SWATCHES.map((sw, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Select preset swatch ${i + 1}`}
+              onClick={() => commit(sw)}
+              style={{
+                width: '18px',
+                height: '18px',
+                borderRadius: 'var(--radius-xs)',
+                border: '1px solid var(--line-default)',
+                background: sw,
+                cursor: 'pointer',
+              }}
+            />
+          ))}
+        </div>
       </div>
+      {recents.length > 0 && (
+        <div style={{ display: 'inline-flex', gap: 'var(--space-1)' }} aria-label="Recent colours">
+          {recents.map((hex) => (
+            <button
+              key={hex}
+              type="button"
+              aria-label={`Use recent colour ${hex}`}
+              title={hex}
+              onClick={() => commit(hex)}
+              style={{
+                width: '16px',
+                height: '16px',
+                borderRadius: 'var(--radius-xs)',
+                border: '1px solid var(--line-default)',
+                background: hex,
+                cursor: 'pointer',
+              }}
+            />
+          ))}
+        </div>
+      )}
+      {notice && (
+        <span role="status" style={{ fontSize: 'var(--fs-xs)', color: 'var(--danger)' }}>
+          {notice}
+        </span>
+      )}
     </div>
   );
 };
