@@ -511,6 +511,44 @@ describe('MomentsService', () => {
     expect(edited.durationUs).toBe(moment.durationUs + 1_000_000);
   });
 
+  it('builds the clip at the chosen aspect, with the chosen caption style on every caption', async () => {
+    /*
+      The other two settings the start screen had been dropping. `buildComposition` reads
+      `settings.aspect` for the canvas and `settings.captionStyleId` for every caption item, and
+      neither was asserted — so when the page was sending `aspectRatio` and `captionStyle`, the
+      analyser built 9:16 clips with "Bold creator" captions and every test still passed.
+
+      Both values are chosen to differ from the defaults (9:16 and bold-creator), because a test at
+      the defaults cannot tell "we read the setting" from "the fallback happened to match".
+    */
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'offline' });
+    storage.updateProject(project.id, {
+      settings: { ...project.settings, aspect: '16:9', captionStyleId: 'karaoke' },
+    });
+
+    const analysed = await moments.analyze({ projectId: project.id });
+    const moment = analysed.moments[0];
+    expect(moment).toBeDefined();
+    if (!moment) return;
+
+    const created = moments.createClips(project.id, [moment.id], {});
+    expect(created.errors).toHaveLength(0);
+    const comp = storage.getComposition(project.id, created.created[0]!.compId);
+    expect(comp).toBeDefined();
+    if (!comp) return;
+
+    expect(comp.payload.canvas.aspect).toBe('16:9');
+    expect(comp.payload.canvas.width).toBe(1920);
+    expect(comp.payload.canvas.height).toBe(1080);
+
+    const captions = Object.values(comp.payload.items).filter((item) => item.type === 'caption');
+    expect(captions.length).toBeGreaterThan(0);
+    for (const caption of captions) {
+      expect(caption.captionStyleId).toBe('karaoke');
+    }
+  });
+
   it('uses the project’s clip-length range, which is what the start screen now writes', async () => {
     /*
       Two slices meet here. `moments-service` has always read `project.settings.clipLengthRangeSec`
