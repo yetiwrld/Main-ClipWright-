@@ -199,6 +199,15 @@ importers:
         specifier: workspace:*
         version: link:../timeline-engine
 
+  packages/brand-kits:
+    dependencies:
+      '@clipwright/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
   packages/caption-styles:
     dependencies:
       '@clipwright/project-schema':

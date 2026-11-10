@@ -65,8 +65,9 @@ export path:
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
-Still open in Phase 5: the colour eyedropper, brand kits (the schema has the field;
-no UI writes it), the voiceover recorder and the equaliser. Three entries left this list
+Still open in Phase 5: the colour eyedropper, brand kit **UI** (the format, the plan and
+the diagnosis are built and tested in `packages/brand-kits`; no screen reads them yet),
+the voiceover recorder and the equaliser. Three entries left this list
 rather than being rephrased. The **shape row** is in — a shape offers its kind, an icon
 offers its stroke width, and neither appears for the other. **Re-picking** an icon on an
 existing item is in too: the picker gained the caller it never had, so its `value` and

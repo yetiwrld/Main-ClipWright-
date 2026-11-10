@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  121 passed (121)
-     Tests  3009 passed (3009)
+Test Files  123 passed (123)
+     Tests  3045 passed (3045)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,7 +116,8 @@ Test Files  121 passed (121)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| **Total** | **3009** | 121 files |
+| `packages/brand-kits` | 36 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, and what applying a kit reports |
+| **Total** | **3045** | 123 files |
 
 ### Tests that run real processes
 
@@ -618,6 +619,47 @@ The second is the third instance of one mistake in this session (the pan test wi
 the icon search for a one-page term, and this). The general statement of it: **a test whose
 fixture sits at the default value cannot observe whether the default was supplied or
 computed.** All three were found by running the mutation, none by reading the test.
+
+### Brand kits: the format and the plan (SPEC 13 §8, data layer only)
+
+`brandKits` had been in the project schema since the beginning as `z.array(z.string())` — a
+list of ids with nothing behind it — and `BrandKits/` was created on disk by the storage
+service. Nothing read or wrote either. SPEC 13 lists brand kits as **CORE for v1 acceptance**,
+so this is the first slice of the largest remaining gap.
+
+What is built is the part that decides things, with no UI yet:
+
+| Module | What it owns |
+|---|---|
+| `schema.ts` | the `.cwbrand` format, its bounds, and import/export preserving newer fields |
+| `apply.ts` | placement and visibility resolution, the application plan, and diagnosis |
+
+**A kit is a recipe, not a new kind of object.** Applying one produces ordinary items and
+ordinary style assignments — an image item on a graphics track, a clip at the start, a
+`captionStyleId` — so nothing downstream learns what a brand kit is. That is what makes
+"delete the kit and the applied items stay" true by construction rather than by bookkeeping,
+and it is why the module returns a *plan* rather than mutating anything: the tests assert the
+decisions without a timeline, a canvas or an ffmpeg binary.
+
+**Every position is a percentage, and the margin is of the short side.** A kit designed on
+16:9 is applied to a 9:16 project without moving the logo off-screen. Measured: the same kit's
+logo is **129.6 px on both** a 1920×1080 and a 1080×1920 canvas, and its bottom-right corner
+stays inside both. `custom` placements are deliberately *not* margins — they use the stored
+percentages against each axis, because a point the user dragged to is a fraction of the width
+and height, not a distance from an edge.
+
+**Nothing is applied silently.** A missing asset or caption style produces a sentence in the
+plan's `report` and the rest of the kit still applies. A part the user unchecked is not
+reported at all — a checkbox that is off is not a failure.
+
+**Mutations.** 8, all bite: the size and the margin each switched to the canvas width, a
+`custom` placement treated as a corner, a missing asset skipped silently, a visibility window
+running past the composition's end, the provenance filter ignoring the kit id, and unknown
+fields dropped on import or not restored on export.
+
+**Not built yet, and deliberately not claimed:** the kit editor UI, apply/detach/reapply as
+commands, `.cwbrand` zip packaging with assets, and the "from the current clip" capture. They
+are recorded in `docs/limitations.md` rather than half-wired into the app.
 
 **Mutations.** 19 were run against the arc maths, the parser, the tokeniser and the wiring;
 all bite. Two survived the first pass and were resolved rather than left: a `largeArc` delta

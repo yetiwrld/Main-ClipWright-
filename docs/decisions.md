@@ -902,3 +902,42 @@ stored for: keeping a star's paths on an item now named `heart` draws the star w
 marks the heart selected. The command clears them, and a test asserts it — because the failure
 would be a picture that disagrees with its own control, which is the recurring failure in this
 feature and the reason every step of it is measured rather than inspected.
+
+## 32. A brand kit is a recipe for ordinary commands
+
+SPEC 13 §8 lists brand kits as CORE for v1. What existed was `brandKits: z.array(z.string())`
+in the project schema and an empty `BrandKits/` directory — a declared capability with nothing
+behind it, which is the failure mode this project has now documented three times (§28, §31).
+
+**The kit produces no new kind of object.** Applying one yields an image item on a graphics
+track, a clip inserted at the start, a `captionStyleId` — all things the app already draws,
+exports and edits. Nothing downstream learns the word "brand kit". That is not tidiness: it is
+what makes the spec's own rules fall out for free. *Deleting a kit leaves applied items
+untouched* is true because they are ordinary items; *reapplying replaces* works because the
+provenance tag on the item is enough to find them; *a kit applied to a project carries no new
+load paths* because there are none.
+
+**The module returns a plan rather than doing anything.** `planKitApplication` takes a kit, a
+canvas size, a duration and what the project has, and returns what *would* be created plus a
+list of what it could not do. The caller runs the commands. This is what makes the interesting
+decisions testable without a store, a canvas or an ffmpeg binary — and the decisions are the
+whole feature: where the logo lands, when it appears, and what the user is told when an asset
+is missing.
+
+**Percentages, with the short side for corners.** A kit is designed for one aspect ratio and
+applied to another; the spec asks for exactly that and says "positions are percentages, so
+adapt". Corners therefore use the short side for both the margin and the size, so a logo is
+the same apparent size and the same distance from the edge on 16:9 and 9:16. `custom`
+placements use the stored percentages against each axis instead, because a point the user
+dragged to means a fraction of the frame, not a distance from an edge — two different
+intentions that a single formula would conflate.
+
+**Nothing is applied silently, and an unchecked part is not a failure.** A missing asset or
+style produces a sentence; a part the user turned off produces nothing, because reporting a
+problem with something they did not ask for is noise. Both rules have a test, and both exist
+because the alternative — a kit that applies four of its six parts in silence — leaves a user
+hunting for a logo that was never placed.
+
+**The UI is deliberately absent.** No screen mentions brand kits yet. An unfinished CORE tool
+that appears as a card, a disabled menu entry or a "coming soon" chip is forbidden by
+`specs/13` §2, and the format being ready is not the same as the feature being usable.
