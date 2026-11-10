@@ -573,3 +573,22 @@ still does not do:
   style; they do not show it.
 - **A project's `sourcePath` is remembered from the start screen only.** Choosing a different source
   for an existing project means starting a new one — the import stage reads that one field.
+
+---
+
+## 7. The project menu has five of the six actions
+
+SPEC 03 §10 lists Open, Rename, Duplicate, Archive, Show in folder and Delete. The menu carries all
+but **Show in folder**, which needs an IPC channel that does not exist — `shell.showItemInFolder`
+is wired for export output only (`export:openFolder`). The store's project directory is derivable,
+so this is one command and one bridge entry rather than a design question; it is recorded here
+because a menu that silently omits a listed item is the same class of gap as a setting nothing
+reads.
+
+Two related things the menu does not do, both noted rather than implied:
+
+- **"Also copy media"** in Duplicate (§10) is not offered. The store shares managed media by
+  reference on duplicate, which is the default the spec describes; the option for a fully
+  independent copy is not built.
+- **"Free proxies and cache for this project"** on Archive is not offered either. Archiving writes
+  the flag; the disk-reclaiming half of §8 is not implemented.

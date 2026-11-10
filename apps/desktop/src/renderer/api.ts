@@ -54,6 +54,34 @@ export const api = {
   async updateProject(projectId: string, patch: Parameters<ClipwrightBridge['updateProject']>[1]) {
     return requireBridge('Updating the project').updateProject(projectId, patch);
   },
+  /*
+    SPEC 03 §10's project actions. All four were implemented in the store and reachable from no
+    window: the bridge exposed them from the start, `api.ts` had a wrapper only for `updateProject`,
+    and `ProjectsPage` had no menu — so a project could not be renamed, duplicated, archived or
+    deleted in an app that had code for each.
+  */
+  async duplicateProject(projectId: string) {
+    return requireBridge('Duplicating the project').duplicateProject(projectId);
+  },
+  /**
+   * Delete a project.
+   *
+   * `deleteMedia` is the caller's word for the store's `deleteExclusiveManagedMedia`, and the name
+   * matters: the store reads that key, and `global.d.ts` used to declare `deleteMedia`, which the
+   * store ignores — a caller following the type would delete the project and keep every managed
+   * file, checkbox ticked, no error. The declaration now carries the store's name; this wrapper
+   * accepts the friendly one and maps it, so neither spelling can be silently dropped.
+   */
+  async deleteProject(projectId: string, opts?: { deleteMedia?: boolean }) {
+    return requireBridge('Deleting the project').deleteProject(projectId, {
+      deleteExclusiveManagedMedia: opts?.deleteMedia === true,
+    });
+  },
+  async archiveProject(projectId: string, archived: boolean) {
+    /* Archive is a field on the record, not a store method: §8's "hides from Home; read-only until
+       unarchived" is expressed by `archived`, and `updateProject` already writes it. */
+    return requireBridge('Archiving the project').updateProject(projectId, { archived });
+  },
 
   /**
    * Export a brand kit as a `.cwbrand` file (SPEC 13 §8.2).

@@ -1847,3 +1847,48 @@ The two Custom tiles also gained their inputs. A "Custom" tile that stores the d
 bug in miniature: the aspect tile opened nothing to type a ratio into, and the clip-count tile
 resolved `Number('custom')` to `NaN`, which the schema refuses — the identical failure as `copy`,
 one click away.
+
+## 53. Four actions in the store, none in the window
+
+`StorageService` has `updateProject` (which renames), `duplicateProject` and `deleteProject`, all
+with tests. `preload/index.cjs` exposes all three on the bridge. `ProjectsPage` was a grid of cards
+that navigated into a project — **no ⋯ menu, so no rename, duplicate, archive or delete**. SPEC 03
+§10 describes all four and SPEC 02 §6 draws the menu; an app carrying an implementation of each
+could not perform one.
+
+The mechanical cause is worth recording because it is a shape that recurs here: the page calls what
+`api.ts` offers, and `api.ts` had a wrapper only for `updateProject`. The other two were reachable
+from the bridge and from nowhere else, and the bridge is not something a page imports directly. So
+the feature was "present" in every layer and absent from the only one a user touches — the same
+anatomy as the ducking object and the start screen's settings, one rung lower.
+
+Building it found a second bug that would otherwise have shipped: `deleteProject`'s option was
+*declared* `{ deleteMedia?: boolean }` and the store reads `deleteExclusiveManagedMedia`. One is a
+TypeScript interface in `global.d.ts`, the other a destructured parameter in main; nothing compares
+them, and the types do not meet. A caller following the declaration would delete the project, keep
+every managed file, have ticked the box, and get no error — the failure in the direction the user
+least expects, since they asked for *more* to be deleted. The declaration now carries the store's
+name, and `api.deleteProject` maps the friendly one onto it, so neither spelling can be dropped in
+silence.
+
+**Decisions the menu needed:**
+
+- **The card stopped being one button.** A menu inside a `<button>` is invalid, unclickable in some
+  browsers, and reads as one control to a screen reader. The card is now a container with a button
+  for the title area; the menu trigger sits outside it.
+- **The trigger is labelled per project** — "Actions for Interview clips" — because a grid of ten
+  cards otherwise reads as ten identical "⋯" buttons.
+- **Archive is a value, and the menu's slot flips.** §8's "read-only until unarchived" means the
+  action has to write `false` for an already-archived project. The first test only asserted that the
+  *label* changed, and a mutation that always wrote `true` survived it: the label comes from the
+  record, not from the action, so the two could disagree forever.
+- **Delete says both sentences before it happens.** Referenced originals are never touched, and
+  copied media only with the box. The dialog names the project and the count, rather than asking
+  "are you sure" about something unnamed.
+- **A failure is reported, not swallowed.** A read-only workspace or a locked file leaves the dialog
+  open with the reason; closing as though it worked would be a lie the user acts on.
+
+Twelve mutations, eleven biting first pass and the twelfth after the archive test was rewritten.
+Two initially reported `MISS` because the mutation's search string did not match the file's
+whitespace — a reminder that a mutation report has three outcomes, not two, and `MISS` is a bug in
+the harness rather than evidence the code is safe.

@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen slices. 3545 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen and project-menu slices. 3562 automated tests,
 all passing.
 
 ---
@@ -58,6 +58,13 @@ All three are now fixed by one shared module, and the reason they lasted is the 
 schema's tests built payloads in the schema's own words. Fifteen mutations were run against the
 fix, and four survived — every one of them a test that wrote down the answer instead of checking it.
 That is the recurring lesson of this build, and this is the clearest example of it.
+
+The project list had the same anatomy one rung lower: **rename, duplicate, archive and delete were
+all implemented in the store and in the bridge, and no window could reach any of them** — the page
+was a grid of cards that navigated into a project and nothing else. It has a ⋯ menu now, and
+building it found a second bug: the delete option was declared `deleteMedia` and the store reads
+`deleteExclusiveManagedMedia`, so ticking "also delete the copied media" would have deleted the
+project and kept every file, with no error.
 
 ---
 
@@ -389,7 +396,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3545 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3562 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

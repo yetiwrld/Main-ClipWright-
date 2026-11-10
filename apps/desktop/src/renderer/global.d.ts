@@ -452,7 +452,15 @@ export interface ClipwrightBridge {
   getProject(projectId: string): Promise<ProjectRecord | undefined>;
   updateProject(projectId: string, patch: Partial<ProjectRecord>): Promise<ProjectRecord>;
   duplicateProject(projectId: string): Promise<ProjectRecord>;
-  deleteProject(projectId: string, opts?: { deleteMedia?: boolean }): Promise<unknown>;
+  /**
+   * `deleteExclusiveManagedMedia` is the store's own key (`StorageService.deleteProject`). The
+   * declaration said `deleteMedia`, which the store ignores — a caller following the type would
+   * have deleted the project and kept every managed file, with the checkbox ticked and no error.
+   */
+  deleteProject(
+    projectId: string,
+    opts?: { deleteExclusiveManagedMedia?: boolean },
+  ): Promise<unknown>;
 
   // Compositions
   getCompositions(projectId: string): Promise<unknown[]>;
