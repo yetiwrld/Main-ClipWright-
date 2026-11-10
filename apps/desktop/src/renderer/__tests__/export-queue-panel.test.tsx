@@ -311,3 +311,46 @@ describe('toExportSettings', () => {
     expect(settings.targetLufs).toBe(-14);
   });
 });
+
+describe('the panel’s metadata choice reaches the plan', () => {
+  /*
+    `use-export` passed `embedProjectName: true` as a literal. The setting existed end to end —
+    panel state, planner field, encoder argument — and could not be turned off, so the project name
+    went into every file a user exported. That is not cosmetic: the comment lands in the file they
+    hand to someone else, and stripping identifying metadata before uploading is a reasonable thing
+    to want.
+
+    Asserted through `toExportSettings`, which is the one place panel state becomes request state.
+    The encoder's own test already covers both values of `plan.embedProjectName`; what was untested
+    was whether the panel's value ever got that far.
+  */
+  const base = {
+    projectId: 'proj-1',
+    compositionId: 'comp-1',
+    rangeUs: [0, 1_000_000] as [number, number],
+    compositionDurationUs: 1_000_000,
+    compositionFps: 30,
+    items: [],
+  };
+
+  it('carries the setting off', () => {
+    const settings = toExportSettings({
+      ...base,
+      panel: { ...DEFAULT_EXPORT_STATE, embedProjectName: false },
+    });
+    expect(settings.embedProjectName).toBe(false);
+  });
+
+  it('carries the setting on', () => {
+    /* Both directions: a payload that always said false would pass the test above. */
+    const settings = toExportSettings({
+      ...base,
+      panel: { ...DEFAULT_EXPORT_STATE, embedProjectName: true },
+    });
+    expect(settings.embedProjectName).toBe(true);
+  });
+
+  it('defaults to on, which is what every export did before the control existed', () => {
+    expect(DEFAULT_EXPORT_STATE.embedProjectName).toBe(true);
+  });
+});

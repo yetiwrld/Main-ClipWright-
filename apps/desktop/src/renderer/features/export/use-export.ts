@@ -61,7 +61,7 @@ export function toExportSettings(input: {
       mean SRT only.
     */
     subtitleFormats: input.panel.saveSubtitles ? input.panel.subtitleFormats : [],
-    embedProjectName: true,
+    embedProjectName: input.panel.embedProjectName,
     normaliseLoudness: input.panel.normaliseLoudness,
     targetLufs: input.panel.targetLufs,
     isDraft: false,

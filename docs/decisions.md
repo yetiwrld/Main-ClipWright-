@@ -2376,3 +2376,25 @@ The general lesson, which cost two rounds of mutation testing to learn: **a fall
 plausible value is indistinguishable from a correct one at the call site.** `aspectFromCanvas` was
 written to answer "which of these six is this canvas closest to", which is a fine question for a
 label and the wrong question for an encoder.
+
+## 68. The last literal in that file
+
+`use-export.ts` passed `embedProjectName: true`. Everything around it was wired: the panel type had
+the field, the planner carried it, `metadataArgs` turned it into `-metadata comment=Clipwright
+Studio · <project>`. The only thing missing was a way to say no.
+
+It is the same fault as §57–67, in the same file, and it is the last one in that payload — I checked
+every remaining field of `toExportSettings` against the panel and they all read from `input.panel`
+now. That is a satisfying place to stop: not because the pattern cannot occur elsewhere, but because
+one file has been swept completely rather than sampled.
+
+**Why this one is worth the control.** A metadata comment is not decoration. It names the project in
+the file, and the file leaves the machine — uploaded, sent, published. "Strip identifying metadata
+before publishing" is a normal thing to want and was impossible here. The default stays `true`, so
+every existing project exports exactly what it exported before.
+
+**A note on where the test had to go.** The encoder already tested both values of
+`plan.embedProjectName` — `metadataArgs` is pure and was covered. The panel state existed. The
+literals sat at the one point that joins them, inside `toExportSettings`, and that function had tests
+only for the subtitle formats. This is §63's boundary again, and the same answer: test the join, not
+either side of it."""

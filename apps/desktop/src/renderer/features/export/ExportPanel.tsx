@@ -43,6 +43,15 @@ export interface ExportPanelState {
    * value; the fault was that it was chosen here in the panel's absence.
    */
   clashPolicy: 'auto-number' | 'replace' | 'ask';
+  /**
+   * Whether the file carries `comment=Clipwright Studio · <project>` in its metadata.
+   *
+   * `use-export` passed `true` as a literal, so the setting existed end to end — panel type, planner,
+   * encoder arguments — and could not be turned off. It is not cosmetic: the comment lands in the
+   * file a user hands to someone else, and "strip identifying metadata" is a reasonable thing to
+   * want before uploading.
+   */
+  embedProjectName: boolean;
   includeAudio: boolean;
   burnCaptions: boolean;
   saveSubtitles: boolean;
@@ -68,6 +77,7 @@ export const DEFAULT_EXPORT_STATE: ExportPanelState = {
   audioBitrate: DEFAULT_AUDIO_BITRATE,
   /* SPEC 14 §5's default. */
   clashPolicy: 'auto-number',
+  embedProjectName: true,
   includeAudio: true,
   burnCaptions: true,
   saveSubtitles: false,
@@ -234,6 +244,11 @@ export function ExportPanel({
         label="Burn captions into video"
         checked={state.burnCaptions}
         onChange={(v) => onChange({ burnCaptions: v })}
+      />
+      <ToggleRow
+        label="Write the project name into the file"
+        checked={state.embedProjectName}
+        onChange={(v) => onChange({ embedProjectName: v })}
       />
       <ToggleRow
         label="Save subtitle files"
