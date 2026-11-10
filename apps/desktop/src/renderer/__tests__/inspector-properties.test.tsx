@@ -11,7 +11,7 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createDefaultTimeline, createMediaItem, type TimelineState } from '@clipwright/timeline-engine';
 import type { TimelineApi } from '../features/editor/use-timeline.js';
 import { ItemInspector } from '../features/editor/Inspector.js';
@@ -289,6 +289,72 @@ describe('ItemInspector shapes and icons (SPEC 11 §12)', () => {
     const icon = makeState({ iconName: 'star', shapeKind: undefined });
     render(<ItemInspector state={icon} timeline={fakeTimeline(icon)} />);
     expect(screen.queryByLabelText('Shape kind')).toBeNull();
+  });
+
+  it('re-picks the icon on an existing item without creating another', async () => {
+    /*
+      The one gap this row did not close on its own. The picker was reachable only from the
+      timeline menu, which *adds*, so changing a star into a heart meant deleting the item
+      and losing its timing. The dialog's `value` and `strokeWidth` props had existed from
+      the day it was written and no caller passed them, which is why the grid could not
+      highlight the current icon either.
+    */
+    /*
+      A *non-default* stroke width (3.5, not 2), for the reason this file has now recorded
+      twice: the picker falls back to the default 2 when it is not told otherwise, so a
+      fixture at 2 cannot tell "the current width is passed" from "no width is passed".
+      The mutation survived until this number changed.
+    */
+    const state = makeState({ iconName: 'star', iconStrokeWidth: 3.5, shapeKind: undefined });
+    const timeline = renderInspector(state);
+
+    /*
+      The row names the item by its label, not by the icon: `createIconItem` sets the label
+      from the icon name at creation, but an item renamed since shows the name it now has,
+      and the button beside it is what says which icon is in play.
+    */
+    fireEvent.click(screen.getByLabelText('Change icon'));
+
+    // The dialog is the picker, and it opens on this item's icon: the `value` prop is what
+    // highlights the current tile, and no caller passed it before this slice.
+    expect(screen.getByText('Choose an icon')).toBeTruthy();
+    expect((screen.getByLabelText('Stroke width') as HTMLInputElement).value).toBe('3.5');
+    /*
+      And the current icon is marked selected in the grid. This is the assertion that was
+      missing first time round: dropping the `value` prop survived, because a test that only
+      reads the stroke field cannot tell an edit dialog from an add dialog. `aria-pressed`
+      is what the tile exposes, so it is what the user's selected state actually is.
+    */
+    /*
+      Searched for first: page one is alphabetical, so `star` is not on it. The selected
+      tile is the current icon *after* filtering, which is the state the user is shown when
+      they open the dialog on an icon they already have.
+    */
+    fireEvent.change(screen.getByLabelText('Search icons'), { target: { value: 'star' } });
+    expect(screen.getByLabelText('star').getAttribute('aria-pressed')).toBe('true');
+    fireEvent.change(screen.getByLabelText('Search icons'), { target: { value: 'heart' } });
+    fireEvent.click(screen.getByLabelText('heart'));
+
+    /*
+      One call, writing both fields, and no second item: `setItemProperties` edits in
+      place. A handler that called `addIcon` would pass a test that only looked for a call
+      to the timeline, which is why the assertion names the method.
+    */
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], {
+      iconName: 'heart',
+      iconStrokeWidth: 3.5,
+    });
+    await waitFor(() => expect(screen.queryByText('Choose an icon')).toBeNull());
+  });
+
+  it('closes the re-pick dialog without touching the item', async () => {
+    const state = makeState({ iconName: 'star', shapeKind: undefined });
+    const timeline = renderInspector(state);
+    fireEvent.click(screen.getByLabelText('Change icon'));
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(timeline.setItemProperties).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText('Choose an icon')).toBeNull());
   });
 
   it('shows neither for an ordinary clip', () => {

@@ -874,3 +874,31 @@ existing item still means deleting it, because the picker is an "add" flow. Maki
 flow needs the picker to take an existing item id, which is a change to the picker's contract
 rather than another field on this command — so it is recorded as the one remaining gap rather
 than half-built here.
+
+## 31. The picker becomes an edit dialog by getting the caller it never had
+
+`IconPicker` declared `value?: string` and `strokeWidth?: number` from the moment it was
+written, and neither was ever passed. That is worth pausing on: the props were not speculative
+— the component highlighted `name === value` in its grid and seeded its width field from
+`strokeWidth` — so the code was correct and unreachable. A prop with no caller is a feature
+that exists only in the type, the same shape as the schema fields in §28, and it fails the
+same way: nothing errors, nothing looks wrong, and the capability is simply absent.
+
+**Why it had no caller.** The picker was built for the timeline menu, which *adds an item*: it
+has no current icon to highlight and no current width to show. The selection UI was written for
+the caller that was going to come later. When it did not come, the "add" flow became the only
+flow, and changing an icon meant deleting the item — losing its timing, its track position and
+its undo history — and adding a new one in its place.
+
+**Binding it to an item is three lines of wiring.** The inspector holds the id of the item
+being re-picked, passes that item's `iconName` and `iconStrokeWidth` to the dialog, and writes
+both back through `setItemProperties` on a pick. The id is held rather than a boolean because
+the selection can change under an open dialog, and a pick would then land on whatever happened
+to be selected instead of the item the user opened.
+
+**The name change clears the stored geometry.** `iconShapes` exists so a project opened by a
+build with a different Lucide set still draws what it drew. It belongs to the icon it was
+stored for: keeping a star's paths on an item now named `heart` draws the star while the picker
+marks the heart selected. The command clears them, and a test asserts it — because the failure
+would be a picture that disagrees with its own control, which is the recurring failure in this
+feature and the reason every step of it is measured rather than inspected.

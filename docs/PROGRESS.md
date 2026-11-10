@@ -66,12 +66,14 @@ export path:
   file matches the preview.
 
 Still open in Phase 5: the colour eyedropper, brand kits (the schema has the field;
-no UI writes it), the voiceover recorder and the equaliser, and re-picking the icon on
-an existing item. Two entries left this list rather than being rephrased. The **shape
-row** is in — a shape offers its kind, an icon offers its stroke width, and neither
-appears for the other, which closes the gap where both values could be chosen once and
-never changed. **Metering** is in as the transport's stereo peak meter (above); what
-remains of §6.3 is the momentary LUFS readout, which needs the mix, not the preview. This
+no UI writes it), the voiceover recorder and the equaliser. Three entries left this list
+rather than being rephrased. The **shape row** is in — a shape offers its kind, an icon
+offers its stroke width, and neither appears for the other. **Re-picking** an icon on an
+existing item is in too: the picker gained the caller it never had, so its `value` and
+`strokeWidth` props finally select and show the current icon, and changing a star to a
+heart no longer means deleting the item and losing its timing. **Metering** is in as the
+transport's stereo peak meter (above); what remains of §6.3 is the momentary LUFS
+readout, which needs the mix, not the preview. This
 paragraph used to list the text and shape items as open — they have been built and
 drawn in both renderers for several slices, and icons joined them, so that claim
 was a stale line rather than a gap. The inspector's keyframes,

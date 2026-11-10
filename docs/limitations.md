@@ -460,10 +460,9 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **An icon's stroke width and a shape's kind are editable; the icon itself is not.**
-    The inspector now has the row that was missing (SPEC 11 §12): a shape offers its kind as
-    a list, an icon offers its 0.5–4 stroke width, and the two never appear together because
-    an item has one source of geometry. What is still missing is **choosing a different
-    icon for an existing one** — the picker is an "add" flow, and re-picking would mean
-    deleting the item and losing its timing. That is the one remaining gap in this feature,
-    and it is smaller than what it replaced.
+13. **Shapes and icons are editable in the inspector, and the picker re-opens on an
+    existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
+    an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on
+    that item. Nothing in this feature still requires deleting an item to change how it
+    looks. The picker's search does not match tag words yet — it matches names and the words
+    in them — which is a want, not a gap, and is recorded here rather than fixed by accident.

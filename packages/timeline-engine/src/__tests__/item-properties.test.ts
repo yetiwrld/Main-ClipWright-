@@ -294,6 +294,64 @@ describe('setItemProperties across a selection', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('changes which icon an item draws, and drops the old stored geometry', () => {
+    /*
+      The last piece of the same gap: the picker was an "add" flow, so turning a star into a
+      heart meant deleting the item and losing its timing.
+    */
+    const state = makeState();
+    const added = addShapeItem(state, {
+      id: 'ico-4',
+      iconName: 'star',
+      iconShapes: [{ t: 'path', d: 'M0 0 L10 10' }],
+      startUs: 0,
+      fps: 30,
+    });
+    if (!added.ok) throw new Error(added.message);
+
+    const result = setItemProperties(added.state, {
+      itemIds: ['ico-4'],
+      patch: { iconName: 'heart' },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const item = result.state.items['ico-4']!;
+    expect(item.iconName).toBe('heart');
+    /*
+      `iconShapes` is cleared, and this is the assertion that matters. Stored geometry is
+      the escape hatch for a file opened by a build with a different Lucide set; keeping a
+      star's paths on an item now named `heart` would draw the star while the picker showed
+      the heart selected — the same "the control and the picture disagree" failure this
+      feature keeps producing.
+    */
+    expect(item.iconShapes).toBeUndefined();
+  });
+
+  it('refuses an icon name on a shape or on a clip with no geometry', () => {
+    // The other direction of the exclusivity rule: an item must not acquire two sources
+    // of geometry, and a video must not gain an icon it has nowhere to draw.
+    const state = makeState();
+    const shape = addShapeItem(state, { id: 'shape-2', shapeKind: 'rect', startUs: 0, fps: 30 });
+    if (!shape.ok) throw new Error(shape.message);
+    expect(
+      setItemProperties(shape.state, {
+        itemIds: ['shape-2'],
+        patch: { iconName: 'star' },
+        fps: 30,
+      }).ok,
+    ).toBe(false);
+
+    // `item-1` is the fixture's video clip: no `iconName`, no `shapeKind`.
+    expect(
+      setItemProperties(makeState(), {
+        itemIds: ['item-1'],
+        patch: { iconName: 'star' },
+        fps: 30,
+      }).ok,
+    ).toBe(false);
+  });
+
   it('skips an id that no longer exists rather than failing the whole edit', () => {
     const result = setItemProperties(makeState(), {
       itemIds: ['item-1', 'ghost'],

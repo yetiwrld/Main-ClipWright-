@@ -3096,6 +3096,16 @@ export function setItemProperties(
        * missing.
        */
       iconStrokeWidth?: number;
+      /**
+       * Which icon an existing item draws (SPEC 11 §12).
+       *
+       * The last piece of the same gap: the picker was an "add" flow, so changing a star
+       * into a heart meant deleting the item and losing its timing. `iconShapes` is cleared
+       * on the way through — stored geometry belongs to the icon it was stored for, and
+       * keeping it would leave the item drawing the old icon from its own copy while the
+       * name said otherwise.
+       */
+      iconName?: string;
     };
     fps: Fps;
   },
@@ -3150,6 +3160,29 @@ export function setItemProperties(
   if (bothGeometries) {
     return fail('invalid', 'An icon draws its own shape; it cannot also have a kind.');
   }
+  /*
+    The other half of the same rule, and the one that needed saying separately: a *shape*
+    must not acquire an icon name, and a clip with no geometry at all (a video, a caption)
+    must not either. Both would create the two-sources-of-geometry item the check above
+    refuses from the other direction.
+  */
+  const notAnIcon = targets.find((id) => {
+    const item = state.items[id]!;
+    return patch.iconName !== undefined && (item.iconName === undefined || item.shapeKind !== undefined);
+  });
+  if (notAnIcon) {
+    return fail('invalid', 'Only an icon item can be given an icon name.');
+  }
+
+  const geometrySources = targets.find((id) => {
+    const item = state.items[id]!;
+    const kind = patch.shapeKind ?? item.shapeKind;
+    const icon = patch.iconName ?? item.iconName;
+    return kind !== undefined && icon !== undefined;
+  });
+  if (geometrySources) {
+    return fail('invalid', 'An item draws one shape or one icon, not both.');
+  }
 
   // Crop edges are fractions of the source; opposite edges that sum past 1 would
   // describe a negative-width frame. Checked per item because the patch may merge
@@ -3197,6 +3230,11 @@ export function setItemProperties(
       // time, and replacing the whole object would reset the other three.
       if (patch.shapeKind !== undefined) target.shapeKind = patch.shapeKind;
       if (patch.iconStrokeWidth !== undefined) target.iconStrokeWidth = patch.iconStrokeWidth;
+      if (patch.iconName !== undefined) {
+        target.iconName = patch.iconName;
+        // Stored geometry belongs to the icon it was stored for.
+        target.iconShapes = undefined;
+      }
       if (patch.crop) target.crop = { ...target.crop, ...patch.crop };
       if (patch.transform) target.transform = { ...target.transform, ...patch.transform };
     }

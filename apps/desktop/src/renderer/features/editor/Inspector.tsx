@@ -14,6 +14,7 @@ import {
   shapeKindLabel,
 } from '@clipwright/compositor';
 import type { TimelineApi } from './use-timeline.js';
+import { IconPicker } from './IconPicker.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import {
   adjacentKeyTime,
@@ -338,6 +339,12 @@ function KeyframeRow({
 
 export function ItemInspector({ state, timeline }: { state: TimelineState; timeline: TimelineApi }) {
   const selected = timeline.selection.map((id) => state.items[id]).filter(Boolean);
+  /*
+    Which item's icon is being re-picked, if any. Holding an id rather than a boolean keeps
+    the dialog bound to the item it was opened for: the selection can change under an open
+    dialog, and a pick would then land on whatever was selected instead.
+  */
+  const [repickTarget, setRepickTarget] = React.useState<string | null>(null);
   if (selected.length === 0) {
     return (
       <div style={{ padding: 'var(--space-2)' }}>
@@ -520,8 +527,31 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
       {item.iconName !== undefined ? (
         <Field label="Icon">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
-              {item.label ?? item.iconName}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--space-1)',
+              }}
+            >
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+                {item.label ?? item.iconName}
+              </span>
+              {/*
+                Re-picking the icon, which was the one gap left after the stroke width
+                became editable: the picker was an "add" flow, so turning a star into a
+                heart meant deleting the item and losing its timing. The dialog is the
+                same component; it just keeps its identity instead of creating one.
+              */}
+              <Button
+                variant="ghost"
+                size={28}
+                onClick={() => setRepickTarget(item.id)}
+                aria-label="Change icon"
+              >
+                Change…
+              </Button>
             </div>
             <Slider
               value={item.iconStrokeWidth ?? ICON_DEFAULT_STROKE_WIDTH}
@@ -1013,6 +1043,31 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
         {item.speed !== 1 ? ` · ${item.speed}×` : ''}
         {track?.locked ? ' · track locked' : ''}
       </div>
+
+      {/*
+        The same picker the timeline menu uses, bound to an existing item. Its `value` and
+        `strokeWidth` props existed from the start and were never passed by a caller —
+        which is why the grid could not highlight the current icon. Passing them here is
+        what makes it an edit dialog rather than an add dialog with a preselected tile.
+      */}
+      {repickTarget !== null && state.items[repickTarget]?.iconName !== undefined ? (
+        <IconPicker
+          open
+          value={state.items[repickTarget]!.iconName}
+          strokeWidth={state.items[repickTarget]!.iconStrokeWidth}
+          onClose={() => setRepickTarget(null)}
+          onPick={(iconName, strokeWidth) => {
+            /*
+              Both are written even when only the icon changed: the picker reports the width
+              it is showing, and writing it keeps the item's outline consistent with the
+              field the user just looked at. Re-picking also clears any stored geometry, in
+              the command, because stored shapes belong to the icon they were stored for.
+            */
+            timeline.setItemProperties([repickTarget], { iconName, iconStrokeWidth: strokeWidth });
+            setRepickTarget(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
