@@ -205,6 +205,101 @@ describe('crop and transform', () => {
   });
 });
 
+describe('ItemInspector shapes and icons (SPEC 11 §12)', () => {
+  /*
+    Both controls were reachable only at creation time. The fields existed in the schema,
+    both renderers drew them and the exporter wrote them, and the inspector had no row -
+    so "the stroke field did nothing after you picked the icon" was a documented
+    limitation rather than an oversight. These tests are about the *wiring*, since the
+    command's own range checks are covered in `item-properties.test.ts`.
+  */
+
+  it('shows an icon\'s stroke width at its stored value and writes a change', () => {
+    /*
+      Asserted at a non-default value (3.5, not 2) on purpose: an input that ignored the
+      stored value and displayed the default would pass a test that used 2, and the whole
+      complaint was that an icon looked the same however the field was set.
+    */
+    const state = makeState({ iconName: 'star', iconStrokeWidth: 3.5, shapeKind: undefined });
+    const timeline = renderInspector(state);
+    const slider = screen.getByLabelText('Icon stroke width') as HTMLInputElement;
+    expect(slider.value).toBe('3.5');
+
+    fireEvent.change(slider, { target: { value: '1' } });
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { iconStrokeWidth: 1 });
+  });
+
+  it('falls back to the library default for an icon that never stored a width', () => {
+    // A project written before the field existed. The slider must show what the renderers
+    // will actually draw, or moving it from "2" would be a lie about the starting point.
+    const state = makeState({ iconName: 'star', iconStrokeWidth: undefined, shapeKind: undefined });
+    renderInspector(state);
+    expect((screen.getByLabelText('Icon stroke width') as HTMLInputElement).value).toBe('2');
+  });
+
+  it('offers the shape kinds for a shape, and writes the chosen one', () => {
+    const state = makeState({ shapeKind: 'rect', iconName: undefined });
+    const timeline = renderInspector(state);
+    // `Select` is a button plus a listbox, not a native <select>: the control shows the
+    // current label and the choice happens on the option, which is how the transition
+    // tests drive the same component.
+    expect(screen.getByLabelText('Shape kind').textContent).toContain('Rect');
+
+    fireEvent.click(screen.getByLabelText('Shape kind'));
+    fireEvent.click(screen.getByText('Star'));
+    expect(timeline.setItemProperties).toHaveBeenCalledWith(['item-1'], { shapeKind: 'star' });
+  });
+
+  it('names the kinds in words rather than kebab-case', () => {
+    /*
+      `round-rect` in a menu is a schema value leaking into the UI. The label is derived
+      from the kind by `shapeKindLabel`, so adding a shape to `SHAPE_KINDS` cannot leave a
+      raw identifier in the control. Opened rather than read off a `<select>`, because this
+      control renders its options only when it is open.
+    */
+    const state = makeState({ shapeKind: 'round-rect', iconName: undefined });
+    renderInspector(state);
+    expect(screen.getByLabelText('Shape kind').textContent).toContain('Round rect');
+
+    fireEvent.click(screen.getByLabelText('Shape kind'));
+    /*
+      `getAllByText`, because the open control shows its current label twice: once on the
+      button and once as the selected option. That is the component working, not a
+      duplicate — the assertion is that every kind appears in words at least once.
+    */
+    for (const label of ['Rect', 'Round rect', 'Ellipse', 'Triangle', 'Star', 'Line', 'Arrow', 'Bubble']) {
+      expect(screen.getAllByText(label).length, label).toBeGreaterThan(0);
+    }
+    // No raw identifier survived into the menu.
+    expect(screen.queryByText('round-rect')).toBeNull();
+  });
+
+  it('shows exactly one of the two controls, never both', () => {
+    /*
+      A shape and an icon are two sources of geometry and the schema keeps them exclusive.
+      Rendering both, with one inert, is the failure this asserts against: it would be a
+      control the user can move that changes nothing, which is the bug this whole slice
+      exists to remove.
+    */
+    const shape = makeState({ shapeKind: 'rect', iconName: undefined });
+    const { unmount } = render(<ItemInspector state={shape} timeline={fakeTimeline(shape)} />);
+    expect(screen.queryByLabelText('Icon stroke width')).toBeNull();
+    unmount();
+
+    const icon = makeState({ iconName: 'star', shapeKind: undefined });
+    render(<ItemInspector state={icon} timeline={fakeTimeline(icon)} />);
+    expect(screen.queryByLabelText('Shape kind')).toBeNull();
+  });
+
+  it('shows neither for an ordinary clip', () => {
+    // The section is conditional on the item having geometry of its own; a video clip
+    // has neither field and must not grow an empty row.
+    renderInspector(makeState({ shapeKind: undefined, iconName: undefined }));
+    expect(screen.queryByLabelText('Shape kind')).toBeNull();
+    expect(screen.queryByLabelText('Icon stroke width')).toBeNull();
+  });
+});
+
 describe('ItemInspector transitions', () => {
   /** Two adjacent clips on the main track, so a transition is possible. */
   function withNeighbour(overrides: Partial<TimelineState['items'][string]> = {}): TimelineState {

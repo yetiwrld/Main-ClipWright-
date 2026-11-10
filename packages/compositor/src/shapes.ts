@@ -32,6 +32,19 @@ export const SHAPE_KINDS = [
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
 
 /**
+ * How a shape kind is written in the UI: `round-rect` → `Round rect`.
+ *
+ * Derived from the kind rather than kept as a parallel table, so adding a shape to
+ * `SHAPE_KINDS` cannot leave a menu showing a raw kebab-case identifier. Only the
+ * capitalisation is decided here — the words are the kind's own, which keeps one
+ * vocabulary between the schema, the geometry and the control.
+ */
+export function shapeKindLabel(kind: ShapeKind): string {
+  const words = kind.replace(/-/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
  * Shape geometry, defined **once**, in a 100×100 box.
  *
  * Earlier this module produced an SVG path string and the exporter had its own idea of

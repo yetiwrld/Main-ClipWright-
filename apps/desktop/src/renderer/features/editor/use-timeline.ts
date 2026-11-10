@@ -191,7 +191,10 @@ export interface TimelineApi {
   splitCaptionSegment: (itemId: string, timeUs: number) => boolean;
   mergeCaptionSegments: (leftItemId: string, rightItemId: string) => boolean;
   trimCaptionSegment: (itemId: string, edge: 'start' | 'end', timeUs: number) => boolean;
-  /** Edit opacity, level, pan, speed, fades, crop or transform (SPEC 09 §17). */
+  /**
+   * Edit opacity, level, pan, speed, fades, crop, transform — or an item's geometry
+   * (SPEC 09 §17, SPEC 11 §12).
+   */
   setItemProperties: (
     itemIds: string[],
     patch: Parameters<typeof setItemProperties>[1]['patch'],

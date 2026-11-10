@@ -27,6 +27,7 @@ import {
   shapeBoxAt,
   resolveIconItem,
   shapeGeometry,
+  shapeKindLabel,
   shapePath,
   type IconShape,
   type ShapeBoxPercent,
@@ -35,7 +36,7 @@ import {
   type ShapeKind,
 } from '@clipwright/compositor';
 
-export { SHAPE_KINDS, shapeGeometry, shapePath, searchIconLibrary, type ShapeKind };
+export { SHAPE_KINDS, shapeGeometry, shapeKindLabel, shapePath, searchIconLibrary, type ShapeKind };
 
 /** An item that draws type or geometry rather than footage. */
 export interface GraphicItemLike {

@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  addShapeItem,
   createDefaultTimeline,
   createMediaItem,
   setItemProperties,
@@ -219,6 +220,78 @@ describe('setItemProperties across a selection', () => {
     expect(result.state.items['item-1']!.opacity).toBe(0.5);
     expect(result.state.items['item-2']!.opacity).toBe(0.5);
     expect(result.affectedItemIds).toEqual(['item-1', 'item-2']);
+  });
+
+  /*
+    Shapes and icons (SPEC 11 §12). Both were settable only at creation: a user who wanted
+    a star instead of a rectangle, or a heavier outline than the picker's default, had to
+    delete the item and add it again. The fields were in the schema, drawn by both
+    renderers and exported; the command simply had no way to write them.
+  */
+  it('changes a shape\'s kind', () => {
+    const state = makeState();
+    const added = addShapeItem(state, { id: 'shape-1', shapeKind: 'rect', startUs: 0, fps: 30 });
+    if (!added.ok) throw new Error(added.message);
+    const result = setItemProperties(added.state, {
+      itemIds: ['shape-1'],
+      patch: { shapeKind: 'star' },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['shape-1']!.shapeKind).toBe('star');
+  });
+
+  it('changes an icon\'s stroke width', () => {
+    const state = makeState();
+    const added = addShapeItem(state, { id: 'ico-1', iconName: 'star', startUs: 0, fps: 30 });
+    if (!added.ok) throw new Error(added.message);
+    const result = setItemProperties(added.state, {
+      itemIds: ['ico-1'],
+      patch: { iconStrokeWidth: 3.5 },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['ico-1']!.iconStrokeWidth).toBe(3.5);
+  });
+
+  it('refuses a stroke width the picker could not produce', () => {
+    /*
+      The schema's own range, enforced with a message rather than by letting the patch
+      throw inside `produceWithPatches`. A slider cannot leave 0.5–4; a corrupted project
+      or a future caller can, and the difference between the two failures is whether the
+      user is told why nothing happened.
+    */
+    const state = makeState();
+    const added = addShapeItem(state, { id: 'ico-2', iconName: 'star', startUs: 0, fps: 30 });
+    if (!added.ok) throw new Error(added.message);
+    for (const width of [0.4, 4.5, Number.NaN]) {
+      const result = setItemProperties(added.state, {
+        itemIds: ['ico-2'],
+        patch: { iconStrokeWidth: width },
+        fps: 30,
+      });
+      expect(result.ok, `width ${width}`).toBe(false);
+    }
+  });
+
+  it('refuses to give an icon a shape kind as well', () => {
+    /*
+      An item with both would leave two renderers free to disagree about which geometry
+      wins — the same reason `addShapeItem` refuses an icon with a kind. Refused rather
+      than resolved by precedence, because whichever precedence is chosen, the file
+      describes something the UI cannot have made.
+    */
+    const state = makeState();
+    const added = addShapeItem(state, { id: 'ico-3', iconName: 'star', startUs: 0, fps: 30 });
+    if (!added.ok) throw new Error(added.message);
+    const result = setItemProperties(added.state, {
+      itemIds: ['ico-3'],
+      patch: { shapeKind: 'rect' },
+      fps: 30,
+    });
+    expect(result.ok).toBe(false);
   });
 
   it('skips an id that no longer exists rather than failing the whole edit', () => {

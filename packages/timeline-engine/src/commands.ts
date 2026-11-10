@@ -3082,6 +3082,20 @@ export function setItemProperties(
       fadeCurve?: TimelineItem['fadeCurve'];
       crop?: Partial<TimelineItem['crop']>;
       transform?: Partial<TimelineItem['transform']>;
+      /**
+       * A shape item's kind (SPEC 11 §12). Editing it is how a rectangle becomes a star
+       * after it was added, rather than deleting and re-adding.
+       */
+      shapeKind?: NonNullable<TimelineItem['shapeKind']>;
+      /**
+       * An icon's outline thickness, 0.5–4 in the 100-box (SPEC 11 §12).
+       *
+       * Added because the picker could set it and nothing else could: a user who wanted a
+       * heavier star had to delete the icon and add it again with the field already at the
+       * value they wanted. The value was stored, drawn and exported; only editing was
+       * missing.
+       */
+      iconStrokeWidth?: number;
     };
     fps: Fps;
   },
@@ -3110,6 +3124,31 @@ export function setItemProperties(
   }
   if (patch.speed !== undefined && (patch.speed < 0.1 || patch.speed > 8)) {
     return fail('invalid', 'Speed must be between 0.1× and 8×.');
+  }
+  /*
+    The same 0.5–4 the schema enforces, checked here so the command fails with a message
+    instead of the patch throwing somewhere inside `produceWithPatches`. A slider cannot
+    leave this range; a corrupted project or a future caller can.
+  */
+  if (
+    patch.iconStrokeWidth !== undefined &&
+    (!Number.isFinite(patch.iconStrokeWidth) ||
+      patch.iconStrokeWidth < 0.5 ||
+      patch.iconStrokeWidth > 4)
+  ) {
+    return fail('invalid', 'Stroke width must be between 0.5 and 4.');
+  }
+  /*
+    A `shapeKind` on an icon would give one item two sources of geometry, and the two
+    renderers are allowed to disagree about which wins — the same reason `addShapeItem`
+    refuses an item with both. Refused rather than resolved by precedence.
+  */
+  const bothGeometries = targets.find((id) => {
+    const item = state.items[id]!;
+    return patch.shapeKind !== undefined && item.iconName !== undefined;
+  });
+  if (bothGeometries) {
+    return fail('invalid', 'An icon draws its own shape; it cannot also have a kind.');
   }
 
   // Crop edges are fractions of the source; opposite edges that sum past 1 would
@@ -3156,6 +3195,8 @@ export function setItemProperties(
       if (patch.fadeCurve !== undefined) target.fadeCurve = patch.fadeCurve;
       // Crop and transform merge per field: the inspector edits one corner at a
       // time, and replacing the whole object would reset the other three.
+      if (patch.shapeKind !== undefined) target.shapeKind = patch.shapeKind;
+      if (patch.iconStrokeWidth !== undefined) target.iconStrokeWidth = patch.iconStrokeWidth;
       if (patch.crop) target.crop = { ...target.crop, ...patch.crop };
       if (patch.transform) target.transform = { ...target.transform, ...patch.transform };
     }

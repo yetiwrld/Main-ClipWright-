@@ -842,3 +842,35 @@ suspended and `resume()` needs one.
 audio-mastered clock all want per-item nodes; this is one tap on one layer. Building the
 meter first is not a compromise, it is the order that makes the rest checkable — once the
 graph grows, the meter shows whether it works, instead of the change being judged by ear.
+
+## 30. A shape row is one row, because an item has one geometry
+
+Shapes and icons had no inspector control at all: a shape's kind and an icon's stroke width
+could be set once, in the menu or the picker, and never changed. The fields were in the schema,
+the renderers drew them, the exporter wrote them — and `setItemProperties` could not write
+either, so the gap was in the command before it was in the UI.
+
+**The row asks what the item is rather than offering everything.** A shape has a `shapeKind`,
+an icon has an `iconName`, and the schema treats those as alternatives. Rendering both controls
+with the irrelevant one disabled would be worse than the gap it replaced: a control the user
+can see and cannot use reads as a bug, and a control that appears to work while writing a field
+the renderers ignore is the exact class of bug this project has spent several slices removing
+(`docs/decisions.md` §28).
+
+**The command enforces the same exclusivity the type does.** `addShapeItem` already refuses an
+item given both a kind and a name; `setItemProperties` now refuses to add a kind to an icon.
+Both refusals exist because two sources of geometry leave the preview and the exporter free to
+choose differently, and a file that renders one way in the editor and another in the export is
+the failure this whole project is arranged against.
+
+**Labels are derived from the kind.** `shapeKindLabel` turns `round-rect` into `Round rect`
+rather than consulting a table, so the list of kinds and the list of labels cannot drift. The
+alternative — a hand-written `SHAPE_LABELS` map — is one more place to forget when a shape is
+added, and it fails silently: the menu shows `hexagon-hollow` and nobody notices until a user
+does.
+
+**What is still not editable, and why it is a smaller gap.** Re-picking the *icon* on an
+existing item still means deleting it, because the picker is an "add" flow. Making it an edit
+flow needs the picker to take an existing item id, which is a change to the picker's contract
+rather than another field on this command — so it is recorded as the one remaining gap rather
+than half-built here.

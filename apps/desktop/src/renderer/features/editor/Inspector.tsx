@@ -6,7 +6,13 @@ import {
   quantizeUs,
   type TimelineState,
 } from '@clipwright/timeline-engine';
-import { EFFECTS, effectDefinition } from '@clipwright/compositor';
+import {
+  EFFECTS,
+  ICON_DEFAULT_STROKE_WIDTH,
+  SHAPE_KINDS,
+  effectDefinition,
+  shapeKindLabel,
+} from '@clipwright/compositor';
 import type { TimelineApi } from './use-timeline.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import {
@@ -499,6 +505,54 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           </div>
         </Field>
       )}
+
+      {/*
+        Shapes and icons (SPEC 11 §12). Neither had a row here: a shape's kind and an
+        icon's stroke width could be chosen once, when the item was created, and never
+        changed again. `docs/limitations.md` recorded that as the gap it was, and this is
+        the row that closes it.
+
+        The section is one or the other, never both. A shape has a `shapeKind`, an icon has
+        an `iconName`, and the schema keeps them exclusive — so the inspector asks which
+        sort of item it is holding rather than showing two controls and letting one do
+        nothing.
+      */}
+      {item.iconName !== undefined ? (
+        <Field label="Icon">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              {item.label ?? item.iconName}
+            </div>
+            <Slider
+              value={item.iconStrokeWidth ?? ICON_DEFAULT_STROKE_WIDTH}
+              min={0.5}
+              max={4}
+              step={0.5}
+              ariaLabel="Icon stroke width"
+              formatValue={(value) => `${value}`}
+              onChange={(value) =>
+                timeline.setItemProperties([item.id], { iconStrokeWidth: value })
+              }
+            />
+          </div>
+        </Field>
+      ) : item.shapeKind !== undefined ? (
+        <Field label="Shape">
+          <Select
+            value={item.shapeKind}
+            ariaLabel="Shape kind"
+            options={SHAPE_KINDS.map((kind) => ({ value: kind, label: shapeKindLabel(kind) }))}
+            onChange={(value) =>
+              timeline.setItemProperties([item.id], {
+                // Narrowed rather than cast: the options come from `SHAPE_KINDS`, so a
+                // value outside it cannot reach here, and the compiler should say so if
+                // the list ever changes shape.
+                shapeKind: value as NonNullable<typeof item.shapeKind>,
+              })
+            }
+          />
+        </Field>
+      ) : null}
 
       <KeyframeRow label="Opacity" path="opacity" value={item.opacity} item={item} timeline={timeline}>
         <Slider

@@ -192,6 +192,7 @@ export {
   SHAPE_KINDS,
   shapeBoxAt,
   shapeGeometry,
+  shapeKindLabel,
   shapePath,
   type ShapeBoxPercent,
   type ShapeKind,

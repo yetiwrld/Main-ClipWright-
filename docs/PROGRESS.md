@@ -66,9 +66,12 @@ export path:
   file matches the preview.
 
 Still open in Phase 5: the colour eyedropper, brand kits (the schema has the field;
-no UI writes it), a shape row in the inspector (an icon's stroke width is set in the
-picker when it is added and cannot be changed afterwards), and the audio
-tools beyond the envelope (equaliser, metering UI, voiceover recorder). This
+no UI writes it), the voiceover recorder and the equaliser, and re-picking the icon on
+an existing item. Two entries left this list rather than being rephrased. The **shape
+row** is in — a shape offers its kind, an icon offers its stroke width, and neither
+appears for the other, which closes the gap where both values could be chosen once and
+never changed. **Metering** is in as the transport's stereo peak meter (above); what
+remains of §6.3 is the momentary LUFS readout, which needs the mix, not the preview. This
 paragraph used to list the text and shape items as open — they have been built and
 drawn in both renderers for several slices, and icons joined them, so that claim
 was a stale line rather than a gap. The inspector's keyframes,

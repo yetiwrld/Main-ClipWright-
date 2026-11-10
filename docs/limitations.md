@@ -460,10 +460,10 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **An icon's stroke width can be set when it is added, and not afterwards.** The picker
-    has the 0.5–4 field (SPEC 11 §12) and the value is stored on the item, drawn by both
-    renderers and written as `\bord` in the burn-in — but the inspector has no row for it, so
-    changing it means removing the icon and adding it again. The item's *icon* is likewise not
-    editable after the fact; the picker is an "add" flow, not a property editor. Both are the
-    same missing piece: a shape row in the inspector. Recorded rather than hidden because a
-    control that appears once and then cannot be revisited reads as a bug to anyone who tries.
+13. **An icon's stroke width and a shape's kind are editable; the icon itself is not.**
+    The inspector now has the row that was missing (SPEC 11 §12): a shape offers its kind as
+    a list, an icon offers its 0.5–4 stroke width, and the two never appear together because
+    an item has one source of geometry. What is still missing is **choosing a different
+    icon for an existing one** — the picker is an "add" flow, and re-picking would mean
+    deleting the item and losing its timing. That is the one remaining gap in this feature,
+    and it is smaller than what it replaced.

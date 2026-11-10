@@ -18,6 +18,7 @@ import { builtInStyle } from '@clipwright/caption-styles';
 import type { MeasureText } from '@clipwright/compositor';
 import {
   SHAPE_KINDS,
+  shapeKindLabel,
   hasGraphicContent,
   isGraphicItem,
   shapeBox,
@@ -99,6 +100,36 @@ describe('which items this module draws', () => {
       hasGraphicContent({ type: 'shape', shapeKind: 'hexagon-hollow', startUs: 0, durationUs: 1 })
     ).toBe(false);
     expect(hasGraphicContent({ type: 'shape', startUs: 0, durationUs: 1 })).toBe(false);
+  });
+});
+
+describe('shape kind labels', () => {
+  /*
+    The inspector's kind control shows these, and the failure mode is a schema value
+    leaking into the UI: a menu reading `round-rect` and `polygon` tells the user about the
+    file format. Derived from `SHAPE_KINDS` rather than kept as a table, so a new kind
+    cannot arrive without a label.
+  */
+  it('writes every kind in words', () => {
+    expect(shapeKindLabel('rect')).toBe('Rect');
+    expect(shapeKindLabel('round-rect')).toBe('Round rect');
+    expect(shapeKindLabel('ellipse')).toBe('Ellipse');
+    expect(shapeKindLabel('star')).toBe('Star');
+  });
+
+  it('leaves no kebab-case in any label', () => {
+    for (const kind of SHAPE_KINDS) {
+      const label = shapeKindLabel(kind);
+      expect(label, kind).not.toContain('-');
+      /*
+        Never the raw identifier either. Compared case-sensitively and excluding the
+        single-word kinds on purpose: `rect` → `Rect` differs only in case, so a
+        lowercased comparison would fail on the correct implementation — which it did,
+        first time, before this comment existed.
+      */
+      if (kind.includes('-')) expect(label, kind).not.toBe(kind);
+      expect(label.charAt(0), kind).toBe(label.charAt(0).toUpperCase());
+    }
   });
 });
 
