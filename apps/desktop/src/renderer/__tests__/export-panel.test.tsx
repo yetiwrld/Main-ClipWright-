@@ -108,6 +108,15 @@ describe('ExportPanel', () => {
   });
 
   it('calls onChange when aspect ratio is changed', () => {
+    /*
+      Queried by its label, not by its position.
+
+      These two tests used `getAllByRole('combobox')[n]`, and adding the rate-control select moved
+      every index after it — both failed with a message about the *value* rather than about the
+      position, which reads like a broken panel. The labels only became queryable when `Field` was
+      given a `htmlFor`; before that this was the only way to reach a control, which is how the
+      brittleness got in.
+    */
     const onChange = vi.fn();
     render(
       <ExportPanel
@@ -117,8 +126,7 @@ describe('ExportPanel', () => {
         onCancel={() => {}}
       />,
     );
-    const selects = screen.getAllByRole('combobox');
-    fireEvent.change(selects[1], { target: { value: '16:9' } });
+    fireEvent.change(screen.getByLabelText('Aspect ratio'), { target: { value: '16:9' } });
     expect(onChange).toHaveBeenCalledWith({ aspect: '16:9' });
   });
 
@@ -132,9 +140,8 @@ describe('ExportPanel', () => {
         onCancel={() => {}}
       />,
     );
-    const selects = screen.getAllByRole('combobox');
-    // Audio bitrate is the 6th select (index 5)
-    fireEvent.change(selects[5], { target: { value: '256' } });
+    /* The label carries the current value, so it is matched by prefix. */
+    fireEvent.change(screen.getByLabelText(/^Audio bitrate/), { target: { value: '256' } });
     expect(onChange).toHaveBeenCalledWith({ audioBitrate: 256 });
   });
 
@@ -271,5 +278,38 @@ describe('subtitle formats', () => {
     );
     fireEvent.click(screen.getByLabelText('SubRip (.srt)'));
     expect(removals.at(-1)?.subtitleFormats).toEqual(['vtt']);
+  });
+});
+
+describe('every control can be found by name, not by position', () => {
+  /*
+    Two tests in this file used `getAllByRole('combobox')[n]`. Adding one select moved every index
+    after it and both failed with a message about the *value* — which reads like a broken panel
+    rather than a broken test. Positional queries are a standing hazard in a form that grows, and
+    the fix for the labelling (§61) is what makes the alternative possible.
+  */
+  it('finds every select by its label', () => {
+    render(
+      <ExportPanel
+        state={DEFAULT_EXPORT_STATE}
+        onChange={() => {}}
+        onExport={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const labels: Array<string | RegExp> = [
+      'Resolution',
+      'Aspect ratio',
+      'Frame rate',
+      'Format',
+      'Quality',
+      'Rate control',
+      'If the file already exists',
+      /* The bitrate label carries its value, so it is matched by prefix. */
+      /^Audio bitrate/,
+    ];
+    for (const label of labels) {
+      expect(screen.getByLabelText(label).tagName).toBe('SELECT');
+    }
   });
 });

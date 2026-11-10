@@ -354,3 +354,41 @@ describe('the panel’s metadata choice reaches the plan', () => {
     expect(DEFAULT_EXPORT_STATE.embedProjectName).toBe(true);
   });
 });
+
+describe('the panel’s rate control reaches the plan', () => {
+  /*
+    SPEC 14 §3.8 offers *VBR (default) / CBR*. The encoder implements CBR — it pins `-minrate` and
+    `-maxrate` to the target and adds a buffer — and `use-export` passed `'vbr'` as a literal, so the
+    mode was unreachable. CBR is what a broadcaster or a platform with a hard bitrate cap needs; VBR
+    spikes above the average by design.
+  */
+  const base = {
+    projectId: 'proj-1',
+    compositionId: 'comp-1',
+    rangeUs: [0, 1_000_000] as [number, number],
+    compositionDurationUs: 1_000_000,
+    compositionFps: 30,
+    items: [],
+  };
+
+  it('carries constant bitrate through', () => {
+    const settings = toExportSettings({
+      ...base,
+      panel: { ...DEFAULT_EXPORT_STATE, rateControl: 'cbr' },
+    });
+    expect(settings.rateControl).toBe('cbr');
+  });
+
+  it('carries variable bitrate through', () => {
+    /* Both directions: a payload hardcoded to either value would pass a one-sided test. */
+    const settings = toExportSettings({
+      ...base,
+      panel: { ...DEFAULT_EXPORT_STATE, rateControl: 'vbr' },
+    });
+    expect(settings.rateControl).toBe('vbr');
+  });
+
+  it('defaults to VBR, the spec’s documented default and what every export did before', () => {
+    expect(DEFAULT_EXPORT_STATE.rateControl).toBe('vbr');
+  });
+});

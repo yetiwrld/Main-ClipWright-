@@ -50,7 +50,7 @@ export function toExportSettings(input: {
     fps: input.panel.fps,
     format: input.panel.format,
     quality: input.panel.quality,
-    rateControl: 'vbr',
+    rateControl: input.panel.rateControl,
     audioBitrate: input.panel.audioBitrate,
     includeAudio: input.panel.includeAudio,
     burnCaptions: input.panel.burnCaptions,

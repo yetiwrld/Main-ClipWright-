@@ -2398,3 +2398,39 @@ every existing project exports exactly what it exported before.
 literals sat at the one point that joins them, inside `toExportSettings`, and that function had tests
 only for the subtitle formats. This is §63's boundary again, and the same answer: test the join, not
 either side of it."""
+
+## 69. Two literals, and why only one of them became a feature
+
+`toExportSettings` had two hardcoded values left: `rateControl: 'vbr'` and `isDraft: false`. They
+look identical from the panel and they are not the same kind of thing at all.
+
+**`rateControl` is a repair.** SPEC 14 §3.8 offers *VBR (default) / CBR*, and `encoder.ts` already
+implements both — CBR pins `-minrate` and `-maxrate` to the target and sets a buffer, which is what a
+broadcaster on a hard bitrate cap needs. The implementation existed and the switch did not. Adding
+the control is a switch in front of working code.
+
+**`isDraft` would have been a lie.** SPEC 14 §3.7's draft mode renders from *preview proxies at a fast
+preset*, from a filename ending `-DRAFT`. In this codebase `isDraft` is read in exactly one place —
+the plan's ID prefix, `'draft'` or `'final'` — and nowhere else. A toggle labelled *Draft export*
+wired to that field would change a string in a plan ID and nothing about the export. The user would
+tick it, export, wait the same length of time, and receive a file indistinguishable from the final
+one except in its name.
+
+So I left it hardcoded and wrote it down. The test for which case you are in is not "is there a
+setting field" but **"does the thing the setting names already happen, somewhere, and I need to
+expose the choice?"** If yes, it is a repair. If the substance does not exist, adding the control
+manufactures the appearance of a feature — which is worse than the gap, because a gap can be found
+and a checkbox that does nothing has to be disproved.
+
+This is the same judgement as `compositionFps` (§62): a field threaded through four layers that is
+read by nothing. There the honest move was to correct the comment that claimed it did work. Here it
+is to leave the literal and say why. Both are cases where the *code* looked like the feature was
+present and only reading the consumers settled it.
+
+**A collateral lesson about positional queries.** Adding the rate-control select broke two existing
+tests that reached controls with `getAllByRole('combobox')[1]` and `[5]`. Both failed with an
+assertion about the *value*, which is a message that reads like a broken panel rather than a broken
+test — the worst kind of false signal when you have just changed the code under test. They now query
+by label, and a new test enumerates all eight selects that way. That was only possible because
+`Field` gained a `htmlFor` in §61; before that, position was the *only* way to reach a control, which
+is how the brittleness got in and stayed.

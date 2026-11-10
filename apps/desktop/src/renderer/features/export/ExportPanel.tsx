@@ -17,6 +17,7 @@ import {
   AUDIO_BITRATES,
   resolutionForPreset,
   DEFAULT_AUDIO_BITRATE,
+  type RateControlMode,
 } from '@clipwright/export-core';
 import type {
   ExportPresetId,
@@ -52,6 +53,12 @@ export interface ExportPanelState {
    * want before uploading.
    */
   embedProjectName: boolean;
+  /**
+   * VBR or CBR (SPEC 14 3.8). The encoder implements both - CBR pins `-minrate`/`-maxrate` and sets
+   * a buffer - and `use-export` passed `'vbr'` as a literal, so a broadcaster needing a constant
+   * bitrate could not ask for one.
+   */
+  rateControl: RateControlMode;
   includeAudio: boolean;
   burnCaptions: boolean;
   saveSubtitles: boolean;
@@ -78,6 +85,8 @@ export const DEFAULT_EXPORT_STATE: ExportPanelState = {
   /* SPEC 14 §5's default. */
   clashPolicy: 'auto-number',
   embedProjectName: true,
+  /* SPEC 14 3.8's default. */
+  rateControl: 'vbr',
   includeAudio: true,
   burnCaptions: true,
   saveSubtitles: false,
@@ -153,6 +162,18 @@ export function ExportPanel({
           {EXPORT_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
+        </select>
+      </Field>
+
+      {/* Rate control */}
+      <Field label="Rate control">
+        <select
+          value={state.rateControl}
+          onChange={(e) => onChange({ rateControl: e.target.value as RateControlMode })}
+          style={selectStyle}
+        >
+          <option value="vbr">Variable bitrate</option>
+          <option value="cbr">Constant bitrate</option>
         </select>
       </Field>
 
