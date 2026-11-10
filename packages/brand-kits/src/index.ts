@@ -21,6 +21,24 @@ export {
 } from './schema.js';
 
 export {
+  ArchiveError,
+  KIT_ENTRY_NAME,
+  assetEntryName,
+  extensionFor,
+  kitAssetIds,
+  readArchive,
+  readBrandKitArchive,
+  writeArchive,
+  writeBrandKitArchive,
+  type ArchiveEntry,
+  type ImportedKitArchive,
+  type KitArchiveResult,
+  type KitAssetFetcher,
+  type ParsedArchive,
+} from './archive.js';
+export { crc32 } from './crc32.js';
+
+export {
   ALL_KIT_PARTS,
   diagnoseKit,
   findKitAppliedItems,

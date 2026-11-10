@@ -468,8 +468,10 @@ context menus, in-editor import, the fill lock).
     (`packages/brand-kits`, 36 tests; the commands in `packages/timeline-engine`, 18 tests;
     20 mutations between them, all biting). Applying produces ordinary items carrying
     `aiProvenance: {tool: 'brand-kit'}`, so a removed kit leaves its work standing. What does
-    not exist is everything a user would touch — the kit list and editor, the `.cwbrand` zip
-    with its assets, capturing a kit from a clip, and the buttons that call the commands.
+    not exist is everything a user would touch — the kit list and editor, capturing a kit from
+    a clip, and the buttons that call the commands. The `.cwbrand` **archive** does exist:
+    `writeBrandKitArchive`/`readBrandKitArchive` write and read a real zip (verified against
+    `unzip`), but nothing in the app offers to export or import one yet.
     Nothing in the app mentions brand kits, which is the correct state for an unbuilt feature
     (`specs/13` §2: an unfinished tool is never shown as a teaser). The project schema's
     `brandKits: string[]` and the `BrandKits/` directory are still empty placeholders until

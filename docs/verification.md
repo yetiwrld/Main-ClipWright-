@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  124 passed (124)
-     Tests  3085 passed (3085)
+Test Files  125 passed (125)
+     Tests  3105 passed (3105)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,8 +116,8 @@ Test Files  124 passed (124)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 50 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, and safe-area-aware placement pinned to `assets/safe-areas.json` |
-| **Total** | **3085** | 124 files |
+| `packages/brand-kits` | 70 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, and the `.cwbrand` archive written by hand and verified with a real `unzip` |
+| **Total** | **3105** | 125 files |
 
 ### Tests that run real processes
 
@@ -777,9 +777,44 @@ already returns `undefined`. Recording it matters as much as the kills: a mutati
 change behaviour says nothing about the tests, and leaving it in the list as a "survivor" would
 misrepresent the suite.
 
-**Not built yet, and deliberately not claimed:** the kit editor UI, `.cwbrand` zip packaging
-with assets, the "from the current clip" capture, and building a composition from a template.
-They are recorded in `docs/limitations.md` rather than half-wired into the app.
+### Brand kits: the archive is a zip, and a real unzip says so
+
+**The zip is written by hand, and the tests check it with `unzip` rather than with its own
+reader.** A `.cwbrand` is `kit.json` plus the assets the kit names, under `<assetId>.<ext>`.
+Writing it needed a container format, and this repository does not add a runtime dependency for
+one; shelling out to `zip` was the other candidate and `zip` does not exist on a user's Windows
+machine. The subset is three local headers, a central directory and an end record — forty lines
+each way — and the reason to prefer it over a library is the *reader*: implemented against the
+format, not against one library's idea of it.
+
+**The tests open the archive with `unzip`.** Round-tripping through our own writer and reader
+would pass with a wrong signature, a wrong CRC or a wrong central offset, because both halves
+would be wrong in the same way. So the archive is listed with `unzip -Z1`, extracted with
+`unzip -qq` and the extracted bytes compared, and a **flipped byte makes `unzip -t` fail** —
+which is what proves the CRC is real rather than zero. A deflated archive made by `zip` is read
+back too, because a kit may have been exported by another tool.
+
+**Entries are stored, not deflated.** The payload is a JSON kit and a logo: PNGs are already
+compressed, so the gain is small, and a stored entry has no deflate round trip to fail. The
+*reader* accepts deflate anyway, through `DecompressionStream` — in every runtime this app runs
+on — so a compressed archive from elsewhere opens without a hand-written inflater in the
+package.
+
+**A missing asset is reported, not fatal.** The archive is still written without it and the
+caller gets `missingAssets`; on import the same list is computed by matching the id prefix, so
+a kit whose logo went missing can still be opened, edited and applied. A kit imported from a
+clean workspace — nothing left on disk to be found by accident — compares equal to the original,
+with assets attached.
+
+**Mutations.** 11, all bite: the final CRC inversion, the table index, the central-directory
+offset, a zeroed compressed size, the duplicate and unsafe-path guards, deflated reads, the
+missing-asset report, a template counted as an asset, skipping `importBrandKit`, and the
+extension sniff. The CRC ones are the pointed ones — a wrong checksum still yields a file that
+this reader would happily read, and only `unzip -t` notices.
+
+**Not built yet, and deliberately not claimed:** the kit editor UI, the "from the current clip"
+capture, and building a composition from a template. They are recorded in `docs/limitations.md`
+rather than half-wired into the app.
 
 **Mutations.** 19 were run against the arc maths, the parser, the tokeniser and the wiring;
 all bite. Two survived the first pass and were resolved rather than left: a `largeArc` delta

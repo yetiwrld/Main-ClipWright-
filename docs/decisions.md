@@ -1037,3 +1037,36 @@ and compares each number is what stops the copy rotting.
 Both outcomes were recorded. A suite that reported "7/7 killed" would have needed a contrived
 test for the equivalent one, and a suite that reported "6/7" without saying why would look
 weaker than it is.
+
+## 36. `.cwbrand` is a hand-written zip, tested against a real `unzip`
+
+**The container is written by hand rather than pulled in as a dependency.** This repository
+vendors deliberately; a zip container is three local headers, a central directory and an end
+record, and the subset a kit needs is the simplest part of the format. The alternative was
+shelling out to `zip`, which does not exist on a Windows machine — and this app ships for
+Windows. A dependency for forty lines, in a package that is otherwise `zod` and pure functions,
+was the worse trade.
+
+**The reader is written against the format, and the tests use `unzip`.** The trap in a
+first-party archive format is a writer and reader that agree with each other and with nothing
+else: they round-trip perfectly and produce a file no other tool can open. So the tests list the
+archive with `unzip -Z1`, extract it with `unzip -qq` and compare the payload bytes, and verify
+a flipped byte makes `unzip -t` fail — the last of which is the only thing that proves the CRC is
+computed rather than zeroed. A deflated archive produced by `zip` must also read back, because a
+kit can arrive from elsewhere.
+
+**Entries are stored; reads accept deflate.** PNGs are already compressed and the payload is
+small, so compression buys little and costs a deflate round trip that can fail. Reads go through
+`DecompressionStream`, which every runtime this app targets provides, rather than a bundled
+inflater that would be the largest and least testable code in the package.
+
+**Assets are named by id, and their extension comes from their bytes.** The kit's JSON names
+`logo-1`; the archive holds `logo-1.png`, because a user who opens the zip expects a file they
+can look at. The extension is sniffed from the signature rather than the id, so an id containing
+dots cannot produce a misleading name, and an unknown type becomes `.bin` instead of being
+refused — a font is still worth carrying.
+
+**A missing asset does not stop the export or the import.** Both sides report `missingAssets`
+and carry on. A `.cwbrand` that refuses to be created because one logo vanished is worse than
+one that says which file is absent, and a kit whose logo is missing can still be opened, edited
+and applied.
