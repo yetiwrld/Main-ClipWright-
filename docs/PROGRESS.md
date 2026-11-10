@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction slice. 3476 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction and auto-ducking slices. 3520 automated tests,
 all passing.
 
 ---
@@ -277,6 +277,19 @@ playhead is derived from `AudioContext.currentTime` through an anchor taken on t
 of playback, so a dropped frame costs picture rather than sound, and playback rate
 (0.5×–2×, pitch preserved) is in the transport. **Per-track meters are in** (§6.3): a summing node per audible track in the graph, and two 3 px
 bars in the header on the master meter's own scale and colours, from the same arithmetic module.
+**Track-level auto-ducking is in** (SPEC 12 §6.7), which closes the largest instance of the
+recurring bug in this build: the schema has carried six ducking fields on every track — trigger
+tracks, a −3…−24 dB reduction, a −42 dBFS threshold, a 120 ms attack and a 400 ms release — since
+the format was written, and **nothing read them**, and no command could write them. It is now one
+shared module that returns spans ("the track is held down from here to here"), which the preview
+multiplies into its gain automation and the export turns into a per-sample curve through the same
+`duckingCurve` the per-item flag already used — so the editor and the file cannot disagree, and a
+test compares the two envelopes at two thousand instants to keep it that way. A track menu item
+turns it on; an empty trigger list means "everything else", and a near-silent word gap is merged
+rather than releasing and re-attacking inside the release time. What it does **not** do is detect
+speech: it ducks under *placements*, so a bed under a mostly-silent clip is ducked throughout (see
+`docs/limitations.md` §5).
+
 **Ducking and normalisation are now both reachable.** Normalisation measures the real mix and
 lifts it toward −16 LUFS; ducking lowers a music bed under speech. Both worked in principle and
 neither could run for a real project: normalisation had a checkbox and a mixer branch, and ducking
@@ -359,7 +372,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3476 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3520 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

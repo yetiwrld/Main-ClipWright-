@@ -26,6 +26,7 @@ import {
   Power,
   Folder,
   Settings,
+  Volume1,
   Volume2,
   VolumeX,
   BarChart3,
@@ -1607,6 +1608,26 @@ function trackMenuItems(
     { id: 'mute', label: track.muted ? 'Unmute' : 'Mute', icon: track.muted ? <Volume2 size={14} /> : <VolumeX size={14} />, onSelect: () => timeline.toggleMute(trackId) },
     { id: 'lock', label: track.locked ? 'Unlock' : 'Lock', icon: <Lock size={14} />, onSelect: () => timeline.toggleTrackLock(trackId) },
     { id: 'hide', label: track.hidden ? 'Show' : 'Hide', icon: track.hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: () => timeline.toggleTrackHidden(trackId) },
+    /*
+      Auto-duck (SPEC 12 §6.7): "on a track (track header menu or Audio panel)". This is the header
+      menu, and the switch is the feature's own `enabled` — the six settings have been in the
+      project file since the format was written and no control could write any of them, so the
+      feature was unreachable even before a renderer could honour it.
+
+      Only on audio-bearing tracks: ducking a video track's own audio under another track is
+      expressible in the model but has no use, and a menu item that does nothing audible is worse
+      than an absent one.
+    */
+    ...(track.kind === 'audio' || track.role === 'music' || track.role === 'voiceover'
+      ? [
+          {
+            id: 'duck',
+            label: track.ducking?.enabled ? 'Stop ducking under speech' : 'Duck under speech',
+            icon: <Volume1 size={14} />,
+            onSelect: () => timeline.toggleDucking(trackId),
+          },
+        ]
+      : []),
     { id: 'sep1', label: '', onSelect: () => {} },
     { id: 'add-track', label: 'Add track above', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video', trackId) },
     { id: 'add-track-below', label: 'Add track below', icon: <Plus size={14} />, onSelect: () => timeline.addTrack('video') },

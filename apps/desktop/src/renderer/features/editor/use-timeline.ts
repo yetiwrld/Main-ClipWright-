@@ -15,6 +15,7 @@ import {
   deleteItems,
   duplicateItems,
   moveItems,
+  setTrackDucking,
   setTrackMuted,
   setTrackMagnetic,
   splitItems,
@@ -142,6 +143,8 @@ export interface TimelineApi {
   duplicate: () => boolean;
   addMarkerAt: (atUs: number) => boolean;
   toggleMute: (trackId: string) => boolean;
+  /** Turn auto-ducking on or off for a track (SPEC 12 §6.7). */
+  toggleDucking: (trackId: string) => boolean;
   toggleMagnetic: (trackId: string) => boolean;
   detachAudio: (itemId: string) => boolean;
   unlink: (itemId: string) => boolean;
@@ -586,6 +589,13 @@ export function useTimeline(projectId: string, compId: string | undefined): Time
       addMarkerAt: (atUs) => run('Add marker', (s) => addMarker(s, { timeUs: atUs, fps })),
       toggleMute: (trackId) =>
         run('Mute track', (s) => setTrackMuted(s, { trackId, muted: !s.tracks.find((t) => t.id === trackId)?.muted })),
+      toggleDucking: (trackId) =>
+        run('Duck this track', (s) =>
+          setTrackDucking(s, {
+            trackId,
+            ducking: { enabled: !s.tracks.find((t) => t.id === trackId)?.ducking?.enabled },
+          }),
+        ),
       toggleMagnetic: (trackId) =>
         run('Toggle magnetic', (s) =>
           setTrackMagnetic(s, {

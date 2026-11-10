@@ -399,3 +399,140 @@ describe('the envelope at one instant', () => {
     expect(gainAtInstant(request, 0)).toBe(0);
   });
 });
+
+describe('auto-ducking in the preview (SPEC 12 §6.7)', () => {
+  /*
+    §6.7's binding sentence is that the ducking envelope is "used identically by preview automation
+    and export mixer". Until this slice the preview had *no* ducking at all — the graph was built
+    from `previewAudioRequests`, which did not carry it, and the track-level settings the schema
+    declares were read by nothing anywhere.
+
+    These tests are about the plan, not the Web Audio: the hook multiplies `duckingGainAt` into the
+    item's gain node per frame, and the arithmetic it calls is the one tested in `ducking.test.ts`.
+    What is asserted here is that the plan carries the right spans for the right track.
+  */
+  const timeline = (options: {
+    ducking?: Record<string, unknown>;
+    items?: Array<{ id: string; trackId: string; startUs: number; durationUs: number; type?: string }>;
+  }): PreviewAudioTimeline => ({
+    tracks: [
+      { id: 'trk-music', kind: 'audio', role: 'music', order: 0, ...(options.ducking ? { ducking: options.ducking } : {}) },
+      { id: 'trk-voice', kind: 'audio', role: 'voiceover', order: 1 },
+    ],
+    items: Object.fromEntries(
+      (options.items ?? [
+        { id: 'bed', trackId: 'trk-music', startUs: 0, durationUs: 10_000_000 },
+        { id: 'voice', trackId: 'trk-voice', startUs: 2_000_000, durationUs: 1_000_000 },
+      ]).map((item) => [
+        item.id,
+        {
+          id: item.id,
+          trackId: item.trackId,
+          type: item.type ?? 'audio',
+          mediaId: `media-${item.id}`,
+          startUs: item.startUs,
+          durationUs: item.durationUs,
+        },
+      ]),
+    ),
+  } as unknown as PreviewAudioTimeline);
+
+  it('carries no ducking for a track that has none', () => {
+    const requests = previewAudioRequests(timeline({}));
+    expect(requests.every((request) => request.ducking.length === 0)).toBe(true);
+  });
+
+  it('ducks a track under the other tracks’ items', () => {
+    const requests = previewAudioRequests(
+      timeline({ ducking: { enabled: true, triggerTrackIds: [] } }),
+    );
+    const bed = requests.find((request) => request.itemId === 'bed')!;
+    expect(bed.ducking).toEqual([{ startUs: 2_000_000, endUs: 3_000_000 }]);
+  });
+
+  it('never lets an item duck under itself', () => {
+    /*
+      The failure that makes the whole feature useless: a music track whose own items count as
+      speech would duck continuously, and the sound would be quiet everywhere with no visible cause.
+    */
+    const requests = previewAudioRequests(
+      timeline({ ducking: { enabled: true, triggerTrackIds: [] } }),
+    );
+    const bed = requests.find((request) => request.itemId === 'bed')!;
+    /* Only the voice's span, not the bed's own ten seconds. */
+    expect(bed.ducking).toHaveLength(1);
+    expect(bed.ducking[0]!.startUs).toBe(2_000_000);
+  });
+
+  it('honours the tracks it names', () => {
+    const requests = previewAudioRequests(
+      timeline({ ducking: { enabled: true, triggerTrackIds: ['trk-other'] } }),
+    );
+    const bed = requests.find((request) => request.itemId === 'bed')!;
+    expect(bed.ducking).toEqual([]);
+  });
+
+  it('does nothing when the track is not enabled', () => {
+    const requests = previewAudioRequests(
+      timeline({ ducking: { enabled: false, triggerTrackIds: [] } }),
+    );
+    expect(requests.find((request) => request.itemId === 'bed')!.ducking).toEqual([]);
+  });
+
+  it('does not count a muted item as speech', () => {
+    /*
+      A muted voice is not audible, so it must not duck the music. The previous version of this
+      test removed the voice from the timeline altogether, which asserts that an absent item is not
+      a trigger — true, and not the question. A mutation deleting the mute filter survived it.
+    */
+    const base = timeline({ ducking: { enabled: true, triggerTrackIds: [] } });
+    const muted = {
+      ...base,
+      items: {
+        ...base.items,
+        voice: { ...base.items['voice']!, muted: true },
+      },
+    } as unknown as PreviewAudioTimeline;
+    expect(previewAudioRequests(muted).find((request) => request.itemId === 'bed')!.ducking).toEqual([]);
+  });
+
+  it('does not count a hidden track’s item as speech', () => {
+    const base = timeline({ ducking: { enabled: true, triggerTrackIds: [] } });
+    const hidden = {
+      ...base,
+      tracks: base.tracks.map((track) =>
+        track.id === 'trk-voice' ? { ...track, hidden: true } : track,
+      ),
+    } as unknown as PreviewAudioTimeline;
+    expect(previewAudioRequests(hidden).find((request) => request.itemId === 'bed')!.ducking).toEqual([]);
+  });
+
+  it('carries the ramps that shaped the spans', () => {
+    const requests = previewAudioRequests(
+      timeline({ ducking: { enabled: true, triggerTrackIds: [], reductionDb: -18, attackMs: 50, releaseMs: 200 } }),
+    );
+    const bed = requests.find((request) => request.itemId === 'bed')!;
+    expect(bed.duckingRamps).toEqual({ reductionDb: -18, attackMs: 50, releaseMs: 200 });
+  });
+
+  it('computes one set of spans per track, shared by its items', () => {
+    /*
+      Not a micro-optimisation: a track with several items would otherwise walk the whole timeline
+      once per item, and a project with fifty music cues would do that fifty times per render.
+    */
+    const requests = previewAudioRequests(
+      timeline({
+        ducking: { enabled: true, triggerTrackIds: [] },
+        items: [
+          { id: 'bed-a', trackId: 'trk-music', startUs: 0, durationUs: 4_000_000 },
+          { id: 'bed-b', trackId: 'trk-music', startUs: 5_000_000, durationUs: 4_000_000 },
+          { id: 'voice', trackId: 'trk-voice', startUs: 2_000_000, durationUs: 1_000_000 },
+        ],
+      }),
+    );
+    const a = requests.find((request) => request.itemId === 'bed-a')!;
+    const b = requests.find((request) => request.itemId === 'bed-b')!;
+    /* The same array instance: computed once and handed to both. */
+    expect(a.ducking).toBe(b.ducking);
+  });
+});

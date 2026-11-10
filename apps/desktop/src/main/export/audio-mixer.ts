@@ -42,6 +42,15 @@ import { ffmpegPath, run, CancelledError } from './ffmpeg-runner.js';
 /** What the mixer needs to know about one audible item. */
 export interface AudioItemRequest {
   itemId: string;
+  /**
+   * The track the item is on.
+   *
+   * Needed for track-level ducking (SPEC 12 §6.7): a ducked track names the tracks it ducks under,
+   * and a cue without its origin cannot be matched against that list. Optional so a caller that
+   * predates the feature keeps compiling, and a cue with no track simply never matches a named
+   * trigger — which is the safe direction.
+   */
+  trackId?: string;
   /** Absolute path to the source media. */
   sourcePath: string;
   /** Source in-point in microseconds. */
@@ -79,6 +88,21 @@ export interface AudioItemRequest {
   keyframes?: ReadonlyArray<{ timeUs: number; valueDb: number; interpolation?: 'linear' | 'hold' | 'bezier' | 'preset' }>;
   /** Set for a music bed that should duck under the other items (§12 §6.7). */
   duckUnderSpeech?: boolean;
+  /**
+   * The track's own auto-duck settings (§6.7), when the track has them enabled.
+   *
+   * A different feature from `duckUnderSpeech` above, and the one the spec actually describes:
+   * the flag asks the *item* whether it wants ducking, while this asks the *track* what it ducks
+   * under, how far, and with what ramps. Both are honoured — the flag is what an older project
+   * carries, and the bed path it drives is the hardcoded −12 dB the track settings generalise.
+   */
+  ducking?: {
+    reductionDb: number;
+    attackMs: number;
+    releaseMs: number;
+    /** Which tracks trigger the reduction. Empty means every track but this one. */
+    triggerTrackIds: readonly string[];
+  };
   /**
    * The audio crossfade this item needs at a cut (SPEC 12 §4.2), if any.
    *
@@ -161,8 +185,17 @@ export async function buildAudioMix(options: {
   }
 
   // ---- Decode every item and lay it into the mix.
-  const cues: Array<[number, number]> = [];
-  const beds: Array<{ clip: PcmClip; start: number }> = [];
+  /*
+    Speech cues, with the track each came from. The track is what makes track-level ducking
+    possible (a music track ducks under *the tracks it names*, not under everything), and leaving
+    it out was why the only ducking in the mixer could be the per-item flag.
+  */
+  const cues: Array<[number, number, string]> = [];
+  const beds: Array<{
+    clip: PcmClip;
+    start: number;
+    ducking?: AudioItemRequest['ducking'] & { triggerTrackIds?: readonly string[] };
+  }> = [];
 
   for (const [index, item] of items.entries()) {
     if (signal?.aborted) throw new CancelledError();
@@ -224,7 +257,7 @@ export async function buildAudioMix(options: {
     }
     const at = usToSamples(item.timelineStartUs);
     if (item.duckUnderSpeech) {
-      beds.push({ clip, start: at });
+      beds.push({ clip, start: at, ...(item.ducking ? { ducking: item.ducking } : {}) });
     } else {
       mixClipInto(mix, clip, at);
       /*
@@ -244,15 +277,35 @@ export async function buildAudioMix(options: {
         mix.length,
         at + Math.round((item.timelineDurationUs / 1_000_000) * MIX_SAMPLE_RATE),
       );
-      if (!item.muted) cues.push([at, triggerEnd]);
+      if (!item.muted) cues.push([at, triggerEnd, item.trackId ?? '']);
     }
   }
 
   // ---- Ducking for beds, computed from the summed speech regions.
   if (beds.length > 0 && cues.length > 0) {
     onProgress?.('mixing', 'Ducking music under speech');
-    const curve = duckingCurve({ length: mix.length, triggers: cues, reductionDb: -12 });
     for (const bed of beds) {
+      /*
+        Each bed's own triggers.
+
+        A bed with track-level settings ducks only under the tracks that track names; a bed with
+        only the older per-item flag ducks under everything, which is what that flag has always
+        meant. The two are one branch because the *curve* is the same shape — only the trigger
+        list and the depth differ.
+      */
+      const triggers = bed.ducking?.triggerTrackIds?.length
+        ? cues.filter((cue) => bed.ducking!.triggerTrackIds!.includes(cue[2]))
+        : cues;
+      if (triggers.length === 0) {
+        mixClipInto(mix, bed.clip, bed.start);
+        continue;
+      }
+      const curve = duckingCurve({
+        length: mix.length,
+        triggers: triggers.map((cue) => [cue[0], cue[1]] as [number, number]),
+        reductionDb: bed.ducking?.reductionDb ?? -12,
+        ...(bed.ducking ? { attackMs: bed.ducking.attackMs, releaseMs: bed.ducking.releaseMs } : {}),
+      });
       applyGainCurve(bed.clip, curve.subarray(0, bed.clip.length));
       mixClipInto(mix, bed.clip, bed.start);
     }
@@ -559,6 +612,7 @@ export function planAudioItems(
     const pan = item.pan === undefined ? 0 : clamp(item.pan / 100, -1, 1);
     items.push({
       itemId: item.itemId,
+      trackId: item.trackId,
       sourcePath: path,
       sourceInUs,
       sourceDurationUs: item.durationUs + availableLeadUs,
@@ -579,6 +633,12 @@ export function planAudioItems(
         always was.
       */
       ...(item.duckUnderSpeech ? { duckUnderSpeech: true } : {}),
+      /*
+        The track's own auto-duck settings (SPEC 12 §6.7). Until now these lived only in the
+        project file — six validated parameters that no renderer read. `duckUnderSpeech` above is
+        the per-item flag; this is the per-track feature the spec actually describes.
+      */
+      ...(item.trackDucking ? { ducking: item.trackDucking } : {}),
     });
   }
   return items;

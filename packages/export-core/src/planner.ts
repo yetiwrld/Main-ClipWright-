@@ -176,6 +176,19 @@ export interface PlannedItem {
    * guess which one is on top.
    */
   trackOrder?: number;
+  /**
+   * The track's auto-duck settings, when it has them enabled (SPEC 12 §6.7).
+   *
+   * Carried per item rather than as a separate track map because the mixer walks items, not
+   * tracks — the same reason `trackOrder` rides here. Absent means the track does not duck, which
+   * is the spec's own default ("off by default and never applied silently").
+   */
+  trackDucking?: {
+    reductionDb: number;
+    attackMs: number;
+    releaseMs: number;
+    triggerTrackIds: readonly string[];
+  };
 }
 
 /** Export plan describing the full render. */
@@ -341,6 +354,14 @@ export interface ExportSettings {
     transitionIn?: PlannedItem['transitionIn'];
     /** Stacking order of the item's track; larger is nearer the viewer. */
     trackOrder?: number;
+    /** The track's auto-duck settings as stored (SPEC 12 §6.7), including whether it is on. */
+    trackDucking?: {
+      enabled?: boolean;
+      reductionDb?: number;
+      attackMs?: number;
+      releaseMs?: number;
+      triggerTrackIds?: readonly string[];
+    };
   }>;
 }
 
@@ -428,6 +449,21 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         opacity: item.opacity,
         blendMode: item.blendMode,
         trackOrder: item.trackOrder,
+        /*
+          Only an enabled track ducks — a disabled one that still carries settings is off, which is
+          the spec's "off by default and never applied silently". The defaults are filled here so
+          the mixer never has to decide what a missing `reductionDb` means.
+        */
+        ...(item.trackDucking?.enabled
+          ? {
+              trackDucking: {
+                reductionDb: item.trackDucking.reductionDb ?? -12,
+                attackMs: item.trackDucking.attackMs ?? 120,
+                releaseMs: item.trackDucking.releaseMs ?? 400,
+                triggerTrackIds: item.trackDucking.triggerTrackIds ?? [],
+              },
+            }
+          : {}),
         transitionIn: item.transitionIn,
         effects: item.effects,
         captionSegment: item.captionSegment,

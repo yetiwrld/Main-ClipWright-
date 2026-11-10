@@ -125,6 +125,7 @@ function fakeTimeline(state: TimelineState, overrides: Partial<TimelineApi> = {}
     duplicate: vi.fn(() => true),
     addMarkerAt: vi.fn(() => true),
     toggleMute: vi.fn(() => true),
+    toggleDucking: vi.fn(() => true),
     toggleMagnetic: vi.fn(() => true),
     placeMedia: vi.fn(() => true),
     dismissNotes: vi.fn(),

@@ -1279,3 +1279,213 @@ describe.skipIf(!HAS_FFMPEG)('a music bed that ducks under speech (SPEC 12 §6.7
   });
 });
 
+
+describe.skipIf(!HAS_FFMPEG)('track-level auto-ducking (SPEC 12 §6.7)', () => {
+  /*
+    The track-level feature the spec describes, as opposed to the per-item flag above. Its six
+    settings have been in the project schema since the file format was written and no renderer read
+    any of them, so this asserts the two things that make it real: the depth is the track's, and the
+    triggers are the tracks it names.
+  */
+
+  const build = async (options: {
+    name: string;
+    triggerTrackIds: readonly string[] | null;
+    reductionDb?: number;
+  }) => {
+    const bedSource = makeConstantToneFile('tbed.wav', { seconds: 2, volume: 0.5, frequency: 200 });
+    const voiceSource = makeConstantToneFile('tvoice.wav', { seconds: 1, volume: 0.5, frequency: 900 });
+    const otherSource = makeConstantToneFile('tother.wav', { seconds: 1, volume: 0.5, frequency: 1300 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'bed',
+            trackId: 'track-music',
+            type: 'audio',
+            mediaId: 'media-bed',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            trackOrder: 0,
+            /*
+              `duckUnderSpeech` is what puts the item in the *beds* list at all, which is what
+              makes it duckable — but it also means the per-item fallback applies when there are no
+              track settings. That is the behaviour being pinned in the last test below, and it is
+              why the "no settings" case still ducks: the item asked for it.
+            */
+            duckUnderSpeech: true,
+            trackDucking:
+              options.triggerTrackIds === null
+                ? undefined
+                : {
+                    enabled: true,
+                    reductionDb: options.reductionDb ?? -12,
+                    attackMs: 120,
+                    releaseMs: 400,
+                    triggerTrackIds: options.triggerTrackIds,
+                  },
+          },
+          {
+            id: 'voice',
+            trackId: 'track-voice',
+            type: 'audio',
+            mediaId: 'media-voice',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            trackOrder: 1,
+          },
+        ],
+      }),
+    );
+    const sources: Record<string, string> = {
+      'media-bed': bedSource,
+      'media-voice': voiceSource,
+      'media-other': otherSource,
+    };
+    const wavPath = join(TMP, `tduck-${options.name}.wav`);
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => sources[mediaId] ?? bedSource),
+      wavPath,
+    });
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    const energy = (fromUs: number, toUs: number): number => {
+      const from = Math.round((fromUs / 1_000_000) * MIX_SAMPLE_RATE);
+      const to = Math.min(decoded.samples.length / 2, Math.round((toUs / 1_000_000) * MIX_SAMPLE_RATE));
+      if (to <= from) return 0;
+      const k = (2 * Math.PI * 200) / MIX_SAMPLE_RATE;
+      const coeff = 2 * Math.cos(k);
+      let s1 = 0;
+      let s2 = 0;
+      for (let index = from; index < to; index += 1) {
+        const s0 = (decoded.samples[index * 2] ?? 0) + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - coeff * s1 * s2)) / Math.max(1, to - from);
+    };
+    return { during: energy(200_000, 800_000), after: energy(1_500_000, 1_950_000) };
+  };
+
+  it('ducks under a track it names', async () => {
+    const levels = await build({ name: 'named', triggerTrackIds: ['track-voice'] });
+    expect(levels.during).toBeLessThan(levels.after * 0.5);
+  }, 120_000);
+
+  it('does not duck under a track it does not name', async () => {
+    /*
+      The assertion that the *selection* is honoured rather than the feature being "everything
+      ducks under everything", which the previous test alone would accept.
+    */
+    const levels = await build({ name: 'unnamed', triggerTrackIds: ['track-other'] });
+    const ratio = levels.during / levels.after;
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
+  }, 120_000);
+
+  it('uses the track’s depth, not a hardcoded one', async () => {
+    /*
+      The mixer hardcoded −12 dB. A track asking for −3 and one asking for −24 must produce
+      measurably different files, or the control is a control over nothing.
+    */
+    const shallow = await build({ name: 'shallow', triggerTrackIds: ['track-voice'], reductionDb: -3 });
+    const deep = await build({ name: 'deep', triggerTrackIds: ['track-voice'], reductionDb: -24 });
+    const shallowRatio = shallow.during / shallow.after;
+    const deepRatio = deep.during / deep.after;
+    expect(deepRatio).toBeLessThan(shallowRatio);
+  }, 180_000);
+
+  it('falls back to the per-item flag when the track has no settings', async () => {
+    /*
+      Two features, one curve. The per-item `duckUnderSpeech` is what an older project carries, and
+      it has always meant "duck me under everything, at −12 dB". A track that has enabled settings
+      overrides that with its own triggers and depth; a track with none leaves the older behaviour
+      intact. Both are asserted here because the interesting failure is either one being dropped
+      while the other keeps passing.
+    */
+    const levels = await build({ name: 'none', triggerTrackIds: null });
+    /* Ducked — by the item's own flag, not by a default. */
+    expect(levels.during).toBeLessThan(levels.after * 0.5);
+  }, 120_000);
+
+  it('does nothing when neither the track nor the item asks for it', async () => {
+    /*
+      The real "never applied silently": a bed with no track settings and no flag is not an item
+      the mixer considers duckable at all, so it plays flat. This is the control for every ducking
+      test above — without it, a mixer that ducked every audio item would pass them all.
+    */
+    const bedSource = makeConstantToneFile('flatbed.wav', { seconds: 2, volume: 0.5, frequency: 200 });
+    const voiceSource = makeConstantToneFile('flatvoice.wav', { seconds: 1, volume: 0.5, frequency: 900 });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'bed',
+            trackId: 'track-music',
+            type: 'audio',
+            mediaId: 'media-bed',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            trackOrder: 0,
+          },
+          {
+            id: 'voice',
+            trackId: 'track-voice',
+            type: 'audio',
+            mediaId: 'media-voice',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            trackOrder: 1,
+          },
+        ],
+      }),
+    );
+    const sources: Record<string, string> = { 'media-bed': bedSource, 'media-voice': voiceSource };
+    const wavPath = join(TMP, 'tduck-none-flat.wav');
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => sources[mediaId] ?? bedSource),
+      wavPath,
+    });
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    const energy = (fromUs: number, toUs: number): number => {
+      const from = Math.round((fromUs / 1_000_000) * MIX_SAMPLE_RATE);
+      const to = Math.min(decoded.samples.length / 2, Math.round((toUs / 1_000_000) * MIX_SAMPLE_RATE));
+      const k = (2 * Math.PI * 200) / MIX_SAMPLE_RATE;
+      const coeff = 2 * Math.cos(k);
+      let s1 = 0;
+      let s2 = 0;
+      for (let index = from; index < to; index += 1) {
+        const s0 = (decoded.samples[index * 2] ?? 0) + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - coeff * s1 * s2)) / Math.max(1, to - from);
+    };
+    const ratio = energy(200_000, 800_000) / energy(1_500_000, 1_950_000);
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
+  }, 120_000);
+});

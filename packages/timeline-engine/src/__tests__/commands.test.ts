@@ -20,6 +20,7 @@ import {
   moveItems,
   moveItemsToTrack,
   setTrackMuted,
+  setTrackDucking,
   setTrackMagnetic,
   rollAt,
   detachAudio,
@@ -2700,5 +2701,117 @@ describe('linked selection (SPEC 09 §9.6)', () => {
     if (!moved.ok) throw new Error(moved.message);
     // Zero delta: nothing to do, and the partner must not be disturbed.
     expect(moved.state.items[audioId]!.startUs).toBe(state.items[audioId]!.startUs);
+  });
+});
+
+describe('setTrackDucking (SPEC 12 §6.7)', () => {
+  /*
+    Auto-duck's settings have been in the project schema from the start with no command to write
+    them, so the feature could not be turned on by any means — the UI had nothing to call. These
+    tests are about the writer, and about the two values it refuses rather than stores.
+  */
+  const state = () => createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+  const audioTrack = (s: TimelineState) => s.tracks.find((track) => track.kind === 'audio')!;
+
+  it('turns ducking on, with the defaults the schema declares', () => {
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const result = setTrackDucking(base, { trackId, ducking: { enabled: true } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ducking = result.state.tracks.find((track) => track.id === trackId)!.ducking!;
+    expect(ducking.enabled).toBe(true);
+    /* Filled in, not left undefined: a renderer reading `reductionDb` should not have to guess. */
+    expect(ducking.reductionDb).toBe(-12);
+    expect(ducking.attackMs).toBe(120);
+    expect(ducking.releaseMs).toBe(400);
+    expect(ducking.thresholdDb).toBe(-42);
+    expect(ducking.triggerTrackIds).toEqual([]);
+  });
+
+  it('merges rather than replacing, so one control does not reset the others', () => {
+    /*
+      The inspector edits one value at a time. Replacing the object would make setting the depth
+      silently turn the feature off — the same bug shape the item's crop avoids by merging.
+    */
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const enabled = setTrackDucking(base, { trackId, ducking: { enabled: true } });
+    if (!enabled.ok) throw new Error('setup');
+    const reduced = setTrackDucking(enabled.state, { trackId, ducking: { reductionDb: -18 } });
+    expect(reduced.ok).toBe(true);
+    if (!reduced.ok) return;
+    const ducking = reduced.state.tracks.find((track) => track.id === trackId)!.ducking!;
+    expect(ducking.enabled).toBe(true);
+    expect(ducking.reductionDb).toBe(-18);
+  });
+
+  it('keeps the tracks it was told to trigger on', () => {
+    const base = state();
+    const target = audioTrack(base);
+    const other = base.tracks.find((track) => track.id !== target.id)!;
+    const result = setTrackDucking(base, {
+      trackId: target.id,
+      ducking: { enabled: true, triggerTrackIds: [other.id] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.tracks.find((track) => track.id === target.id)!.ducking!.triggerTrackIds).toEqual([other.id]);
+  });
+
+  it('refuses a reduction that is not a reduction', () => {
+    /*
+      Zero or positive stores a setting every renderer reads as "held down" while nothing gets
+      quieter — a control that looks applied and does nothing.
+    */
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const zero = setTrackDucking(base, { trackId, ducking: { reductionDb: 0 } });
+    expect(zero.ok).toBe(false);
+    const boost = setTrackDucking(base, { trackId, ducking: { reductionDb: 6 } });
+    expect(boost.ok).toBe(false);
+    if (boost.ok) return;
+    expect(boost.message).toContain('quieter');
+  });
+
+  it('refuses a negative ramp', () => {
+    /* A negative attack runs the envelope backwards — a swell where a dip was asked for. */
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const attack = setTrackDucking(base, { trackId, ducking: { attackMs: -1 } });
+    expect(attack.ok).toBe(false);
+    if (attack.ok) return;
+    expect(attack.message).toContain('attack');
+    const release = setTrackDucking(base, { trackId, ducking: { releaseMs: -50 } });
+    expect(release.ok).toBe(false);
+  });
+
+  it('clamps a depth outside the spec’s range instead of refusing it', () => {
+    /*
+      −3…−24 is the spec's range and a slider cannot leave it, so a value beyond it is a
+      hand-edited file. Clamping keeps the project usable; refusing would make a whole project
+      unopenable over one number, which is worse than a slightly different duck.
+    */
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const deep = setTrackDucking(base, { trackId, ducking: { reductionDb: -80 } });
+    expect(deep.ok).toBe(true);
+    if (!deep.ok) return;
+    expect(deep.state.tracks.find((track) => track.id === trackId)!.ducking!.reductionDb).toBe(-24);
+  });
+
+  it('is undoable in one step', () => {
+    const base = state();
+    const trackId = audioTrack(base).id;
+    const result = setTrackDucking(base, { trackId, ducking: { enabled: true, reductionDb: -9 } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const undone = applyPatches(result.state, result.inverse);
+    expect(undone.tracks.find((track) => track.id === trackId)!.ducking).toBeUndefined();
+  });
+
+  it('refuses a track that is not there', () => {
+    const result = setTrackDucking(state(), { trackId: 'gone', ducking: { enabled: true } });
+    expect(result.ok).toBe(false);
   });
 });

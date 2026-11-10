@@ -59,6 +59,7 @@ export {
   setGuidesLocked,
   clearGuides,
   addMarker,
+  setTrackDucking,
   setTrackMuted,
   setTrackMagnetic,
   rollAt,

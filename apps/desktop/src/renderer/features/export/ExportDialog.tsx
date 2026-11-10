@@ -276,6 +276,12 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
     anySolo ? state.tracks.filter((track) => !track.solo).map((track) => track.id) : [],
   );
   const items: Array<Record<string, unknown>> = [];
+  /*
+    One lookup per item rather than a map built up front: a project has tens of tracks and
+    thousands of items, and `find` over a track list is cheaper than the allocation. Named so the
+    two ducking lines below read as one thing.
+  */
+  const trackOf = (trackId: string) => state.tracks.find((track) => track.id === trackId);
   for (const item of Object.values(state.items)) {
     if (!item) continue;
     if (hiddenTracks.has(item.trackId)) continue;
@@ -319,6 +325,16 @@ export function collectExportItems(state: TimelineState | null): Array<Record<st
       // The export needs to know which clip is on top, and the item itself does
       // not store that — the track's order does.
       trackOrder: state.tracks.find((track) => track.id === item.trackId)?.order ?? 0,
+      /*
+        The track's auto-duck settings (SPEC 12 §6.7), which until now lived only in the project
+        file: six validated parameters — `enabled`, `triggerTrackIds`, `reductionDb`,
+        `thresholdDb`, `attackMs`, `releaseMs` — that no renderer read, so the control would have
+        been a control over nothing. Carried with the item because that is how the plan and the
+        mixer are structured; the mixer then ducks a *track* under the tracks it names.
+      */
+      ...(trackOf(item.trackId)?.ducking !== undefined
+        ? { trackDucking: trackOf(item.trackId)!.ducking }
+        : {}),
       // Transitions travel too (SPEC 12 §4); without them the export cuts hard
       // where the preview fades, which is the difference a user notices first.
       transitionIn: item.transitionIn,

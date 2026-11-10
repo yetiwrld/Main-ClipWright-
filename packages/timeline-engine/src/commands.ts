@@ -1693,6 +1693,85 @@ export function setTrackMuted(
   return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
 }
 
+/**
+ * Set a track's auto-duck settings (SPEC 12 §6.7).
+ *
+ * The six settings — `enabled`, `triggerTrackIds`, `reductionDb`, `thresholdDb`, `attackMs`,
+ * `releaseMs` — have been in the project schema from the start and were written by no command, so
+ * a user could not turn ducking on even if a renderer had been able to honour it. This is the
+ * writer.
+ *
+ * Two refusals, both about values that would silently do nothing:
+ *
+ * - **A reduction of zero or a positive gain** is not ducking. Accepting it stores a setting that
+ *   every renderer reads as "held down" while nothing gets quieter.
+ * - **A negative attack or release** is not a ramp. The schema does not constrain them, and a
+ *   negative ramp makes the envelope run backwards — audibly a swell rather than a dip.
+ *
+ * The range for `reductionDb` is the spec's own (−3…−24) and is *clamped* rather than refused: a
+ * slider cannot produce a value outside it, so a value that does is a hand-edited file, and
+ * clamping keeps the project openable while making the result honest.
+ */
+export function setTrackDucking(
+  state: TimelineState,
+  params: {
+    trackId: string;
+    ducking: {
+      enabled?: boolean;
+      triggerTrackIds?: string[];
+      reductionDb?: number;
+      thresholdDb?: number;
+      attackMs?: number;
+      releaseMs?: number;
+    };
+  },
+): CommandResult {
+  const track = state.tracks.find((candidate) => candidate.id === params.trackId);
+  if (!track) return fail('not_found', 'That track no longer exists.');
+
+  const reduction = params.ducking.reductionDb;
+  if (reduction !== undefined) {
+    if (!Number.isFinite(reduction)) return fail('invalid', 'That reduction is not a number.');
+    if (reduction >= 0) {
+      return fail('invalid', 'Ducking has to make the track quieter, so the reduction must be negative.');
+    }
+  }
+  for (const [label, value] of [
+    ['attack', params.ducking.attackMs],
+    ['release', params.ducking.releaseMs],
+  ] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      return fail('invalid', `The ${label} time cannot be negative.`);
+    }
+  }
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    const target = draft.tracks.find((candidate) => candidate.id === params.trackId);
+    if (!target) return;
+    /*
+      Merged rather than replaced: the inspector edits one control at a time, and replacing the
+      object would reset the other five — the same rule the item's crop follows.
+    */
+    const current = target.ducking ?? {
+      enabled: false,
+      triggerTrackIds: [],
+      reductionDb: -12,
+      thresholdDb: -42,
+      attackMs: 120,
+      releaseMs: 400,
+    };
+    target.ducking = {
+      ...current,
+      ...params.ducking,
+      ...(params.ducking.reductionDb !== undefined
+        ? { reductionDb: Math.min(-3, Math.max(-24, params.ducking.reductionDb)) }
+        : {}),
+    };
+  });
+
+  return { ok: true, state: nextState, patches, inverse, affectedItemIds: [], notes: [] };
+}
+
 /** Toggle the disabled flag on an item (SPEC 09 §12, context menu Enable/Disable). */
 export function toggleItemDisabled(
   state: TimelineState,

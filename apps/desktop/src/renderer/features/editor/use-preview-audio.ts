@@ -38,6 +38,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   clampPlaybackRate,
+  duckingGainAt,
   gainAtInstant,
   gainCurveFor,
   previewAudioRequests,
@@ -386,7 +387,24 @@ export function usePreviewAudio(
         exercise. `setTargetAtTime` with a short time constant rather than an assignment: a raw
         `gain.value` write per frame is a discontinuity per frame, which is a rasp on a fade.
       */
-      chain.gain.gain.setTargetAtTime(gainAtInstant(request, timeUs), context.currentTime, 0.02);
+      /*
+        Auto-ducking (SPEC 12 §6.7) multiplies into the same node as the envelope rather than
+        getting one of its own. Both are gains on the item's path and both are functions of time;
+        two nodes would be two places to be wrong, and the product is the same either way.
+
+        It is evaluated per frame like the envelope, from the *same* pure function the mixer takes
+        its per-sample curve from — which is what makes §6.7's "used identically by preview
+        automation and export mixer" true of the code rather than of two people's intentions. The
+        track's ramps come from `duckingSpans`, computed once in `previewAudioRequests`.
+      */
+      const duck = request.ducking.length
+        ? duckingGainAt(request.ducking, timeUs, request.duckingRamps)
+        : 1;
+      chain.gain.gain.setTargetAtTime(
+        gainAtInstant(request, timeUs) * duck,
+        context.currentTime,
+        0.02,
+      );
       /*
         The rate is applied per frame rather than once, because an element that is repositioned
         (a seek) keeps its rate but an element whose source was replaced does not, and a single

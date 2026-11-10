@@ -68,3 +68,15 @@ export {
   type ClockSource,
   type PlaybackRate,
 } from './playback-clock.js';
+
+export {
+  DUCKING_DEFAULTS,
+  DUCKING_REDUCTION_RANGE,
+  duckingGainAt,
+  duckingSpans,
+  resolveDucking,
+  speechFromWords,
+  type DuckingInput,
+  type DuckingSettings,
+  type DuckingSpan,
+} from './ducking.js';

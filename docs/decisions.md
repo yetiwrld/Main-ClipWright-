@@ -1731,3 +1731,62 @@ reason none of them states and changing them all is a separate, testable change.
 The process lesson is the one this project keeps relearning: **the local suite passing is evidence
 about the local machine**. A test that gates on the presence of a binary has to gate on its
 *runnability*, and only CI on the other platform can tell you that you did not.
+
+## 51. Auto-ducking was six settings and no feature
+
+SPEC 12 §6.7 describes auto-ducking as a **track** feature: *Duck this track when [Original audio /
+Voiceover / selected tracks] has speech*, with a reduction adjustable −3…−24 dB, a −42 dBFS
+threshold, 120 ms attack, 400 ms release, and the envelope "used identically by preview automation
+and export mixer (no real-time side-chain)".
+
+The project schema has held all six of those as a `ducking` object on every track since the file
+format was written. **Nothing read them.** Not the preview, not the mixer, and no command could
+write them either — so a user could not turn the feature on even if a renderer had honoured it. The
+`duckUnderSpeech` boolean fixed in the previous slice is a *different* feature: it asks the item
+whether it wants ducking, cannot name its triggers, and its depth is a hardcoded −12. The schema's
+track object was a whole unreachable feature sitting next to it.
+
+This is the same bug shape as `plan.music` and as `duckUnderSpeech` itself, at the largest scale
+yet: not one dropped value but six, validated on load and rendered by nobody.
+
+**One module, two renderers.** The arithmetic lives in `packages/audio-core/src/ducking.ts` and
+returns **spans** — where the track is held down — rather than a sample array. A sample array would
+be tied to one sample rate and one buffer length; spans convert to whatever a consumer needs, and
+the mixer takes its per-sample curve from `duckingCurve` over the same spans. §6.7's binding
+sentence is therefore a property of the code: the preview and the file cannot disagree, because
+there is one envelope and two serialisations of it.
+
+**The comparison is a test.** `export-core`'s `audio-mix.test.ts` imports both and samples the two
+at ~2000 instants across four seconds, including every ramp. Neither package can import the other
+without a cycle, so that test lives where both are reachable — and it is the one that would fail if
+either ramp shape changed.
+
+**Decisions the spec leaves open, decided here:**
+
+- **An empty `triggerTrackIds` means "everything else"**, not "nothing". That is the only reading
+  under which an unconfigured auto-duck does something, and it matches what the control says.
+- **A region with no `trackId` never matches a named trigger.** Treating unknown as a match means
+  the bed ducks under a track the user explicitly excluded.
+- **Speech regions closer than the release time are merged.** Two sentences with a 100 ms pause
+  would otherwise release and re-attack inside 400 ms, which is audible as a pulse. This is the
+  spec's "smoothing identical for all uses" applied at the span level.
+- **A reduction of zero or a positive gain is refused**, not stored. Every renderer reads a stored
+  setting as "held down", so zero is a control that looks applied and does nothing.
+- **A depth outside −3…−24 is clamped rather than refused.** A slider cannot leave the range, so a
+  value beyond it is a hand-edited file; clamping keeps the project openable, and refusing would
+  make one number cost a whole project.
+- **The preview derives speech from the other items' spans**, not from decoded audio. The spec
+  allows either. The preview has no decode and usually no transcript, but it does know where every
+  other item sits — and an analysis-based version would be more accurate about *speech* while
+  disagreeing with the export, which is the worse error.
+
+Two mutations survived the first pass and both were redundant code, not missing tests: an
+`enabled` check in the preview that `duckingSpans` already performs, and — after the first fix — a
+`muted` filter whose test had removed the muted item from the timeline entirely rather than muting
+it. The first was deleted; the second got a test that holds an item and mutes it, plus a second for
+a hidden track. A surviving mutation is a question, and the answer is sometimes "delete the line".
+
+Twenty-one tests on the module, nine on the preview plan, eight on the command, and eight on the
+produced audio against the real ffmpeg — including one that asks for −3 dB and one for −24 dB and
+requires the two files to differ, which is the assertion that the depth is the track's rather than
+the mixer's hardcoded default.

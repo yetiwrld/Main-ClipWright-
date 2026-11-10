@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { duckingGainAt, duckingSpans } from '@clipwright/audio-core';
 import { gainAt, gainToDb } from '@clipwright/audio-core';
 import {
   LIMITER_CEILING_DB,
@@ -564,5 +565,54 @@ describe('de-click (SPEC 12 §12 item 8)', () => {
     // The last steps of the ramp are much smaller than a linear ramp's step would be.
     expect(1 - nearEnd).toBeLessThan(0.02);
     expect(atEnd).toBe(1);
+  });
+});
+
+describe('the ducking envelope agrees with the preview (SPEC 12 §6.7)', () => {
+  /*
+    §6.7's binding sentence: the envelope is "**used identically by preview automation and export
+    mixer** (no real-time side-chain)". Two implementations will drift, and the drift is inaudible
+    in the direction that matters — a preview that ducks a little differently from the file is a
+    preview nobody trusts and nobody can point at.
+
+    The two live in different packages: `audio-core`'s `duckingSpans`/`duckingGainAt` produce the
+    preview's ramps from spans, and this package's `duckingCurve` produces the export's per-sample
+    gain from sample indices. Neither can import the other without a cycle, so the comparison
+    belongs here — the one place both are reachable.
+  */
+  it('matches the preview’s gain at every sampled instant', () => {
+    const rate = 48_000;
+    const length = rate * 4;
+    const settings = {
+      enabled: true,
+      triggerTrackIds: [],
+      reductionDb: -12,
+      thresholdDb: -42,
+      attackMs: 120,
+      releaseMs: 400,
+    };
+    const spans = duckingSpans({
+      settings,
+      items: [],
+      speech: [{ startUs: 1_500_000, endUs: 2_000_000 }],
+    });
+    const curve = duckingCurve({
+      length,
+      triggers: spans.map(
+        (span) =>
+          [
+            Math.round((span.startUs / 1_000_000) * rate),
+            Math.round((span.endUs / 1_000_000) * rate),
+          ] as [number, number],
+      ),
+      reductionDb: settings.reductionDb,
+      attackMs: settings.attackMs,
+      releaseMs: settings.releaseMs,
+    });
+
+    for (let index = 0; index < length; index += 97) {
+      const timeUs = (index / rate) * 1_000_000;
+      expect(duckingGainAt(spans, timeUs, settings), `at ${timeUs} µs`).toBeCloseTo(curve[index]!, 3);
+    }
   });
 });

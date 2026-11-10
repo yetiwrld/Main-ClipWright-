@@ -538,3 +538,18 @@ context menus, in-editor import, the fill lock).
     that item. Nothing in this feature still requires deleting an item to change how it
     looks. The picker's search does not match tag words yet — it matches names and the words
     in them — which is a want, not a gap, and is recorded here rather than fixed by accident.
+
+---
+
+## 5. Auto-ducking keys off item placement, not detected speech
+
+The track-level ducking feature (SPEC 12 §6.7) holds a track down wherever another track has an
+item, not wherever another track has *speech*. A music bed under a ten-second clip that is silent
+for eight of those seconds is ducked for all ten. The spec allows either implementation; this one
+was chosen because the preview has no decode and usually no transcript, and because deriving the
+envelope from placement is what lets preview and export share a single function — an analysis-based
+version would be more accurate about speech while disagreeing with the file.
+
+The threshold setting (`thresholdDb`, default −42) is stored and round-tripped but does not yet
+gate anything: placement is treated as unconditional speech. When a detector exists, it belongs at
+the point where spans are computed, and both renderers inherit it.

@@ -29,6 +29,7 @@
  *    picture and the sound in two different places, which is worse than an imperfect crossfade.
  */
 import { gainAt, type FadeCurve, type GainEnvelopeInput } from './envelope.js';
+import { duckingSpans, resolveDucking, type DuckingSpan } from './ducking.js';
 
 /** One audible item, as the graph should build it. */
 export interface PreviewAudioRequest {
@@ -57,6 +58,23 @@ export interface PreviewAudioRequest {
   pan: number;
   /** Whether the item is silenced by another track's solo, which the graph dims rather than drops. */
   silencedBySolo: boolean;
+  /**
+   * Where this item's track is auto-ducked (SPEC 12 §6.7), in timeline microseconds.
+   *
+   * Empty for a track with no ducking, which is almost all of them. The graph schedules the same
+   * attack/release ramps on the *track's* node that the mixer computes per sample — the same
+   * `duckingSpans`, so §6.7's "used identically by preview automation and export mixer" is a
+   * property of the code rather than of two people agreeing.
+   */
+  ducking: readonly DuckingSpan[];
+  /**
+   * The ramps the spans above are shaped by.
+   *
+   * Carried alongside rather than looked up by the consumer: the spans and the ramps come from one
+   * set of settings, and a caller that resolved them separately could pair a track's spans with
+   * another track's attack time — a mismatch that would sound almost right.
+   */
+  duckingRamps: { reductionDb: number; attackMs: number; releaseMs: number };
 }
 
 /** The timeline facts this module needs. Structural, so no `TimelineState` import is required. */
@@ -75,6 +93,20 @@ export interface PreviewAudioTimeline {
     solo?: boolean;
     volumeDb?: number;
     order?: number;
+    /**
+     * Auto-duck settings (SPEC 12 §6.7), as the schema stores them.
+     *
+     * Optional because a track written before the feature existed has none — and "none" has to
+     * mean off, which is the spec's own default.
+     */
+    ducking?: {
+      enabled?: boolean;
+      triggerTrackIds?: readonly string[];
+      reductionDb?: number;
+      thresholdDb?: number;
+      attackMs?: number;
+      releaseMs?: number;
+    };
   }>;
   items: Readonly<Record<string, {
     id: string;
@@ -121,6 +153,58 @@ const AUDIBLE_TYPES = new Set(['video', 'audio']);
  */
 export function previewAudioRequests(timeline: PreviewAudioTimeline): PreviewAudioRequest[] {
   const tracks = new Map(timeline.tracks.map((track) => [track.id, track]));
+
+  /*
+    Speech regions for auto-ducking (SPEC 12 §6.7), derived from the *other* audible items on the
+    timeline rather than from decoded audio.
+
+    The spec offers two inputs: "the trigger tracks' post-gain signal ... or the transcript word
+    ranges when available, for speech detection without audio analysis". The preview has neither a
+    decode nor, usually, a transcript — but it does know where every other item sits, and an item
+    on an audio-bearing track that is playing is exactly what the mixer treats as a cue. Using the
+    same source means the preview's ducking and the file's ducking cover the same instants, which
+    is the property that matters; an analysis-based version would be more accurate about *speech*
+    and would disagree with the export, which is worse.
+  */
+  const audibleItems = Object.values(timeline.items).filter(
+    (item) =>
+      !item.muted &&
+      !item.disabled &&
+      (item.type === 'audio' || item.type === 'video') &&
+      !(tracks.get(item.trackId)?.muted ?? false) &&
+      !(tracks.get(item.trackId)?.hidden ?? false),
+  );
+  const duckingFor = (trackId: string): readonly DuckingSpan[] => {
+    const track = tracks.get(trackId);
+    if (!track?.ducking) return [];
+    /*
+      No `enabled` check here: `duckingSpans` returns nothing for a disabled track, and a second
+      guard was redundant — a mutation deleting it changed no output. One check, in the module that
+      owns the decision.
+    */
+    const settings = resolveDucking(track.ducking);
+    const speech = audibleItems
+      .filter((other) => other.trackId !== trackId)
+      .map((other) => ({ startUs: other.startUs, endUs: other.startUs + other.durationUs, trackId: other.trackId }));
+    return duckingSpans({ settings, items: [], speech });
+  };
+  /*
+    One computation per track, not per item: a track with twelve items would otherwise walk the
+    whole timeline twelve times to compute the same spans.
+  */
+  const duckingRampsFor = (trackId: string) => {
+    const settings = resolveDucking(tracks.get(trackId)?.ducking);
+    return {
+      reductionDb: settings.reductionDb,
+      attackMs: settings.attackMs,
+      releaseMs: settings.releaseMs,
+    };
+  };
+  const duckingByTrack = new Map<string, readonly DuckingSpan[]>();
+  const duckingForTrack = (trackId: string): readonly DuckingSpan[] => {
+    if (!duckingByTrack.has(trackId)) duckingByTrack.set(trackId, duckingFor(trackId));
+    return duckingByTrack.get(trackId)!;
+  };
   /*
     Solo is a document-wide question, so it is answered once. A hidden track is *not* soloed out
     of existence: hiding is a view concern, and the export honours mute while ignoring hide
@@ -208,6 +292,12 @@ export function previewAudioRequests(timeline: PreviewAudioTimeline): PreviewAud
       */
       pan: item.pan === undefined ? 0 : Math.max(-1, Math.min(1, item.pan / 100)),
       silencedBySolo: false,
+      /*
+        Computed from the *other* items, so an item on a ducked track never triggers its own
+        reduction — which would be a track ducking under itself.
+      */
+      ducking: duckingForTrack(item.trackId),
+      duckingRamps: duckingRampsFor(item.trackId),
     });
   }
 
