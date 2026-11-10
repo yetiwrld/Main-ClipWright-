@@ -39,6 +39,14 @@ export {
 export { crc32 } from './crc32.js';
 
 export {
+  captureKitFromClip,
+  type CapturableItem,
+  type CapturableStyle,
+  type CaptureReport,
+  type CaptureSource,
+} from './capture.js';
+
+export {
   ALL_KIT_PARTS,
   diagnoseKit,
   findKitAppliedItems,

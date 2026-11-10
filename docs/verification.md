@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  125 passed (125)
-     Tests  3106 passed (3106)
+Test Files  126 passed (126)
+     Tests  3123 passed (3123)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,8 +116,8 @@ Test Files  125 passed (125)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 71 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, and the `.cwbrand` archive written by hand and verified with a real `unzip` |
-| **Total** | **3106** | 125 files |
+| `packages/brand-kits` | 88 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, and capturing a kit from the current clip by measuring geometry back into percentages |
+| **Total** | **3123** | 126 files |
 
 ### Tests that run real processes
 
@@ -821,9 +821,47 @@ missing-asset report, a template counted as an asset, skipping `importBrandKit`,
 extension sniff. The CRC ones are the pointed ones — a wrong checksum still yields a file that
 this reader would happily read, and only `unzip -t` notices.
 
-**Not built yet, and deliberately not claimed:** the kit editor UI, the "from the current clip"
-capture, and building a composition from a template. They are recorded in `docs/limitations.md`
-rather than half-wired into the app.
+### Brand kits: capturing one from the clip in front of you
+
+**The clip already is the kit; this reads it back out.** `captureKitFromClip` takes the items,
+the tracks the user selected, the canvas and the resolved caption style, and returns a kit plus
+a list of what it could not take. The distinction that shapes the whole module is between
+*facts* (a caption's `captionStyleId`, a fill colour, a font family, an image's `mediaId`) and
+*judgements* (which corner an item "means", what percentage of the short side it occupies).
+Only facts are read; where a judgement would be invented, the module writes a sentence instead.
+
+**Geometry is measured back into the kit's own units, which is the part that matters.** An image
+at `x 0.44375` on 1920×1080 is a box 12% of the short side, 4% in from the right edge. The
+captured kit stores those percentages, so re-applying it to a 1080×1920 canvas puts the box at
+12% of *that* short side and 4% in from *its* right edge — asserted in the test, because a
+capture that stored pixels would be a kit that only works on the clip it came from.
+
+**The middle of the frame is not a corner.** A corner is the outer third of both axes; without
+that rule the portrait in the centre of the frame becomes the kit's logo and is pasted into a
+corner on every clip the kit is applied to. The nearest qualifying item wins when two are near.
+
+**Colours and the font come from the resolved style, mapped, not guessed.** The fill is the
+kit's `text`, the highlight is its `accent`, the background is its `background`; `primary` and
+`secondary` have no counterpart in a caption style, so they take the text colour rather than a
+brand colour derived from an outline. With **no style there is nothing to map** and the kit gets
+black and white — a kit the user edits knowingly, rather than one that looks finished. The
+caption font crosses over without its size, because size belongs to the style, and a captured
+size would fight the style the kit is applied with.
+
+**What it cannot take, it says.** No captions; a style id that could not be resolved (SPEC 13
+§8.3's missing-font case one step earlier); text and shape items, which the kit's schema has no
+field for yet; a logo that started part-way through, since a kit has no "appear at 4 s". Eleven
+notes exist in all, and each one is a place the alternative was a silent guess.
+
+**Mutations.** 11, all bite — after three were fixed by better fixtures. The margin was only
+tested on a right-hand corner, so measuring a **left** one from the y centre passed everything;
+a fixture where the two distances differ (43.2 px against 54 px) now catches it. A style
+supplied *without* a caption to bind it to was taken anyway, colouring the kit from the wrong
+look. And a media-less image nearer the corner than the real logo won the race and produced a
+kit with no asset — the schema requires one — so the fixture now has both.
+
+**Not built yet, and deliberately not claimed:** the kit editor UI and building a composition
+from a template. Both are recorded in `docs/limitations.md` rather than half-wired into the app.
 
 **Mutations.** 19 were run against the arc maths, the parser, the tokeniser and the wiring;
 all bite. Two survived the first pass and were resolved rather than left: a `largeArc` delta

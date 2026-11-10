@@ -468,8 +468,11 @@ context menus, in-editor import, the fill lock).
     (`packages/brand-kits`, 36 tests; the commands in `packages/timeline-engine`, 18 tests;
     20 mutations between them, all biting). Applying produces ordinary items carrying
     `aiProvenance: {tool: 'brand-kit'}`, so a removed kit leaves its work standing. What does
-    not exist is everything a user would touch — the kit list and editor, capturing a kit from
-    a clip, and the buttons that call the commands. The `.cwbrand` **archive** does exist:
+    not exist is everything a user would touch — the kit list and editor, and the buttons
+    that call the commands. Capturing a kit **from the current clip** does exist as data
+    (`captureKitFromClip`: the caption style, its colours and font, and a corner image measured
+    back into percentages), but no button offers it, and text/shape items cannot be captured
+    because the kit's schema has no field for them yet. The `.cwbrand` **archive** does exist:
     `writeBrandKitArchive`/`readBrandKitArchive` write and read a real zip (verified against
     `unzip`), but nothing in the app offers to export or import one yet.
     Nothing in the app mentions brand kits, which is the correct state for an unbuilt feature

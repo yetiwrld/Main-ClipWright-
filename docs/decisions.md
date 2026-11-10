@@ -1090,3 +1090,39 @@ next to them rather than inferred from a build log.
 **A fixture should not share code with the thing under test.** `buildDeflatedArchive` duplicates
 the header writing on purpose. The overlap is a dozen lines; the alternative is a reader tested
 only against the writer's own bugs, which is the failure this whole file exists to avoid.
+
+## 38. Capture reads facts and reports judgements; it never invents a look
+
+**The split is between what is in the project and what only the user knows.** A caption's
+style id, a fill colour, a font family and an image's media id are *facts* — they are written
+down. Which of six corners a top-left item "means", what fraction of the short side it occupies,
+and whether it should show for the whole clip are *judgements*. `captureKitFromClip` reads the
+first and reports the second, and every place it cannot decide produces a sentence rather than a
+default. A kit captured with an invented palette looks finished and is not; one with black and
+white and a note reading "the captions on this clip use no style" is a kit the user knows they
+are about to edit.
+
+**Geometry is measured back into percentages, not pixels.** This is the difference between a kit
+captured from a 16:9 clip and a kit that only works on that clip. An image 4% in from the right
+of a 1920-wide frame becomes `margin: 4`, which `resolvePlacement` re-applies against whatever
+canvas the kit lands on. The same reasoning already governs the placement maths; the capture
+side is the inverse and had to be written as one, because a round trip through pixel values would
+lose the percentages the whole feature is built on.
+
+**A corner is the outer third of both axes, and the middle of the frame is never one.** Without
+that rule a portrait sitting in the centre of the frame becomes the kit's logo, and every clip
+the kit is applied to gets a face in the corner. The rule is deliberately stated as a band rather
+than "nearest corner", because *every* point is nearest some corner — the band is what makes the
+answer "none" possible.
+
+**Colours and fonts come from the resolved style, because they can, and only then.** The caller
+passes the style in — this package does not depend on the caption-style library to read four
+colours — and the mapping is by meaning: fill is the text, highlight is the accent, background is
+the background. The two slots a style has no counterpart for (`primary`, `secondary`) take the
+text colour rather than a colour derived from an outline, and the font crosses over **without its
+size**, because size belongs to the style and a captured size would fight it.
+
+**A capture never validates silently: it round-trips.** The test feeds `captureKitFromClip`'s
+output through `tryParseBrandKit` and `exportBrandKit`, because a captured kit goes into an
+editor and then into a `.cwbrand` file — and a capture that produced kits which fail to validate
+or lose fields on export would be a feature that only looks finished.

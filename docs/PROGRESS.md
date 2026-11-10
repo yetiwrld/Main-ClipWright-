@@ -73,7 +73,9 @@ outro live in `packages/timeline-engine` (26 tests). An intro is an *insert*, no
 placement: the project grows by its length and every unlocked track ripples, so the user's
 cuts stay where they were against the picture. Safe-area presets move a kit's corner
 graphics out of the platform's chrome, with the numbers pinned to `assets/safe-areas.json` by a
-test. A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
+test. A kit can also be captured from the clip in front of you: `captureKitFromClip` reads the
+caption style, its colours and font, and measures a corner image back into percentages so the
+kit works on a different aspect ratio. A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
 without a dependency and verified in the tests with `unzip`, including a checksum check
 that a flipped byte fails. Applying a kit produces ordinary items tagged
 `aiProvenance: {tool: 'brand-kit'}`, which is what makes "delete the kit, keep its work" a
