@@ -48,6 +48,7 @@ import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import { LevelMeter } from './LevelMeter.js';
 import { AudioMetersPopover } from './AudioMetersPopover.js';
 import { useAudioMeter } from './use-audio-meter.js';
+import { usePreviewAudio } from './use-preview-audio.js';
 import { createSeekCoalescer, shouldSeek } from './seek-coalescer.js';
 import {
   scrubFrameUrl,
@@ -420,11 +421,20 @@ export function PreviewPane({
   */
   const [metersOpen, setMetersOpen] = useState(false);
   /*
-    The master meter (SPEC 12 §6.3). Its graph is a tap on the preview's own `<video>`, so
-    it measures what the user hears rather than a model of it, and it is created lazily by
-    the hook because `createMediaElementSource` may only ever be called once per element.
+    The preview's audio graph (SPEC 12 §6.2/§6.3). Every audible item gets its own element and
+    its own gain and pan nodes, summed into one bus — which is what makes an audio-only item
+    audible at all, and pan and volume automation audible as they will be in the file.
+
+    It is fed the timeline rather than reading the store so it stays a pure function of what the
+    preview already has, and it is `null` when there is no timeline (a standalone preview).
   */
-  const audioMeter = useAudioMeter(videoRef, true);
+  const previewAudio = usePreviewAudio(timeline ? state : null, { enabled: !muted });
+  /*
+    The master meter (SPEC 12 §6.3). It taps the *mix bus* when the graph exists, so it measures
+    what the user hears — every layer, panned and enveloped — rather than the bottom picture
+    layer. The hook falls back to the `<video>` element when no graph could be built.
+  */
+  const audioMeter = useAudioMeter(videoRef, true, previewAudio.tap);
   /**
    * The Guides menu's anchor, in viewport coordinates, or `null` while closed.
    *
@@ -1320,6 +1330,14 @@ export function PreviewPane({
       preview would need a Web Audio graph to match the mixer's constant-power pan. The
       export applies it; the preview is centred. Recorded in `docs/limitations.md`.
     */
+    /*
+      Once the graph owns the sound, the element's own output must be silenced or every clip
+      plays twice — once through the element and once through its `MediaElementSource`, a few
+      milliseconds apart, which is the phasing you hear before you can work out why.
+      `muted` rather than `volume = 0`, because it is a boolean and cannot drift; the envelope
+      is applied on the graph's gain node instead, which is the node that can follow a keyframe.
+    */
+    video.muted = previewAudio.ready;
     video.volume = gainAt(
       {
         startUs: bottom.startUs,
@@ -1343,7 +1361,7 @@ export function PreviewPane({
       },
       us,
     );
-  }, [layers, state]);
+  }, [layers, state, previewAudio.ready]);
 
   // Follow the playhead while it moves (scrubbing and playback alike).
   useEffect(() => {
@@ -1351,6 +1369,28 @@ export function PreviewPane({
     syncVideo();
     return unsubscribe;
   }, [syncVideo]);
+
+  /*
+    The graph follows the same clock the picture does — `seekTo` is called from a subscription to
+    the playhead rather than from its own timer, so there is exactly one clock (SPEC 09 §23). It
+    is told whether the transport is playing so it can start and stop elements; the gain envelope
+    is applied either way, which is what makes a scrub through a fade land on the right level.
+  */
+  useEffect(() => {
+    const sync = () => previewAudio.seekTo(playheadStore.get(), playing);
+    const unsubscribe = playheadStore.subscribe(sync);
+    sync();
+    return unsubscribe;
+  }, [previewAudio, playing]);
+
+  /*
+    Play is the user gesture the `AudioContext` needs, and pause must suspend it or a paused
+    preview keeps a clock running for sound nobody hears. Both are no-ops when no graph exists.
+  */
+  useEffect(() => {
+    if (playing) previewAudio.resume();
+    else previewAudio.suspend();
+  }, [playing, previewAudio]);
 
 
 

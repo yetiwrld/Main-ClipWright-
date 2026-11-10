@@ -44,3 +44,12 @@ export {
   type LoudnessReading,
   type LoudnessWindow,
 } from './loudness.js';
+
+export {
+  gainAtInstant,
+  gainCurveFor,
+  hasAudioAt,
+  previewAudioRequests,
+  type PreviewAudioRequest,
+  type PreviewAudioTimeline,
+} from './preview-graph.js';

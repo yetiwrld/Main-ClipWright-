@@ -57,28 +57,32 @@ This document tracks architectural scope boundaries and honest limitations per `
 
 ## 3. Phase 4 notes (editor core, in progress)
 
-1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes the audio device position the master clock whenever audio plays. This slice advances the playhead from `performance.now()` and lets the `<video>` element follow it, so a long playback can drift from the audio by a frame. Audio-mastered playback lands with the audio tools.
-   Three consequences of there being **no Web Audio graph in the preview at all** are
-   worth naming together, because each looks like a separate bug from the outside:
-   * **Only the bottom picture layer is audible.** Sound comes from the one `<video>`
-     element the preview drives, so an audio item on its own track — a music bed, a
-     voiceover take, anything from *Extract audio* — is silent in the editor and present
-     in the export.
-   * **Pan is not previewed.** `pan` is stored, drawn in the inspector and applied by the
-     mixer, but a `<video>` element has no pan control; without a graph the preview is
-     always centred. The export is not.
-   * **The master meter reads the bottom picture layer only.** The stereo peak meter itself —
-     −60…0 dB, 1.5 s hold, a latching clip light — is built, on a small graph that taps the
-     preview's `<video>` through two `AnalyserNode`s at 30 Hz. Because the tap is on that one
-     element it inherits the first limitation: it meters what the preview actually plays, which
-     is the bottom layer. The **momentary LUFS readout** is built (BS.1770 K-weighting over a
-     400 ms gate) and shown in the *Audio meters* popover, which the transport's meter opens —
-     and for the same reason it measures that one layer too.
-   * **Per-track meters** in the track headers (SPEC 12 §6.3, "when headers are wide enough")
-     are not built: a per-track meter needs a node per track, which is the same missing graph.
-   The full graph is the fix for all three at once, and it is the next piece of audio work
-   rather than three separate ones. The meter came first because it makes the rest
-   checkable: once the graph grows per-item nodes, the meter shows whether it is working.
+1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes
+   the audio device position the master clock whenever audio plays. This slice advances the
+   playhead from `performance.now()` and lets the graph follow it — it now follows *one* clock,
+   the playhead, rather than each element keeping its own — but the clock's source is still the
+   animation frame. A long playback can drift from the audio device by a frame, and correcting
+   that (reading `AudioContext.currentTime` back as the master) is the remaining piece of §23.
+   The Web Audio graph itself is **built** (SPEC 12 §6.2/§6.3): every audible item gets a
+   `<audio>` element of its own, a `GainNode` carrying the full envelope and a `StereoPannerNode`,
+   summed into a bus. That changed three things this document used to list as limitations:
+   * **Audio items are audible.** A music bed, a voiceover take or anything from *Extract audio*
+     now plays on its own track; previously only the bottom picture layer made sound, because
+     that was the one `<video>` element the preview drove.
+   * **Pan is previewed.** `pan` reaches a `StereoPannerNode`, so the preview is left/right the
+     way the export's constant-power pan is.
+   * **The master meter reads the mix.** Both the stereo peak meter and the momentary LUFS
+     readout tap the graph's **bus** — the node every item is summed into — so they measure what
+     a listener hears rather than the bottom layer. The `<video>`-element tap is still the
+     fallback when no graph can be built (no Web Audio in the environment), and it still means
+     the bottom layer; the hook says so where it falls back.
+   What is still true: **per-track meters** in the track headers are not built. The graph now has
+   the nodes they need, but a meter per track means an analyser per track and a place in the
+   header to draw it, which is a UI slice rather than a graph one.
+   Two honest gaps in the graph itself: it builds one chain per *item*, not per track, so an
+   edit that re-plans the whole graph on every timeline change is cheap at this scale and would
+   not be at a thousand clips; and **audio is not yet the master clock**, so the drift above is
+   still possible.
 2. **The preview plays proxies, but seeking a `<video>` element is still the scrub
    mechanism.** Import generates a proxy for 4K, Chromium-unsafe-codec, variable
    frame-rate and HDR sources (SPEC 04 §7), the media record stores its path, and the

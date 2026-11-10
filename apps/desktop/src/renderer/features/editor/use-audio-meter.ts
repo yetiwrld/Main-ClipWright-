@@ -80,6 +80,16 @@ export interface AudioMeterApi {
 export function useAudioMeter(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   active: boolean,
+  /**
+   * The preview's mix bus, when a preview graph exists.
+   *
+   * Passing it makes the meter measure the *mix* — every audible item, panned and
+   * enveloped, summed exactly as the export sums them. Without it the meter falls back to
+   * tapping the `<video>` element, which is the bottom picture layer only; that fallback
+   * exists for the environments where no preview graph could be built (no Web Audio), not
+   * as a second opinion about the level.
+   */
+  tap: { context: AudioContext; node: AudioNode } | null = null,
 ): AudioMeterApi {
   const [meter, setMeter] = useState<MeterState>(SILENT_METER);
   const [loudness, setLoudness] = useState<LoudnessReading>(SILENT_READING);
@@ -113,51 +123,93 @@ export function useAudioMeter(
   };
 
   const resume = () => {
-    const context = contextRef.current;
+    const context = tap ? tap.context : contextRef.current;
     if (context && context.state === 'suspended') void context.resume();
   };
 
   useEffect(() => {
     if (!active) return;
-    const video = videoRef.current;
-    if (!video) return;
 
-    // No Web Audio in this environment (jsdom, or a browser that refuses one): the meter
-    // stays at silence and nothing throws. The transport still draws its scale, so the
-    // absence reads as "quiet" rather than as "no meter".
-    const Context = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Context) return;
+    /*
+      Two ways to feed the analysers, and which one applies is not a preference:
 
-    let context = contextRef.current;
-    if (!context) {
+      - **A tap on the preview's mix bus** when the preview graph exists. This is the only
+        node whose samples are the mix the export would produce.
+      - **The `<video>` element** otherwise — no Web Audio, or a build that predates the
+        graph. It measures the bottom picture layer, so it is a fallback, not the truth.
+
+      The `<video>` is not required when a tap is present, which is why the ref is only
+      consulted on the fallback path: a preview with all its sound in audio items still has
+      a video element, but requiring one would tie the meter to a picture being on screen.
+    */
+    let context: AudioContext;
+    if (tap) {
+      context = tap.context;
       try {
-        context = new Context();
-        contextRef.current = context;
-        /*
-          One source per element, forever. `MediaElementAudioSourceNode` disconnects the
-          element from the default output when it is created, so the source *must* be
-          connected through to the destination or the preview goes silent the moment the
-          meter starts — a spectacular way to introduce a bug while adding an instrument.
-        */
-        const source = context.createMediaElementSource(video);
         const splitter = context.createChannelSplitter(2);
         const left = context.createAnalyser();
         const right = context.createAnalyser();
         left.fftSize = ANALYSER_FFT;
         right.fftSize = ANALYSER_FFT;
-        source.connect(splitter);
+        /*
+          `connect` on an existing node is additive, so tapping the bus leaves the sound
+          path alone — the bus already reaches `destination`, and the meter is a branch off
+          it, not a stage in it. That also means nothing needs disconnecting on teardown
+          beyond the analysers themselves, which are dropped with the effect.
+        */
+        tap.node.connect(splitter);
         splitter.connect(left, 0);
         splitter.connect(right, 1);
-        // And the sound itself, unaltered: the meter is a tap, not an effect.
-        source.connect(context.destination);
         leftRef.current = left;
         rightRef.current = right;
       } catch {
-        // A second `createMediaElementSource` on the same element, or a context the
-        // environment will not give us. Leave the meter silent rather than throwing into
-        // React's render path.
-        contextRef.current = null;
+        leftRef.current = null;
+        rightRef.current = null;
         return;
+      }
+    } else {
+      const video = videoRef.current;
+      if (!video) return;
+
+      // No Web Audio in this environment (jsdom, or a browser that refuses one): the meter
+      // stays at silence and nothing throws. The transport still draws its scale, so the
+      // absence reads as "quiet" rather than as "no meter".
+      const Context = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Context) return;
+
+      const existing = contextRef.current;
+      if (existing) {
+        context = existing;
+      } else {
+        try {
+          context = new Context();
+          contextRef.current = context;
+          /*
+            One source per element, forever. `MediaElementAudioSourceNode` disconnects the
+            element from the default output when it is created, so the source *must* be
+            connected through to the destination or the preview goes silent the moment the
+            meter starts — a spectacular way to introduce a bug while adding an instrument.
+          */
+          const source = context.createMediaElementSource(video);
+          const splitter = context.createChannelSplitter(2);
+          const left = context.createAnalyser();
+          const right = context.createAnalyser();
+          left.fftSize = ANALYSER_FFT;
+          right.fftSize = ANALYSER_FFT;
+          source.connect(splitter);
+          splitter.connect(left, 0);
+          splitter.connect(right, 1);
+          // And the sound itself, unaltered: the meter is a tap, not an effect.
+          source.connect(context.destination);
+          leftRef.current = left;
+          rightRef.current = right;
+        } catch {
+          // A second `createMediaElementSource` on the same element, or a context the
+          // environment will not give us. Leave the meter silent rather than throwing into
+          // React's render path.
+          contextRef.current = null;
+          return;
+        }
       }
     }
 
@@ -197,7 +249,7 @@ export function useAudioMeter(
     }, METER_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
-  }, [active, videoRef]);
+  }, [active, videoRef, tap]);
 
   return { meter, loudness, clearClip, resume };
 }

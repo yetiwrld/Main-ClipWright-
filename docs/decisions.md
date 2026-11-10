@@ -1390,3 +1390,76 @@ green. The design system owns components, so this was a hole rather than an acci
 missing pattern immediately failed two existing style-editor tests, which is the argument for the
 pattern: the hole had been hiding a label rename the shared control introduced.
 
+## 46. The preview builds a node per item, because the unit that has a gain curve is an item
+
+**One absence, three symptoms.** The preview had no Web Audio graph, so its sound was whatever one
+`<video>` element played. That single fact explained three unrelated-looking problems: an audio
+item was silent in the editor and present in the export; pan was stored, drawn, mixed and never
+heard; and the master meter — built on a tap of that element — measured the bottom picture layer
+and reported it as the mix. Three fixes would have been three chances to disagree with the export.
+One graph fixes all three, which is the whole argument for doing them together.
+
+**Per item, not per track.** A track is the unit a user mutes; an item is the unit that owns a
+volume envelope and a pan. A per-track chain would be cheaper and would lose every keyframe, and a
+per-track *plus* per-item chain is what the export's `planAudioItems` already is. The preview
+follows the export here rather than inventing a cheaper shape that would sound subtly different.
+
+**Item-local keyframe times, deliberately the opposite of the export.** `planAudioItems` shifts a
+clip's keyframes into mix time because it decodes a bounded range and evaluates one clock. The
+preview evaluates each item against its own start. The asymmetry is not an oversight — the export
+is answering "where is this in the file", the preview "where is this in the clip" — and it is
+commented at the point of divergence so a later reader does not "fix" one into the other.
+
+**The graph asks the plan, and the plan is pure.** `previewAudioRequests` answers what should play,
+with what gain and where in the stereo field, in `audio-core` with no Web Audio in sight. That is
+what lets the interesting rules be tested in a plain Node test: a muted item is **not requested**
+rather than requested at zero gain (a zeroed node still decodes); a **hidden** track is still
+requested (hiding is a view concern and the export ignores it); solo is answered once for the
+document; an absent `gainDb` stays absent rather than becoming 0 dB, because "no opinion" and
+"unity" are different facts when a fallback is what consumes them.
+
+**A one-point curve is a constant, and that was a real bug.** `gainCurveFor(request, 1)` evaluates
+the envelope at the clip's start. Applying that per frame would have played every fade and every
+keyframe at its opening value — a preview that looks exactly like the feature was never built, with
+nothing in a log to say otherwise. The per-frame path needed `gainAtInstant`, and it survives
+because one test asserts two different instants of one fade give two different values.
+
+**Clamp the end, never the start.** `gainAt` already returns 0 outside an item's span. Clamping the
+instant into the span turns "this clip has not started" into "this clip is at its opening gain" —
+a bed leaking into the seconds before it begins, which sounds like a mix error rather than a
+boundary bug. Sampling also stays strictly inside the span, because `gainAt` is 0 at
+`start + duration` and a curve that samples the boundary ends every clip with a one-sample click.
+
+**`setTargetAtTime`, never `gain.value`, never `setValueCurveAtTime`.** Assigning `gain.value` every
+frame is a discontinuity every frame: a rasp on every fade, and a click on every static clip. A
+scheduled curve is worse — it throws when it overlaps an already-scheduled range, and this graph
+re-plans on every timeline edit, so the throw would arrive from a user's keystroke. Short time
+constants keep the value following the envelope without either failure.
+
+**Elements are pooled, because the binding is forever.** `createMediaElementSource` may be called
+once per element, ever — a second call throws. So elements live in a ref keyed by item and are
+*reused* across renders, seeks and source changes; the chain is re-planned, never rebuilt. The
+`catch` around node creation exists for the environments that refuse, and it is exactly why the
+tests use a fake that **throws on the second call**: an implementation that rebuilt would swallow
+its own exception and go quiet, and "how many sources did it create" cannot see that because the
+throw comes first.
+
+**Muting is a pause, not a teardown.** The binding cannot be undone, so a teardown would leave the
+element permanently unplayable through the graph. Zeroing the bus is not enough either: the
+elements would keep decoding and drift away from the playhead, so unmuting would resume from the
+wrong place. Muting pauses every element and keeps the graph, and a test asserts the graph survives
+a mute–unmute round trip without a second `createMediaElementSource`.
+
+**The `<video>` is silenced once the graph is ready, and the meter moved to the bus.** Leaving the
+element audible plays every clip twice a frame apart. The meter, meanwhile, had built its own
+context and its own source on that element; it now accepts the graph's context and node when one
+exists, because an `AnalyserNode` can only connect within its own context, and keeps the element
+tap as the fallback for an environment with no Web Audio. That fallback is the old limitation, and
+the hook says so where it falls back rather than pretending the two taps measure the same thing.
+
+**Two test fixtures that had to be fixed before they could fail.** An end-boundary test used an
+unfaded item, where the opening and closing gains are both 1 — clamping and not clamping give the
+same number, so it asserted nothing. A caption fixture had no `mediaId`, so a mutant that made
+captions audible was skipped a step earlier, by the missing source rather than by the type check.
+Both are the same lesson the rest of this project keeps relearning: a fixture must contain the
+thing the rule is about, or the rule is tested by accident.

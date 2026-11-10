@@ -259,10 +259,14 @@ rendered WAV rather than the request, which is how the volume keyframe line had 
 earlier; this was the same bug shape a third time. The **master peak meter is in** (§6.3): stereo, −60…0 dB, a 1.5 s hold and a clip light
 that latches until clicked, reading two analysers on the preview's own `<video>`. Its
 arithmetic is a pure module with eleven tests and ten mutations, because jsdom has no
-`AudioContext` and the decisions are all in the arithmetic. What is still missing from the
-audio system is the **full Web Audio graph** in the preview, and that one absence explains
-two remaining symptoms: only the bottom picture layer is audible (so the meter reads that
-layer only) and pan is not previewed. **Text and shape items are in**, which closes the biggest
+`AudioContext` and the decisions are all in the arithmetic. The **full Web Audio graph is in** (SPEC 12 §6.2): one element, one gain node carrying
+the whole envelope and one panner per audible item, summed into a bus. It closed the two
+symptoms that absence explained — only the bottom picture layer was audible, so an audio
+item played in the file and was silent in the editor, and pan was stored, exported and
+never previewed. The meter now taps the bus, so both it and the LUFS readout measure the
+mix instead of one layer. What is still missing from the audio system is **audio as the
+master clock** (SPEC 09 §23) and **per-track meters** in the track headers, which the
+graph has made a UI job rather than a graph one. **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without
