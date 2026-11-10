@@ -460,13 +460,13 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **Brand kits are built end to end except the editor and the file pickers.** SPEC 13 §8
+13. **Brand kits are built end to end except the file pickers and a few form controls.** SPEC 13 §8
     lists them as CORE for v1 acceptance, and the honest state is this: the `.cwbrand` format,
     import/export with unknown-field preservation, placement resolution across aspect ratios,
     safe-area-aware corners, the application plan and its report, the commands that apply,
     reapply, remove, detach and insert an intro or outro, the `.cwbrand` **archive** (a real zip,
     verified against `unzip`), and capture **from the current clip** are all built and tested
-    (`packages/brand-kits`, 88 tests; the commands in `packages/timeline-engine`, 26). A
+    (`packages/brand-kits`, 109 tests; the commands in `packages/timeline-engine`, 26). A
     **Kits tab** in the editor's library lists a project's kits, shows how many items each has
     placed, and offers apply (with the spec's six part checkboxes and a before-apply summary
     that reports a missing logo), reapply, detach, remove and delete — each as one undo step,
@@ -482,7 +482,10 @@ context menus, in-editor import, the fill lock).
     because the form has four corners and no way to express a dragged point. The colour picker
     is the shared `ColourPicker` — *recent colours* and *pick from logo* (SPEC 13 §8.2) are not
     built, and neither is the batch apply across several clips (the panel applies to the
-    composition being edited).
+    composition being edited). A kit's **fonts** are resolved against what the machine has —
+    a missing family substitutes by *character*, so a serif falls back to a serif, and the
+    sentence naming both goes into the plan's report (SPEC 11 §10.2) — but the kit editor has no
+    font controls yet, so a kit's fonts arrive only from a capture or a `.cwbrand` file.
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on

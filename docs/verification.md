@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  128 passed (128)
-     Tests  3171 passed (3171)
+Test Files  129 passed (129)
+     Tests  3192 passed (3192)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,8 +116,8 @@ Test Files  128 passed (128)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 88 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, and capturing a kit from the current clip by measuring geometry back into percentages |
-| **Total** | **3171** | 128 files |
+| `packages/brand-kits` | 109 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, capturing a kit from the current clip by measuring geometry back into percentages, and missing-font substitution that keeps a serif a serif |
+| **Total** | **3192** | 129 files |
 
 ### Tests that run real processes
 
@@ -935,6 +935,45 @@ now one element rendered by both branches.
 **Mutations.** 12 on the draft, 11 biting; 10 on the panel. The two that needed better tests were
 an unvalidated intro length (the schema would have caught it, but with a message about a field the
 form calls "Seconds") and a footprint fixture with no applied items.
+
+### Brand kits: a missing font substitutes, and keeps its character
+
+**"Substitute and flag" is the spec's rule, and both failures are tempting.** Refusing a kit
+because one family is absent makes a shared `.cwbrand` unusable on most machines; substituting in
+silence puts a caption in the wrong typeface with nothing to explain it. So `substituteFont`
+returns a usable `FontRef` **and** a sentence naming both families, in the spec's own wording
+("Font missing: <name>…"), because a user told only that something is wrong cannot judge whether
+the result is acceptable or ask for something else.
+
+**The substitute is chosen by character, not by name.** The bundled families carry a coarse
+attribute — sans, serif, condensed, display, script, mono — and a kit asking for Playfair Display
+falls back to Lora rather than Inter. The alternative is a serif poster turned into a modern sans,
+which is a different design rather than a substitute. A catalogue with no family of the right
+character says so rather than claiming a similarity it does not have.
+
+**A present family's weight is rounded without a warning.** SPEC 11 §10.1 says the nearest weight
+is used; it is a normal condition, not a fault. It still has to be a weight the font has, because
+a canvas `font` string asking for 900 on a family that ships 700 is replaced by the browser and
+the result is not what the kit said. Ties go to the **heavier** one — a caption set at 700 is meant
+to look bold, and rounding down makes it look like a mistake.
+
+**Through the plan, the warnings reach the user.** `planKitApplication` resolves the kit's fonts
+when the caller supplies a catalogue and appends the sentences to `report`; the resolved fonts ride
+on the plan so a caller applying text styles does not resolve them a second time and possibly
+differently. Deduplicated: a kit that names one missing family for all three slots produces **one**
+banner, because three identical sentences is the kind of warning users learn to scroll past.
+
+**Two guards that exist to stop false alarms.** No catalogue means no check — a caller that has
+not loaded the font list gets no warning rather than one invented from an empty one. And fonts
+belong to the `textDefaults` part, so an apply with text defaults switched off reports nothing
+about fonts at all.
+
+**Mutations.** 11 on the module, 10 bite. The first run found a real gap: nothing asserted the
+*weight* of a present family was rounded, so a version that returned the request unchanged passed
+every test — exactly the mutation whose symptom would be a caption that looks subtly wrong for no
+stated reason. One test also failed on first run and was right to: Oswald was listed as a fallback
+but had no character, so it was unreachable. **A family nobody describes can never be chosen**,
+which is the sort of dead entry a table like this grows quietly.
 
 **Not built yet, and deliberately not claimed:** building a composition from a
 `compositionTemplateId`, and the export/import buttons. Both are recorded in

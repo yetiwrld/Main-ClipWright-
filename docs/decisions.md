@@ -1196,3 +1196,38 @@ open nothing. A test that pressed the button found it; a screenshot would not ha
 files, and it is right: a kit's colours come from a file and are the user's. They live in
 `packages/brand-kits` as `DEFAULT_KIT_COLOURS`, shared by the form's starting palette and by a
 capture that had no style to read — so the two cannot disagree about what "no colours yet" means.
+
+## 41. A missing font is substituted by character, and the sentence names both families
+
+**Both halves of "substitute and flag" are load-bearing.** Refusing a kit because one family is
+absent makes a shared `.cwbrand` unusable on most machines; substituting silently puts a caption
+in the wrong typeface with nothing to explain it, and the user reasonably concludes the kit was
+ignored. So `substituteFont` returns a usable `FontRef` *and* a warning naming what was asked for
+and what was used — the second name is what lets a user decide whether the result is acceptable
+or ask for a different replacement.
+
+**The substitute is chosen by character, not by name.** A kit asking for Playfair Display that
+falls back to Inter is a serif poster turned into a modern sans: a different design rather than a
+substitute. The bundled families carry a coarse attribute — sans, serif, condensed, display,
+script, mono — and the preference list picks within it. The taxonomy is deliberately coarse: a
+finer one (grotesque against humanist, didone against transitional) would claim a precision
+nobody measured, and the substitute only has to keep the *character* of the type.
+
+**An unknown family is treated as a sans, and the warning is unchanged.** Nothing describes it, so
+the commonest caption character is used; the sentence still names the family the user asked for,
+because that name is the only thing that lets them act.
+
+**A present family's weight is rounded without a warning.** SPEC 11 §10.1 says the nearest weight
+is used; it is a normal condition, not a fault, and a warning on every apply would train users to
+ignore the warning that matters. But it must be a weight the family *has*: a canvas font string
+asking for 900 on a family that ships 700 is silently replaced by the browser, and the result is
+not what the kit said. Ties go to the heavier weight, because a caption set at 700 is meant to
+look bold and rounding it down looks like a mistake.
+
+**The warnings are deduplicated.** A kit naming one missing family in all three slots produces one
+banner. Three identical sentences is the kind of noise users learn to scroll past, which costs the
+warning its whole purpose.
+
+**Two guards against false alarms.** A caller with no font catalogue gets no check rather than one
+invented from an empty list, and fonts belong to the `textDefaults` part, so an apply that
+switches text defaults off says nothing about fonts.

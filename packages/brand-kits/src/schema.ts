@@ -190,6 +190,8 @@ export const brandKitSchema = z.object({
 
 export type BrandKit = z.infer<typeof brandKitSchema>;
 export type BrandKitPlacement = z.infer<typeof placementSchema>;
+/** A font reference — family, weight, italic and where the family comes from (SPEC 11 §10). */
+export type BrandKitFont = z.infer<typeof fontRefSchema>;
 
 export type ParseKitResult =
   | { ok: true; kit: BrandKit }

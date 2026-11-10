@@ -77,7 +77,9 @@ caption style, its colours and font, and measures a corner image back into perce
 kit works on a different aspect ratio. A **Kits tab** in the library lists a project's kits and
 applies them — one undo step per application, a report when a part could not be applied, and a
 confirm that says the items survive a delete — and an **editor** that creates a kit from scratch
-or from the current clip, with every problem reported at once.
+or from the current clip, with every problem reported at once. A missing font substitutes by
+character — a serif falls back to a serif — and the sentence naming both reaches the apply
+report.
 A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
 without a dependency and verified in the tests with `unzip`, including a checksum check
 that a flipped byte fails. Applying a kit produces ordinary items tagged

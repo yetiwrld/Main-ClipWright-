@@ -17,6 +17,7 @@ export {
   importBrandKit,
   tryParseBrandKit,
   type BrandKit,
+  type BrandKitFont,
   type BrandKitPlacement,
   type ParseKitResult,
 } from './schema.js';
@@ -38,6 +39,18 @@ export {
   type ParsedArchive,
 } from './archive.js';
 export { crc32 } from './crc32.js';
+
+export {
+  BUNDLED_FONT_CHARACTERS,
+  describeFamily,
+  nearestWeight,
+  resolveKitFonts,
+  substituteFont,
+  type FontCatalogue,
+  type FontCharacter,
+  type FontDescriptor,
+  type FontSubstitution,
+} from './fonts.js';
 
 export {
   captureKitFromClip,

@@ -23,7 +23,8 @@
  *    is what makes that possible; see `findKitAppliedItems`.
  */
 
-import type { BrandKit, BrandKitPlacement } from './schema.js';
+import type { BrandKit, BrandKitFont, BrandKitPlacement } from './schema.js';
+import { BUNDLED_FONT_CHARACTERS, resolveKitFonts } from './fonts.js';
 
 /** Which parts of a kit to apply. Everything defaults to on; the UI shows these as checkboxes. */
 export interface KitApplyParts {
@@ -258,6 +259,13 @@ export interface KitApplicationPlan {
   intro?: { assetId?: string; compositionTemplateId?: string; durationUs: number };
   /** The outro clip, appended after everything. Same shape as the intro. */
   outro?: { assetId?: string; compositionTemplateId?: string; durationUs: number };
+  /**
+   * The kit's fonts with any missing families replaced (SPEC 11 §10.2).
+   *
+   * Present only when the caller supplied a font catalogue. A resolved font whose family differs
+   * from the kit's is a substitution, and its sentence is in `report`.
+   */
+  fonts?: Partial<Record<'heading' | 'body' | 'caption', BrandKitFont>>;
   /** The music bed, with the ducking and normalisation the kit asks for. */
   music?: { assetId: string; volumeDb: number; duckUnderSpeech: boolean; targetLufs?: number };
   /**
@@ -280,6 +288,12 @@ export interface KitAvailability {
    * inventing one, and a template has no dimensions at all.
    */
   assetSizes?: ReadonlyMap<string, { widthPx: number; heightPx: number }>;
+  /**
+   * The fonts this machine has. Absent means "do not check" — a caller that has not loaded the
+   * font catalogue reports no font warning rather than inventing one, the same rule as
+   * `assetSizes`.
+   */
+  fonts?: ReadonlyArray<{ family: string; weights: readonly number[] }>;
 }
 
 /**
@@ -296,6 +310,25 @@ export function planKitApplication(
   parts: KitApplyParts = ALL_KIT_PARTS,
 ): KitApplicationPlan {
   const plan: KitApplicationPlan = { report: [] };
+  /*
+    Fonts are checked before anything is placed (SPEC 13 §8.3: "kit with a missing font →
+    substitute and flag"). The warnings go into the report rather than a separate field because
+    the user reads one list of things to know; the *resolved* fonts are carried on the plan so a
+    caller applying text styles does not have to resolve them a second time and possibly
+    differently.
+  */
+  if (parts.textDefaults && availability.fonts) {
+    const catalogue = {
+      families: availability.fonts.map((entry) => ({
+        family: entry.family,
+        character: BUNDLED_FONT_CHARACTERS[entry.family] ?? 'sans',
+        weights: entry.weights,
+      })),
+    };
+    const resolved = resolveKitFonts(kit.fonts, catalogue);
+    plan.fonts = resolved.fonts;
+    for (const warning of resolved.warnings) plan.report.push(warning);
+  }
   /*
     The kit's own safe-area preset moves its corner graphics out of the platform's chrome
     (SPEC 13 §8.2, "logo positions respect the selected safe-area preset"). Resolved once

@@ -574,3 +574,57 @@ describe('safe-area-aware placement', () => {
     }
   });
 });
+
+/**
+ * Missing fonts, through the plan (SPEC 13 §8.3 → SPEC 11 §10.2).
+ *
+ * The substitution itself is tested in `fonts.test.ts`. What is tested here is that a kit
+ * application *reports* it: the user reads one list of things to know about the apply, and a
+ * missing font that stayed in the module would be the silent substitution the spec forbids.
+ */
+describe('fonts in the plan', () => {
+  const withFonts = (family: string) =>
+    kit({ fonts: { caption: { family, weight: 700, italic: false, source: 'bundled' } } });
+
+  it('carries the resolved fonts and reports a substitution', () => {
+    const plan = planKitApplication(
+      withFonts('Poppins'),
+      { widthPx: 1920, heightPx: 1080 },
+      10_000_000,
+      { ...everything, fonts: [{ family: 'Inter', weights: [400, 700] }] },
+    );
+    expect(plan.fonts?.caption?.family).toBe('Inter');
+    expect(plan.report.join(' ')).toContain('Poppins');
+    expect(plan.report.join(' ')).toContain('Inter');
+  });
+
+  it('says nothing when the kit’s fonts are present', () => {
+    const plan = planKitApplication(
+      withFonts('Inter'),
+      { widthPx: 1920, heightPx: 1080 },
+      10_000_000,
+      { ...everything, fonts: [{ family: 'Inter', weights: [400, 700] }] },
+    );
+    expect(plan.fonts?.caption?.family).toBe('Inter');
+    expect(plan.report).toEqual([]);
+  });
+
+  it('does not look at fonts when the caller has no catalogue', () => {
+    // A caller that has not loaded the font list gets no warning rather than one invented from
+    // an empty catalogue, which would fire for every kit with a font.
+    const plan = planKitApplication(withFonts('Poppins'), { widthPx: 1920, heightPx: 1080 }, 10_000_000, everything);
+    expect(plan.fonts).toBeUndefined();
+    expect(plan.report).toEqual([]);
+  });
+
+  it('does not check fonts when the user switched text defaults off', () => {
+    // The part the fonts belong to. Reporting a missing heading font on an apply that excludes
+    // text defaults is a complaint about something the user did not ask for.
+    const plan = planKitApplication(withFonts('Poppins'), { widthPx: 1920, heightPx: 1080 }, 10_000_000, {
+      ...everything,
+      fonts: [{ family: 'Inter', weights: [400] }],
+    }, { ...ALL_KIT_PARTS, textDefaults: false });
+    expect(plan.fonts).toBeUndefined();
+    expect(plan.report).toEqual([]);
+  });
+});
