@@ -77,6 +77,9 @@ export const api = {
       deleteExclusiveManagedMedia: opts?.deleteMedia === true,
     });
   },
+  async revealProject(projectId: string) {
+    return requireBridge('Showing the project folder').revealProject(projectId);
+  },
   async archiveProject(projectId: string, archived: boolean) {
     /* Archive is a field on the record, not a store method: §8's "hides from Home; read-only until
        unarchived" is expressed by `archived`, and `updateProject` already writes it. */

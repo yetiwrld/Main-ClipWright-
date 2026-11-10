@@ -452,6 +452,8 @@ export interface ClipwrightBridge {
   getProject(projectId: string): Promise<ProjectRecord | undefined>;
   updateProject(projectId: string, patch: Partial<ProjectRecord>): Promise<ProjectRecord>;
   duplicateProject(projectId: string): Promise<ProjectRecord>;
+  /** Opens the project's own folder in the OS file manager (SPEC 03 §10). */
+  revealProject(projectId: string): Promise<string>;
   /**
    * `deleteExclusiveManagedMedia` is the store's own key (`StorageService.deleteProject`). The
    * declaration said `deleteMedia`, which the store ignores — a caller following the type would

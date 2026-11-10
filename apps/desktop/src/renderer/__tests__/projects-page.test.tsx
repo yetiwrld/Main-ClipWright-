@@ -21,6 +21,7 @@ const bridge = vi.hoisted(() => ({
   listProjects: vi.fn(),
   updateProject: vi.fn(async (_projectId: string, _patch: Record<string, unknown>) => ({})),
   duplicateProject: vi.fn(async (_projectId: string) => ({})),
+  revealProject: vi.fn(async (_projectId: string) => '/workspace/Projects/prj_1'),
   deleteProject: vi.fn(async (_projectId: string, _opts?: { deleteExclusiveManagedMedia?: boolean }) => ({})),
 }));
 
@@ -30,6 +31,7 @@ vi.mock('../api.js', () => ({
     listProjects: bridge.listProjects,
     updateProject: bridge.updateProject,
     duplicateProject: bridge.duplicateProject,
+    revealProject: bridge.revealProject,
     /*
       The mapping under test lives in `api.ts`, and this file replaces `api` wholesale — so the mock
       has to perform the same translation, or the test would assert on the mock rather than on the
@@ -81,7 +83,8 @@ async function openMenu() {
 describe('the project menu exists and names its project', () => {
   it('shows the five actions from SPEC 03 §10', async () => {
     await openMenu();
-    for (const label of ['Open', 'Rename', 'Duplicate', 'Archive', 'Delete']) {
+    /* SPEC 03 §10's six, in its order. "Show in folder" was the one that had no IPC channel. */
+    for (const label of ['Open', 'Rename', 'Duplicate', 'Archive', 'Show in folder', 'Delete']) {
       expect(screen.getByRole('menuitem', { name: label })).toBeTruthy();
     }
   });
@@ -115,6 +118,14 @@ describe('each action reaches the bridge with the right arguments', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
     await screen.findByRole('alert');
     expect(bridge.updateProject).not.toHaveBeenCalled();
+  });
+
+  it('reveals the project folder by id', async () => {
+    await openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Show in folder' }));
+    await waitFor(() => expect(bridge.revealProject).toHaveBeenCalledWith('prj_1'));
+    /* The menu closes: leaving it open behind a file manager is a stray click waiting to happen. */
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('duplicates by id', async () => {

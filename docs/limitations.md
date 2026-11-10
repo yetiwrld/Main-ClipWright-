@@ -576,16 +576,10 @@ still does not do:
 
 ---
 
-## 7. The project menu has five of the six actions
+## 7. Two project actions are still partial
 
-SPEC 03 §10 lists Open, Rename, Duplicate, Archive, Show in folder and Delete. The menu carries all
-but **Show in folder**, which needs an IPC channel that does not exist — `shell.showItemInFolder`
-is wired for export output only (`export:openFolder`). The store's project directory is derivable,
-so this is one command and one bridge entry rather than a design question; it is recorded here
-because a menu that silently omits a listed item is the same class of gap as a setting nothing
-reads.
-
-Two related things the menu does not do, both noted rather than implied:
+SPEC 03 §10 lists Open, Rename, Duplicate, Archive, Show in folder and Delete, and the menu now
+carries all six. Two related things it does not do, both noted rather than implied:
 
 - **"Also copy media"** in Duplicate (§10) is not offered. The store shares managed media by
   reference on duplicate, which is the default the spec describes; the option for a fully

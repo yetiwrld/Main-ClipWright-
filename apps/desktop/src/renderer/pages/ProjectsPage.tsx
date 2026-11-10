@@ -116,6 +116,20 @@ export function ProjectsPage({ onNavigate }: Props) {
     [runAction],
   );
 
+  const handleReveal = useCallback(
+    (project: ProjectRecord) => {
+      /*
+        Closes the menu before the OS takes focus — a menu left open behind a file manager is a
+        stray click waiting to happen when the user comes back.
+      */
+      setMenuFor(null);
+      void runAction(async () => {
+        await api.revealProject(project.id);
+      });
+    },
+    [runAction],
+  );
+
   const handleDelete = useCallback(() => {
     const project = confirming?.kind === 'delete' ? confirming.project : null;
     if (!project) return;
@@ -228,6 +242,7 @@ export function ProjectsPage({ onNavigate }: Props) {
                 }}
                 onDuplicate={() => handleDuplicate(p)}
                 onArchive={() => handleArchive(p)}
+                onReveal={() => handleReveal(p)}
                 onDelete={() => {
                   setDeleteMedia(false);
                   setMenuFor(null);
@@ -298,6 +313,7 @@ export function ProjectsPage({ onNavigate }: Props) {
                 }}
                 onDuplicate={() => handleDuplicate(p)}
                 onArchive={() => handleArchive(p)}
+                onReveal={() => handleReveal(p)}
                 onDelete={() => {
                   setDeleteMedia(false);
                   setMenuFor(null);
@@ -403,6 +419,7 @@ function ProjectMenu({
   onRename,
   onDuplicate,
   onArchive,
+  onReveal,
   onDelete,
 }: {
   project: ProjectRecord;
@@ -413,13 +430,16 @@ function ProjectMenu({
   onRename: () => void;
   onDuplicate: () => void;
   onArchive: () => void;
+  onReveal: () => void;
   onDelete: () => void;
 }) {
+  /* SPEC 03 §10's order: Open, Rename, Duplicate, Archive, Show in folder, Delete. */
   const items: Array<{ label: string; onSelect: () => void; danger?: boolean }> = [
     { label: 'Open', onSelect: onOpen },
     { label: 'Rename', onSelect: onRename },
     { label: 'Duplicate', onSelect: onDuplicate },
     { label: project.archived ? 'Unarchive' : 'Archive', onSelect: onArchive },
+    { label: 'Show in folder', onSelect: onReveal },
     { label: 'Delete', onSelect: onDelete, danger: true },
   ];
   return (

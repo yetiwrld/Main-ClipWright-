@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('clipwright', {
   updateProject: (projectId, patch) => ipcRenderer.invoke('workspace:updateProject', projectId, patch),
   duplicateProject: (projectId) => ipcRenderer.invoke('workspace:duplicateProject', projectId),
   deleteProject: (projectId, opts) => ipcRenderer.invoke('workspace:deleteProject', projectId, opts),
+  revealProject: (projectId) => ipcRenderer.invoke('workspace:revealProject', projectId),
 
   // ---- Compositions ----
   getCompositions: (projectId) => ipcRenderer.invoke('workspace:getCompositions', projectId),

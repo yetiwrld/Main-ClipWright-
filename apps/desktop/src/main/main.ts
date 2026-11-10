@@ -389,6 +389,20 @@ function registerIPC(): void {
     requireStorage().duplicateProject(projectId)
   );
 
+  /*
+    SPEC 03 §10 — "Show in folder". `shell.showItemInFolder` was wired for export output and for
+    nothing else, which is why the project menu shipped with five of the spec's six actions.
+    The path comes from the store rather than being assembled here: `getProjectDir` is what
+    `deleteProject` and the integrity checks already use, so a change to the layout moves one
+    function.
+  */
+  ipcMain.handle('workspace:revealProject', async (_event, projectId: string) => {
+    const dir = requireStorage().getProjectDir(projectId);
+    const error = await shell.openPath(dir);
+    if (error) throw new Error(`The folder could not be opened: ${error}`);
+    return dir;
+  });
+
   ipcMain.handle('workspace:deleteProject', async (_event, projectId: string, opts) =>
     requireStorage().deleteProject(projectId, opts)
   );

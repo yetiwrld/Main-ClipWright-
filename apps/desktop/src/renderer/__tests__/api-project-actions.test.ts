@@ -14,6 +14,7 @@ const bridge = {
   listProjects: vi.fn(async () => []),
   updateProject: vi.fn(async () => ({})),
   duplicateProject: vi.fn(async () => ({ id: 'prj_2' })),
+  revealProject: vi.fn(async (_projectId: string) => '/workspace/Projects/prj_1'),
   deleteProject: vi.fn(async (_projectId: string, _opts?: { deleteExclusiveManagedMedia?: boolean }) => ({
     deletedProjectId: 'prj_1',
     deletedMediaIds: [],
@@ -86,5 +87,19 @@ describe('without the desktop app', () => {
        believe a project was deleted. */
     removeBridge();
     await expect(api.deleteProject('prj_1')).rejects.toBeInstanceOf(DesktopRequiredError);
+  });
+});
+
+describe('revealProject', () => {
+  it('asks main for the project’s own folder, not a path built here', async () => {
+    /*
+      SPEC 03 §10's "Show in folder" was the one action with no IPC channel, and it shipped absent
+      from the menu for that reason. The renderer must not assemble the path: `StorageService
+      .getProjectDir` is what the store uses to create and delete the same directory, so a layout
+      change has one place to land.
+    */
+    installBridge();
+    await expect(api.revealProject('prj_1')).resolves.toBe('/workspace/Projects/prj_1');
+    expect(bridge.revealProject).toHaveBeenCalledWith('prj_1');
   });
 });
