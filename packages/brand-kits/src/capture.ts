@@ -27,7 +27,7 @@
  * needs the style library, so the caller passes the style in.
  */
 import type { BrandKit } from './schema.js';
-import { CwbrandFormat, CwbrandFormatVersion } from './schema.js';
+import { CwbrandFormat, CwbrandFormatVersion, DEFAULT_KIT_COLOURS } from './schema.js';
 
 /**
  * The little of a timeline item this module needs.
@@ -107,14 +107,7 @@ function coloursFrom(style: CapturableStyle | undefined): BrandKit['colors'] {
     with invented colours looks finished and is not.
   */
   if (!style) {
-    return {
-      primary: '#FFFFFF',
-      secondary: '#000000',
-      accent: '#FFFFFF',
-      background: '#000000',
-      text: '#FFFFFF',
-      custom: [],
-    };
+    return { ...DEFAULT_KIT_COLOURS, custom: [] };
   }
   return {
     primary: style.fill.color,

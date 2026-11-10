@@ -17,7 +17,8 @@ import { BrandKitPanel } from './BrandKitPanel.js';
 import { useBrandKits } from './use-brand-kits.js';
 import { useCaptionStyles } from './use-caption-styles.js';
 import { mediaAwaitingProxy, type PreviewJobLike } from './preview-quality.js';
-import { BUILT_IN_STYLES, DEFAULT_STYLE_ID } from '@clipwright/caption-styles';
+import { BUILT_IN_STYLES, DEFAULT_STYLE_ID, resolveStyle } from '@clipwright/caption-styles';
+import type { CapturableItem } from '@clipwright/brand-kits';
 
 export function EditorPage({
   projectId,
@@ -52,6 +53,31 @@ export function EditorPage({
     [captionStyles.styles],
   );
   const assetIds = useMemo(() => new Set(media.map((item) => item.id)), [media]);
+  /*
+    The style a capture reads its colours and font from: the first caption on the timeline with
+    a style, resolved through the same path the preview uses. Resolved here rather than inside
+    the panel because the panel would otherwise need the style store, the presets and the
+    project copies — three things it has no other use for.
+  */
+  const captureStyle = useMemo(() => {
+    const captionStyleId = Object.values(timeline.state?.items ?? {}).find(
+      (item) => item.type === 'caption' && item.captionStyleId,
+    )?.captionStyleId;
+    if (!captionStyleId) return undefined;
+    const resolved = resolveStyle(captionStyleId, captionStyles.styles);
+    return resolved
+      ? { font: resolved.font, fill: resolved.fill, outline: resolved.outline, highlight: resolved.highlight, background: resolved.background }
+      : undefined;
+  }, [timeline.state, captionStyles.styles]);
+  /*
+    What a capture may look at: every item in the composition, as the structural shape the
+    capture package declares. A cast is honest here — the shape is a subset of a timeline item
+    and the field names are the schema's.
+  */
+  const captureItems = useMemo(
+    () => Object.values(timeline.state?.items ?? {}) as unknown as CapturableItem[],
+    [timeline.state],
+  );
   const [styleEditorOpen, setStyleEditorOpen] = useState(false);
   /*
     The `useProxyPreview` setting, for the preview's quality chip (SPEC 10 §5.1, SPEC 04 §6.3).
@@ -342,6 +368,9 @@ export function EditorPage({
                   canvas={{ widthPx: state.canvas.width, heightPx: state.canvas.height }}
                   captionStyleIds={captionStyleIds}
                   assetIds={assetIds}
+                  media={media.map((entry) => ({ id: entry.id, label: entry.originalName, kind: entry.kind }))}
+                  captionStyle={captureStyle}
+                  captureItems={captureItems}
                 />
               ) : state ? (
                 <CaptionPanel

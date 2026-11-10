@@ -406,6 +406,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set()}
+        media={[]}
       />,
     );
     expect(screen.getByText('No brand kits yet')).toBeTruthy();
@@ -421,6 +422,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set(['logo-1'])}
+        media={[]}
       />,
     );
     expect(screen.getByText('Studio')).toBeTruthy();
@@ -440,6 +442,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set(['logo-1'])}
+        media={[]}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /delete studio/i }));
@@ -455,6 +458,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set(['logo-1'])}
+        media={[]}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /apply…/i }));
@@ -476,6 +480,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set()}
+        media={[]}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /apply…/i }));
@@ -496,6 +501,7 @@ describe('BrandKitPanel', () => {
         canvas={CANVAS}
         captionStyleIds={new Set()}
         assetIds={new Set(['logo-1'])}
+        media={[]}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /apply…/i }));
@@ -503,5 +509,124 @@ describe('BrandKitPanel', () => {
     expect(run).toHaveBeenCalledTimes(1);
     // `run` takes (label, command); the label is what the undo history shows the user.
     expect(run.mock.calls.map((call) => call[0])).toContain('Apply brand kit');
+  });
+});
+
+/**
+ * The kit editor, from the panel's side.
+ *
+ * The draft's rules are tested in `brand-kit-draft.test.ts`; what is checked here is that the
+ * dialog is *reachable* and that saving writes through the store — a form nobody can open, or
+ * one whose Save goes nowhere, is the failure mode a pure-function suite cannot see.
+ */
+describe('kit editor', () => {
+  const renderPanel = (kits: BrandKit[], overrides: Partial<BrandKitsApi> = {}) =>
+    render(
+      <BrandKitPanel
+        state={timelineWithClips()}
+        timeline={api()}
+        brandKits={kitsApi(kits, overrides)}
+        canvas={CANVAS}
+        captionStyleIds={new Set()}
+        assetIds={new Set(['logo-1'])}
+        media={[
+          { id: 'logo-1', label: 'logo.png', kind: 'image' },
+          { id: 'intro-1', label: 'intro.mp4', kind: 'video' },
+        ]}
+      />,
+    );
+
+  it('opens the editor from the empty state, so a project with no kits can make one', () => {
+    // The gap this closes: before the editor, a new project's kit list was permanently empty
+    // and nothing in the app could write a kit.
+    renderPanel([]);
+    fireEvent.click(screen.getByRole('button', { name: /new kit/i }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/new brand kit/i)).toBeTruthy();
+  });
+
+  it('opens the editor on an existing kit with its fields filled in', () => {
+    renderPanel([kit({ name: 'Studio', captionStyleId: 'bold-creator' })]);
+    fireEvent.click(screen.getByRole('button', { name: /edit studio/i }));
+    expect(screen.getByText(/edit “studio”/i)).toBeTruthy();
+    // The caption style id comes from the kit, not from a default.
+    const input = screen.getByDisplayValue('bold-creator');
+    expect(input).toBeTruthy();
+  });
+
+  it('saves a new kit through the store', () => {
+    // Typed so the call's argument is a `BrandKit` rather than a zero-length tuple.
+    const save = vi.fn(async (_kit: BrandKit) => true);
+    renderPanel([], { save });
+    fireEvent.click(screen.getByRole('button', { name: /new kit/i }));
+
+    // The name is required, so the first press reports the problem instead of saving.
+    fireEvent.click(screen.getByRole('button', { name: /save kit/i }));
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toMatch(/needs a name/i);
+
+    fireEvent.change(screen.getByPlaceholderText(/studio, client a/i), { target: { value: 'Client A' } });
+    fireEvent.click(screen.getByRole('button', { name: /save kit/i }));
+    expect(save).toHaveBeenCalledTimes(1);
+    const saved = save.mock.calls[0]![0];
+    expect(saved.name).toBe('Client A');
+    // A readable id from the name, so the kit is identifiable in a `.cwbrand` file.
+    expect(saved.id).toBe('client-a');
+  });
+
+  it('offers “From this clip” only when there is a clip to capture', () => {
+    // SPEC 13 §2: a control that cannot work is not drawn, not drawn disabled.
+    const { rerender } = renderPanel([]);
+    fireEvent.click(screen.getByRole('button', { name: /new kit/i }));
+    expect(screen.queryByRole('button', { name: /from this clip/i })).toBeNull();
+
+    rerender(
+      <BrandKitPanel
+        state={timelineWithClips()}
+        timeline={api()}
+        brandKits={kitsApi([])}
+        canvas={CANVAS}
+        captionStyleIds={new Set()}
+        assetIds={new Set(['logo-1'])}
+        media={[]}
+        captureItems={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /new kit/i }));
+    expect(screen.getByRole('button', { name: /from this clip/i })).toBeTruthy();
+  });
+
+  it('fills the form from the clip when “From this clip” is pressed', () => {
+    /*
+      The capture's result must reach the *fields*, and its notes must be visible: a capture
+      that reported "this clip has no captions" into a toast the dialog covers up would leave
+      the user wondering why the colours did not appear.
+    */
+    render(
+      <BrandKitPanel
+        state={timelineWithClips()}
+        timeline={api()}
+        brandKits={kitsApi([])}
+        canvas={CANVAS}
+        captionStyleIds={new Set(['bold-creator'])}
+        assetIds={new Set(['logo-1'])}
+        media={[]}
+        captureItems={[
+          {
+            id: 'cap-1',
+            type: 'caption',
+            trackId: 'captions',
+            startUs: 0,
+            durationUs: 1_000_000,
+            captionStyleId: 'bold-creator',
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /new kit/i }));
+    fireEvent.click(screen.getByRole('button', { name: /from this clip/i }));
+    expect(screen.getByDisplayValue('bold-creator')).toBeTruthy();
+    // The note about the clip's lack of a corner image is shown above the form.
+    expect(screen.getByRole('status').textContent).toMatch(/logo|caption/i);
   });
 });

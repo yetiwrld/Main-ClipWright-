@@ -130,6 +130,23 @@ const customColourSchema = z.object({
 
 export const BRAND_KIT_MAX_CUSTOM_COLOURS = 8;
 
+/**
+ * The palette a kit starts with — black and white, which is nobody's brand.
+ *
+ * A default rather than a design token: these are *data* (a kit's colours are the user's, stored
+ * in a file), so they belong here rather than in the design system, and the renderer's
+ * token lint rightly refuses hex values in a UI file. Every one is a value the schema requires,
+ * so a new kit validates before the user has changed anything — and a capture with no style to
+ * read gets the same set, so the two cannot disagree about what "no colours" means.
+ */
+export const DEFAULT_KIT_COLOURS = {
+  primary: '#FFFFFF',
+  secondary: '#000000',
+  accent: '#FFFFFF',
+  background: '#000000',
+  text: '#FFFFFF',
+} as const;
+
 export const brandKitSchema = z.object({
   format: z.literal(CwbrandFormat),
   formatVersion: z.literal(CwbrandFormatVersion),

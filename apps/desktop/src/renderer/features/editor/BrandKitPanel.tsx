@@ -20,13 +20,15 @@
  * not need a DOM to check the parts that matter.
  */
 import React, { useMemo, useState } from 'react';
-import { Layers, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Layers, Pencil, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { Button, Card, Chip, Dialog, EmptyState, SegmentedControl, Toggle } from '@clipwright/design-system';
 import {
   ALL_KIT_PARTS,
   findKitAppliedItems,
   planKitApplication,
   type BrandKit,
+  type CapturableItem,
+  type CapturableStyle,
   type KitApplyParts,
   type KitApplicationPlan,
 } from '@clipwright/brand-kits';
@@ -41,6 +43,7 @@ import {
 } from '@clipwright/timeline-engine';
 import type { TimelineApi } from './use-timeline.js';
 import type { BrandKitsApi } from './use-brand-kits.js';
+import { BrandKitEditor, type EditorMediaOption } from './BrandKitEditor.js';
 
 /** What the apply button covers: the spec's "This clip · Selected clips · All clips". */
 export type ApplyScope = 'this-clip' | 'selected-clips' | 'all-clips';
@@ -223,6 +226,7 @@ function KitCard({
   onRemove,
   onDetach,
   onDelete,
+  onEdit,
 }: {
   kit: BrandKit;
   state: TimelineState;
@@ -230,6 +234,7 @@ function KitCard({
   onRemove: () => void;
   onDetach: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const footprint = useMemo(() => kitFootprint(state, kit.id), [state, kit.id]);
   const swatches = [kit.colors.primary, kit.colors.secondary, kit.colors.accent, kit.colors.background];
@@ -272,9 +277,14 @@ function KitCard({
           Apply…
         </Button>
       )}
-      <Button size={28} variant="ghost" onClick={onDelete} aria-label={`Delete ${kit.name}`}>
-        <Trash2 size={12} /> Delete kit
-      </Button>
+      <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+        <Button size={28} variant="ghost" onClick={onEdit} aria-label={`Edit ${kit.name}`}>
+          <Pencil size={12} /> Edit
+        </Button>
+        <Button size={28} variant="ghost" onClick={onDelete} aria-label={`Delete ${kit.name}`}>
+          <Trash2 size={12} /> Delete
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -286,6 +296,9 @@ export function BrandKitPanel({
   canvas,
   captionStyleIds,
   assetIds,
+  media,
+  captionStyle,
+  captureItems,
 }: {
   state: TimelineState;
   timeline: TimelineApi;
@@ -293,11 +306,23 @@ export function BrandKitPanel({
   canvas: { widthPx: number; heightPx: number };
   captionStyleIds: ReadonlySet<string>;
   assetIds: ReadonlySet<string>;
+  /** The media library, for the logo and intro pickers. */
+  media: readonly EditorMediaOption[];
+  /** The caption style in play, so a capture can take real colours and a font. */
+  captionStyle?: CapturableStyle;
+  /** The items a capture reads. Defaults to the whole composition. */
+  captureItems?: readonly CapturableItem[];
 }) {
   const [scope, setScope] = useState<ApplyScope>('this-clip');
   const [parts, setParts] = useState<KitApplyParts>(ALL_KIT_PARTS);
   const [applying, setApplying] = useState<BrandKit | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<BrandKit | null>(null);
+  /*
+    `null` is closed, `{ kit }` is editing that kit, `{}` is creating one. One state rather than
+    a boolean plus an optional kit, because "open with no kit" and "closed with no kit" would
+    otherwise be the same value.
+  */
+  const [editing, setEditing] = useState<{ kit?: BrandKit } | null>(null);
   /*
     Kits are shown a page at a time because a project can accumulate dozens, and a left panel
     with forty cards in it is worse than one with a button. The count grows; nothing is hidden
@@ -337,7 +362,62 @@ export function BrandKitPanel({
     return <div style={{ padding: 'var(--space-2)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>Loading kits…</div>;
   }
 
-  /* A project with no kits says what a kit is for, and offers nothing disabled. */
+  /*
+    The editor and the delete confirm are one element shared by **both** branches below. A first
+    draft put them only in the list branch, so the "New kit" button in the empty state opened
+    nothing at all — the one screen a project with no kits has, and the one place creating a kit
+    must work.
+  */
+  const dialogs = (
+    <>
+      {editing && (
+        <BrandKitEditor
+          open
+          {...(editing.kit ? { initial: editing.kit } : {})}
+          media={media}
+          takenIds={new Set(brandKits.kits.map((entry) => entry.id))}
+          {...(captureItems ? { captureFrom: { items: captureItems, canvas } } : {})}
+          {...(captionStyle ? { captionStyle } : {})}
+          onCancel={() => setEditing(null)}
+          onSave={(kit) => {
+            void brandKits.save(kit);
+            setEditing(null);
+          }}
+        />
+      )}
+      {confirmingDelete && (
+        <Dialog
+          open
+          title={`Delete “${confirmingDelete.name}”?`}
+          onClose={() => setConfirmingDelete(null)}
+          footer={
+            <>
+              <Button size={28} variant="ghost" onClick={() => setConfirmingDelete(null)}>
+                Cancel
+              </Button>
+              <Button
+                size={28}
+                variant="primary"
+                onClick={() => {
+                  void brandKits.remove(confirmingDelete.id);
+                  setConfirmingDelete(null);
+                }}
+              >
+                Delete kit
+              </Button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 'var(--fs-sm)' }}>
+            The items this kit placed on the timeline stay where they are. Only the kit itself is
+            deleted, so you can no longer apply it again.
+          </p>
+        </Dialog>
+      )}
+    </>
+  );
+
+  /* A project with no kits says what a kit is for, and offers a way to make one. */
   if (brandKits.kits.length === 0) {
     return (
       <div style={{ padding: 'var(--space-2)' }}>
@@ -346,15 +426,19 @@ export function BrandKitPanel({
           title="No brand kits yet"
           explanation="A kit holds a caption look, colours, a logo and an intro. Make one from the clip you are editing, and applying it puts the same branding on every clip."
         />
+        <Button size={28} variant="secondary" onClick={() => setEditing({})}>
+          <Plus size={12} /> New kit
+        </Button>
         <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-          Kits are stored with this project. Creating and editing them is not built yet — this
-          screen lists and applies the kits a project has.
+          Kits are stored with this project, so they travel with it and are not shared between
+          projects yet.
         </p>
         {brandKits.error && (
           <p role="alert" style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
             {brandKits.error}
           </p>
         )}
+        {dialogs}
       </div>
     );
   }
@@ -367,6 +451,9 @@ export function BrandKitPanel({
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
         <Sparkles size={14} aria-hidden />
         <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, flex: 1 }}>Brand kits</span>
+        <Button size={28} variant="ghost" onClick={() => setEditing({})} aria-label="New brand kit">
+          <Plus size={12} /> New
+        </Button>
       </div>
 
       {applying ? (
@@ -430,15 +517,16 @@ export function BrandKitPanel({
         </Card>
       ) : null}
 
-      {visible.map((kit) => (
+      {visible.map((entry) => (
         <KitCard
-          key={kit.id}
-          kit={kit}
+          key={entry.id}
+          kit={entry}
           state={state}
-          onApply={() => setApplying(kit)}
-          onRemove={() => timeline.run('Remove kit items', (current) => removeKitItems(current, kit.id))}
-          onDetach={() => timeline.run('Detach kit items', (current) => detachKitItems(current, kit.id))}
-          onDelete={() => setConfirmingDelete(kit)}
+          onApply={() => setApplying(entry)}
+          onRemove={() => timeline.run('Remove kit items', (current) => removeKitItems(current, entry.id))}
+          onDetach={() => timeline.run('Detach kit items', (current) => detachKitItems(current, entry.id))}
+          onDelete={() => setConfirmingDelete(entry)}
+          onEdit={() => setEditing({ kit: entry })}
         />
       ))}
 
@@ -448,35 +536,7 @@ export function BrandKitPanel({
         </Button>
       )}
 
-      {confirmingDelete && (
-        <Dialog
-          open
-          title={`Delete “${confirmingDelete.name}”?`}
-          onClose={() => setConfirmingDelete(null)}
-          footer={
-            <>
-              <Button size={28} variant="ghost" onClick={() => setConfirmingDelete(null)}>
-                Cancel
-              </Button>
-              <Button
-                size={28}
-                variant="primary"
-                onClick={() => {
-                  void brandKits.remove(confirmingDelete.id);
-                  setConfirmingDelete(null);
-                }}
-              >
-                Delete kit
-              </Button>
-            </>
-          }
-        >
-          <p style={{ fontSize: 'var(--fs-sm)' }}>
-            The items this kit placed on the timeline stay where they are. Only the kit itself is
-            deleted, so you can no longer apply it again.
-          </p>
-        </Dialog>
-      )}
+      {dialogs}
     </div>
   );
 }

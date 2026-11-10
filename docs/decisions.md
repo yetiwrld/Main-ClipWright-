@@ -1158,3 +1158,41 @@ did not change, and a kit is data that belongs to the project it was made for. A
 is dropped rather than throwing, and the map's key wins over the object's `id` — because the key
 is what every caller looks a kit up with, and an object whose id drifted would otherwise be
 found under one name and report another.
+
+## 40. The kit form holds a draft, and a switched-on part with nothing chosen is an error
+
+**A `BrandKit` cannot be a form's state.** The schema requires a logo to have an asset id and a
+placement to have six numbers; a user is entitled to be halfway through choosing them, and a form
+that could only hold valid values would have to invent defaults the user never picked. So the form
+holds a `KitDraft` — strings and switches — and `draftToKit` is the one boundary. Everything
+interesting about the form is then a pure function, testable without a DOM.
+
+**Every problem is reported at once.** A form that fails one field per press of Save makes the
+user play a guessing game; the checks append rather than return, and the test asserts three
+problems arriving together.
+
+**A part switched on with nothing chosen is a problem, not an omission.** The user said they
+wanted a logo. A kit that quietly left it out would apply everything *except* the thing they
+turned on, and the plan would say nothing because the kit genuinely has no logo. The message
+names both halves so the fix is obvious. A part switched *off* is different: no key, no
+complaint — the checkpoint is a statement of intent, and the absence of an intent is not an error.
+
+**The schema is the last word.** The form's checks exist to produce messages about controls; the
+schema catches what they miss. When the two overlap the form's message wins, because "Number must
+be greater than or equal to 0.1" at path `intro.durationSec` is not a sentence about a field the
+user can see. The custom-colour cap says 8 in both places, and deleting the form's copy changed
+nothing — an equivalent mutant, recorded as such.
+
+**The form has four corners, and a `custom` placement is a real limit.** Opening a kit whose logo
+used a dragged point shows the nearest corner; saving keeps the size and margin but not the point.
+The alternative is a form that silently rewrites a field it never displayed — worse, because the
+user would have no way to know. It is in `limitations.md` with the other unfinished parts of §8.
+
+**The dialogs are one element rendered by both branches of the panel.** The first draft returned
+early when a project had no kits, which made "New kit" — on the only screen such a project has —
+open nothing. A test that pressed the button found it; a screenshot would not have.
+
+**Kit colours are data, not design tokens.** The renderer's token lint refuses hex values in UI
+files, and it is right: a kit's colours come from a file and are the user's. They live in
+`packages/brand-kits` as `DEFAULT_KIT_COLOURS`, shared by the form's starting palette and by a
+capture that had no style to read — so the two cannot disagree about what "no colours yet" means.

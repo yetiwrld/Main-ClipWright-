@@ -9,6 +9,7 @@
 export {
   BRAND_KIT_MAX_CUSTOM_COLOURS,
   CwbrandFormat,
+  DEFAULT_KIT_COLOURS,
   CwbrandFormatVersion,
   brandKitSchema,
   collectUnknownKitFields,

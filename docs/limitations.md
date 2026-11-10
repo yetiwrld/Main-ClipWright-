@@ -471,13 +471,18 @@ context menus, in-editor import, the fill lock).
     placed, and offers apply (with the spec's six part checkboxes and a before-apply summary
     that reports a missing logo), reapply, detach, remove and delete — each as one undo step,
     and deleting a kit leaves its items standing.
-    What is *not* built: the kit **editor** (creating a kit from scratch and changing its
-    fields), the export/import buttons (the file picker lives in the main process and no
-    `brandKit:export` channel exists), and building a composition from a `compositionTemplateId`
-    — so a template-based intro is planned and then refused rather than inserted empty. Text and
-    shape items cannot be captured, because the kit's schema has no field for them. Nothing in
-    the app offers to *create* a kit, so a project's kit list is empty until something writes
-    one: the panel says so rather than showing a disabled button (`specs/13` §2).
+    The **editor** is built too: a kit can be created from scratch or from the current clip,
+    edited, and saved, with every problem reported at once and a part switched on but not yet
+    chosen treated as a problem rather than a silent omission.
+    What is *not* built: the export/import buttons (the file picker lives in the main process
+    and no `brandKit:export` channel exists), and building a composition from a
+    `compositionTemplateId` — so a template-based intro is planned and then refused rather than
+    inserted empty. Text and shape items cannot be captured, because the kit's schema has no
+    field for them, and a `custom` logo placement becomes the nearest corner when edited,
+    because the form has four corners and no way to express a dragged point. The colour picker
+    is the shared `ColourPicker` — *recent colours* and *pick from logo* (SPEC 13 §8.2) are not
+    built, and neither is the batch apply across several clips (the panel applies to the
+    composition being edited).
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on
