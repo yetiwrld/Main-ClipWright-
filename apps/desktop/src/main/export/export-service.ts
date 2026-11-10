@@ -88,7 +88,7 @@ export interface StartExportFailure {
   /** Plain-language reason (SPEC 14 §8). */
   error: string;
   /** What the user can do about it. */
-  action: 'relink' | 'choose-folder' | 'retry' | 'change-settings' | 'none';
+  action: 'relink' | 'choose-folder' | 'retry' | 'change-settings' | 'resolve-clash' | 'none';
 }
 
 export interface StartExportSuccess {
@@ -169,7 +169,7 @@ export class ExportService {
       request.clashPolicy ?? 'auto-number',
     );
     if (!resolution.ok) {
-      return { ok: false, error: resolution.error, action: 'choose-folder' };
+      return { ok: false, error: resolution.error, action: resolution.action ?? 'choose-folder' };
     }
 
     // ---- Free-space check (§3.4): estimated size × 1.5, plus the temp file.
@@ -348,7 +348,7 @@ export class ExportService {
     baseName: string,
     extension: string,
     policy: ClashPolicy,
-  ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; path: string } | { ok: false; error: string; action?: 'resolve-clash' }> {
     try {
       await mkdir(outputDir, { recursive: true });
     } catch {
@@ -358,7 +358,15 @@ export class ExportService {
     const candidate = join(outputDir, `${sanitised}${extension}`);
     if (!existsSync(candidate)) return { ok: true, path: candidate };
     if (policy === 'replace') return { ok: true, path: candidate };
-    // auto-number (and "ask", which the UI resolves before calling us)
+    /*
+      SPEC 14 §5's *Ask*. This used to fall through to auto-number behind a comment claiming "the UI
+      resolves before calling us" — a resolution nothing implemented, so choosing *Ask* numbered the
+      file and never asked. The dialog now answers it and re-submits with an explicit policy; the
+      error names the path so it can.
+    */
+    if (policy === 'ask') {
+      return { ok: false, error: candidate, action: 'resolve-clash' };
+    }
     for (let counter = 2; counter < 1000; counter += 1) {
       const numbered = join(outputDir, `${sanitised} ${counter}${extension}`);
       if (!existsSync(numbered)) return { ok: true, path: numbered };

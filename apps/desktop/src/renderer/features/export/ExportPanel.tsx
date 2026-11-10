@@ -34,6 +34,15 @@ export interface ExportPanelState {
   format: OutputFormatId;
   quality: QualityPresetId;
   audioBitrate: AudioBitrate;
+  /**
+   * What to do when the output name is taken (SPEC 14 §5).
+   *
+   * The dialog passed `'auto-number'` as a literal, so the spec's *Replace* (with confirmation) and
+   * *Ask* were not reachable — a user who wanted to overwrite a previous render got `clip-2.mp4`
+   * beside it instead, every time. Like the aspect and fps defaults, nothing was wrong with the
+   * value; the fault was that it was chosen here in the panel's absence.
+   */
+  clashPolicy: 'auto-number' | 'replace' | 'ask';
   includeAudio: boolean;
   burnCaptions: boolean;
   saveSubtitles: boolean;
@@ -57,6 +66,8 @@ export const DEFAULT_EXPORT_STATE: ExportPanelState = {
   format: 'mp4',
   quality: 'standard',
   audioBitrate: DEFAULT_AUDIO_BITRATE,
+  /* SPEC 14 §5's default. */
+  clashPolicy: 'auto-number',
   includeAudio: true,
   burnCaptions: true,
   saveSubtitles: false,
@@ -197,6 +208,19 @@ export function ExportPanel({
           {AUDIO_BITRATES.map((b) => (
             <option key={b} value={b}>{b} kbps</option>
           ))}
+        </select>
+      </Field>
+
+      {/* Name clash */}
+      <Field label="If the file already exists">
+        <select
+          value={state.clashPolicy}
+          onChange={(e) => onChange({ clashPolicy: e.target.value as ExportPanelState['clashPolicy'] })}
+          style={selectStyle}
+        >
+          <option value="auto-number">Add a number</option>
+          <option value="replace">Replace it</option>
+          <option value="ask">Ask me each time</option>
         </select>
       </Field>
 

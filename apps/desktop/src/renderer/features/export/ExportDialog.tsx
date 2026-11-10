@@ -18,7 +18,7 @@ import type { ExportJobPayload } from '../../global.js';
 import { isDesktop } from '../../api.js';
 import { DEFAULT_EXPORT_STATE, ExportPanel, type ExportPanelState } from './ExportPanel.js';
 import { ExportQueuePanel, formatRemaining } from './ExportQueuePanel.js';
-import { useExport } from './use-export.js';
+import { useExport, type StartExportInput, type StartExportResult } from './use-export.js';
 
 export interface ExportDialogProps {
   open: boolean;
@@ -48,6 +48,16 @@ export interface ExportDialogProps {
    * style editor (SPEC 11 §6).
    */
   captionStyles?: Readonly<Record<string, CaptionStyle>>;
+  /**
+   * The export runner. Injectable so the dialog's own behaviour — the clash question, in
+   * particular — can be exercised without a main process.
+   *
+   * `useExport` reaches IPC directly, so every existing test of this dialog mocks `api` away and
+   * stops before the interesting branch. SPEC 14 §5's *Ask* is a conversation between the two: the
+   * service reports the clash, the dialog asks, the answer re-runs. That cannot be tested from
+   * either side alone — which is how it came to be implemented in neither.
+   */
+  startExport?: (input: StartExportInput) => Promise<StartExportResult>;
 }
 
 /** Range choices offered by §3.1. */
@@ -65,6 +75,7 @@ export function ExportDialog({
   durationUs,
   canvas,
   captionStyles,
+  startExport: injectedStartExport,
 }: ExportDialogProps) {
   const [panel, setPanel] = useState<ExportPanelState>(() => ({
     ...DEFAULT_EXPORT_STATE,
@@ -86,8 +97,12 @@ export function ExportDialog({
   }));
   const [rangeChoice, setRangeChoice] = useState<RangeChoice>(workAreaUs ? 'work-area' : 'whole');
   const [message, setMessage] = useState('');
+  /** The path a clash stopped, when the policy is "ask me". Empty when there is nothing to ask. */
+  const [clash, setClash] = useState('');
   const [detailsFor, setDetailsFor] = useState<ExportJobPayload | null>(null);
   const exports = useExport(projectId);
+  /* The injected runner replaces only the start call; the queue around it is still the real one. */
+  const startExport = injectedStartExport ?? exports.startExport;
 
   const onChange = useCallback((patch: Partial<ExportPanelState>) => {
     setPanel((current) => ({ ...current, ...patch }));
@@ -104,9 +119,10 @@ export function ExportDialog({
     (job) => job.status !== 'done' && job.status !== 'failed' && job.status !== 'cancelled',
   );
 
-  const handleExport = useCallback(async () => {
+  const handleExport = useCallback(async (policyOverride?: ExportPanelState['clashPolicy']) => {
     setMessage('');
-    const result = await exports.startExport({
+    setClash('');
+    const result = await startExport({
       panel,
       name: compositionName || 'Clip',
       projectId,
@@ -116,11 +132,20 @@ export function ExportDialog({
       compositionFps: fps,
       items,
       backgroundColor: state?.canvas?.backgroundColor,
-      clashPolicy: 'auto-number',
+      clashPolicy: policyOverride ?? panel.clashPolicy,
       fullDecode: true,
       captionStyles,
     });
     if (!result.ok) {
+      /*
+        SPEC 14 §5's *Ask what to do*. The service reports the path it would have written, so the
+        question is concrete — "Replace clip.mp4?" rather than "a file exists". Answering re-runs the
+        export with an explicit policy, so `ask` never reaches main a second time.
+      */
+      if (result.action === 'resolve-clash') {
+        setClash(result.error);
+        return;
+      }
       setMessage(result.error);
       return;
     }
@@ -191,6 +216,43 @@ export function ExportDialog({
           onCancel={onClose}
           showHeading={false}
         />
+
+        {clash && (
+          /*
+            SPEC 14 §5's *Ask*. Shown with the path so the choice is about a file the user can
+            picture; the answer re-runs the export with that policy so `ask` is never sent twice.
+          */
+          <div
+            role="alertdialog"
+            aria-label="File already exists"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-2)',
+              padding: 'var(--space-2)',
+              border: '1px solid var(--line-default)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--surface-raised)',
+            }}
+          >
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+              {clash} already exists.
+            </span>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <Button size={28} onClick={() => void handleExport('replace')}>
+                Replace it
+              </Button>
+              <Button size={28} onClick={() => void handleExport('auto-number')}>
+                Keep both
+              </Button>
+              <Button size={28} onClick={() => setClash('')}>
+                {/* Named apart from the panel's own Cancel: two buttons with one accessible name is
+                    ambiguous to a screen reader and to a test. */}
+                Don’t replace
+              </Button>
+            </div>
+          </div>
+        )}
 
         {message && (
           <p

@@ -534,3 +534,94 @@ describe('the export frame rate matches the composition by default', () => {
     expect((screen.getByLabelText('Frame rate') as HTMLSelectElement).value).toBe('30');
   });
 });
+
+
+describe('the "ask" clash policy asks, with the path, and re-runs with the answer', () => {
+  /*
+    SPEC 14 §5. The dialog passed `'auto-number'` as a literal, so *Replace* and *Ask* were
+    unreachable from the UI. *Ask* also had a second half: the service treats it as auto-number and
+    its comment claimed "the UI resolves before calling us" — a resolution nothing implemented.
+
+    The conversation is between two components — the service reports the clash, the dialog asks, the
+    answer re-runs — so neither side's tests could see it alone. `startExport` is injectable for
+    exactly that reason.
+  */
+  function renderWith(startExport: (input: { clashPolicy?: string }) => Promise<unknown>) {
+    bridge.desktop = false;
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+        startExport={startExport as never}
+      />,
+    );
+  }
+
+  const clashOrStart = (seen: string[]) =>
+    async (input: { clashPolicy?: string }) => {
+      seen.push(input.clashPolicy ?? '(unset)');
+      return input.clashPolicy === 'ask'
+        ? { ok: false, error: '/exports/clip.mp4', action: 'resolve-clash' }
+        : { ok: true, jobId: 'job-1' };
+    };
+
+  it('offers all three policies', () => {
+    /* The control the literal made unreachable. */
+    renderWith(clashOrStart([]));
+    const select = screen.getByLabelText('If the file already exists') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['auto-number', 'replace', 'ask']);
+  });
+
+  it('asks with the concrete path when the service reports a clash', async () => {
+    const seen: string[] = [];
+    renderWith(clashOrStart(seen));
+    fireEvent.change(screen.getByLabelText('If the file already exists'), { target: { value: 'ask' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    const prompt = await screen.findByRole('alertdialog', { name: 'File already exists' });
+    /* The path, not a sentence about a path: the choice is about a file the user can picture. */
+    expect(prompt.textContent).toContain('/exports/clip.mp4');
+    expect(seen).toEqual(['ask']);
+  });
+
+  it('replace re-runs with an explicit policy, so ask is never sent twice', async () => {
+    const seen: string[] = [];
+    renderWith(clashOrStart(seen));
+    fireEvent.change(screen.getByLabelText('If the file already exists'), { target: { value: 'ask' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    await screen.findByRole('alertdialog', { name: 'File already exists' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace it' }));
+    await waitFor(() => expect(seen).toEqual(['ask', 'replace']));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('keep both re-runs with auto-number', async () => {
+    const seen: string[] = [];
+    renderWith(clashOrStart(seen));
+    fireEvent.change(screen.getByLabelText('If the file already exists'), { target: { value: 'ask' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    await screen.findByRole('alertdialog', { name: 'File already exists' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep both' }));
+    await waitFor(() => expect(seen).toEqual(['ask', 'auto-number']));
+  });
+
+  it('cancelling the question starts nothing further', async () => {
+    const seen: string[] = [];
+    renderWith(clashOrStart(seen));
+    fireEvent.change(screen.getByLabelText('If the file already exists'), { target: { value: 'ask' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    await screen.findByRole('alertdialog', { name: 'File already exists' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Don’t replace' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(seen).toEqual(['ask']);
+  });
+});

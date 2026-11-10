@@ -648,3 +648,65 @@ describe('wordResolverFrom', () => {
     expect(resolve('w1')).toBe('Hello');
   });
 });
+
+describe('the "ask" clash policy actually asks', () => {
+  /*
+    SPEC 14 §5 offers *Auto-number* (default), *Replace* (confirm) and *Ask*. The service's
+    `resolveOutputPath` treated `ask` as auto-number behind a comment claiming "the UI resolves before
+    calling us" — a resolution nothing implemented, so choosing *Ask* numbered the file and never
+    asked.
+
+    These run without ffmpeg: the clash is detected before any rendering is planned, so the answer
+    comes back from `start()` directly. A test gated on ffmpeg would leave this branch unchecked on
+    every machine that cannot run it, which is precisely the branch that was wrong.
+  */
+  const dir = join(TMP, 'ask-clash');
+
+  beforeEach(() => {
+    mkdirSync(dir, { recursive: true });
+    /* The path the service would write, occupied by a plain file — no encoder involved. */
+    writeFileSync(join(dir, 'taken.mp4'), 'previous render');
+  });
+
+  it('returns the clashing path and an action, instead of numbering the file', async () => {
+    const service = new ExportService({ storage: makeStorage() });
+    const result = await service.start({
+      jobId: `ask-${Date.now().toString(36)}`,
+      name: 'Ask',
+      settings: makeSettings(),
+      fileName: 'taken',
+      outputDir: dir,
+      clashPolicy: 'ask',
+      createFrameSource: () => solidColourFrameSource({ width: 1280, height: 720, luma: 30 }),
+      fullDecode: false,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      /* The path, not a sentence: the dialog shows "…/taken.mp4 already exists." */
+      expect(result.error).toBe(join(dir, 'taken.mp4'));
+      expect(result.action).toBe('resolve-clash');
+    }
+    /* Nothing was written and nothing was queued. */
+    expect(existsSync(join(dir, 'taken 2.mp4'))).toBe(false);
+  });
+
+  it('does not ask when there is nothing to clash with', async () => {
+    /*
+      The policy is about a collision, not about prompting. With a free name the export proceeds —
+      otherwise "Ask" would make every first export of a clip fail with a question.
+    */
+    const service = new ExportService({ storage: makeStorage() });
+    const result = await service.start({
+      jobId: `ask-free-${Date.now().toString(36)}`,
+      name: 'Ask',
+      settings: makeSettings(),
+      fileName: 'free',
+      outputDir: dir,
+      clashPolicy: 'ask',
+      createFrameSource: () => solidColourFrameSource({ width: 1280, height: 720, luma: 30 }),
+      fullDecode: false,
+    });
+    expect(result.ok).toBe(true);
+  });
+});

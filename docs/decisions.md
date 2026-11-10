@@ -2195,3 +2195,41 @@ field stays, because a plan that does not record the editor's rate is a plan you
 later; the comment now says it is *carried, not read*, and why that is correct rather than an
 oversight. A doc comment that describes imaginary behaviour is worse than no comment: it is a
 plausible reason to stop looking.
+
+## 63. A policy with three answers, one of which was a comment
+
+SPEC 14 §5 gives a name clash three answers: *Auto-number* (default), *Replace* (with
+confirmation), and *Ask*. The dialog passed `'auto-number'` as a literal, so two thirds of the
+feature were unreachable from the UI — §61 and §62 again, in the same file, within twenty lines.
+
+Adding the control exposed the second half, which is the part worth writing down. The service's
+`resolveOutputPath` had:
+
+```ts
+if (policy === 'replace') return { ok: true, path: candidate };
+// auto-number (and "ask", which the UI resolves before calling us)
+```
+
+That comment is a *contract*, written confidently, describing a resolution that existed in no file.
+Choosing *Ask* numbered the file and never asked. Had I only added the control, I would have shipped
+a fourth lie: an option that reads as a question and behaves as a default.
+
+**Why neither test suite could see it.** This is a conversation between two components — the service
+reports the clash, the dialog asks, the answer re-runs the export. The service's tests never passed
+`ask`; the dialog's tests mock `api` away and stop before the start call, because the alternative is
+a real main process and ffmpeg. Each half was individually plausible. This is the same seam that let
+§59's toast claim a save that never happened, and the fix is the same in shape: make the boundary an
+explicit, testable thing.
+
+Here that meant `startExport` as an injectable prop on the dialog — not because production needs the
+indirection, but because the branch cannot be reached through the mocked `api` the other tests use,
+and a branch that no test can reach is a branch that stays wrong. The service now returns the
+clashing path with `action: 'resolve-clash'`, and the dialog answers by re-running with an explicit
+policy, so `ask` never reaches main twice.
+
+**On the gating.** The two new service tests are deliberately not `skipIf(!HAS_FFMPEG)`: the clash is
+detected before any rendering is planned, so `start()` returns the answer directly. A gated test
+would leave the wrong branch unchecked on every machine without ffmpeg — which in CI is most of
+them, and on the developer's machine is exactly when nobody is looking.
+
+Six mutations bite, the original literal among them.

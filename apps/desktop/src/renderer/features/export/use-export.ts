@@ -114,6 +114,11 @@ export function canCancelJob(job: ExportJobPayload): boolean {
   return job.status !== 'done' && job.status !== 'failed' && job.status !== 'cancelled';
 }
 
+/** The arguments a start request carries. Named so the dialog can accept an injected runner. */
+export type StartExportInput = Parameters<ExportApi['startExport']>[0];
+/** What the main process answers, including the action that tells the dialog what to do next. */
+export type StartExportResult = Awaited<ReturnType<ExportApi['startExport']>>;
+
 export interface ExportApi {
   jobs: ExportJobPayload[];
   running: number;
