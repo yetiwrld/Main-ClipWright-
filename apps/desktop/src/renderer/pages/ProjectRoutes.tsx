@@ -143,6 +143,28 @@ function ImportStage({
   const source = project?.settings as Record<string, unknown> | undefined;
   const sourcePath = typeof source?.sourcePath === 'string' ? source.sourcePath : '';
   const isUrl = /^https?:\/\//i.test(sourcePath);
+  /*
+    Both of these were literals, and both are chosen on the start screen.
+
+    `storageMode: 'managed'` is the more expensive of the two mistakes: a user who picked "keep
+    files where they are" still had their video copied into the workspace — the app imported the
+    file it had been asked not to move. `quality: '1080p'` is the download ceiling for URL sources,
+    so a user who chose 4K got 1080p with nothing on screen to say why.
+
+    Read through the same narrow casts the path uses, because `settings` reaches the renderer as an
+    untyped record (`global.d.ts` does not import the schema root). A value that is missing or not
+    a string falls back to what used to be hardcoded here, which is the honest default for a
+    project created before these settings existed.
+  */
+  const DOWNLOAD_QUALITIES = ['720p', '1080p', 'best'] as const;
+  const storedQuality = source?.downloadQuality;
+  const quality =
+    typeof storedQuality === 'string' && (DOWNLOAD_QUALITIES as readonly string[]).includes(storedQuality)
+      ? (storedQuality as (typeof DOWNLOAD_QUALITIES)[number])
+      : '1080p';
+  /* The stored value is already the ingest vocabulary — `startSettings` maps the start screen's
+     `copy` to `managed` before writing it, so nothing is translated here. */
+  const storageMode = source?.storageMode === 'reference' ? 'reference' : 'managed';
 
   const start = useCallback(async () => {
     if (!sourcePath) {
@@ -160,8 +182,8 @@ function ImportStage({
         projectId,
         sourcePath: isUrl ? undefined : sourcePath,
         sourceUrl: isUrl ? sourcePath : undefined,
-        quality: '1080p',
-        storageMode: 'managed',
+        quality,
+        storageMode,
       });
       setResult(res);
       setPercent(100);
@@ -170,7 +192,7 @@ function ImportStage({
       setError(describeError(err));
       setPhase(signalAborted(err) ? 'cancelled' : 'failed');
     }
-  }, [projectId, sourcePath, isUrl]);
+  }, [projectId, sourcePath, isUrl, quality, storageMode]);
 
   const cancel = useCallback(async () => {
     await api.cancelJob(jobIdRef.current);

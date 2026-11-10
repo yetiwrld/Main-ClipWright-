@@ -2097,3 +2097,36 @@ on a button does nothing, and a test written that way would have passed on a pag
 nothing — which is exactly the bug's shape.
 
 Seven mutations bite, including all three original faults.
+
+## 60. Two settings the import replaced with constants
+
+The start screen asks for a download quality and a storage mode, and saves both into the project.
+`ImportStage` — the component that actually starts the import — called:
+
+```ts
+quality: '1080p',
+storageMode: 'managed',
+```
+
+Both are defensible defaults. Both are what a user got no matter what they chose one screen
+earlier.
+
+The storage mode is the one that matters: `media-pipeline` branches on it at `:152`, and
+`reference` means *do not copy the file*. A user who picked "keep files where they are" because
+their source is 40 GB of screen recording had it copied into the workspace anyway. There is no
+error and no warning — the app did what it was built to do, with the wrong instruction.
+
+**What makes this one interesting is where the bug wasn't.** `startSettings` maps the page's
+`copy`/`reference` onto the schema's `managed`/`reference` correctly. The store persists it. The
+pipeline honours it. The types agree at every hop. The value travelled three layers and was
+overwritten in the fourth by two constants that no one had reason to look at, because a constant in
+a call to a well-tested function reads like a default rather than a decision.
+
+That is the same shape as §57 (a literal `'16:9'` at a call site whose callee has the same
+default), and the two were written in the same week. The pattern to watch for is a call site that
+passes a *constant* for a value that also exists as a setting — the constant is never wrong
+syntactically, and whether it is wrong semantically depends on a screen the author is not looking
+at.
+
+The fallbacks kept the old literals for projects created before these keys existed, so an old
+project imports exactly as it always did. That is deliberate: this is a repair, not a migration.
