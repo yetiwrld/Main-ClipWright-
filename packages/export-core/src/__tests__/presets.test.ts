@@ -9,6 +9,7 @@ import {
   OUTPUT_FORMATS,
   ASPECT_RATIOS,
   aspectFromCanvas,
+  exactAspectFromCanvas,
   presetForShortSide,
 } from '../presets.js';
 
@@ -220,5 +221,37 @@ describe('presetForShortSide', () => {
   it('falls back rather than throwing on a degenerate canvas', () => {
     expect(presetForShortSide(0)).toBe('1080p');
     expect(presetForShortSide(Number.NaN)).toBe('1080p');
+  });
+});
+
+describe('exactAspectFromCanvas', () => {
+  /*
+    `aspectFromCanvas` always returns a canonical ratio, which is right for a control's *default* and
+    wrong for a *decision*: the export panel's aspect is what the encoder is told, so snapping a 5:4
+    composition to 4:3 exports a different picture and shows the snapped value as though it were the
+    project's.
+  */
+  it('returns the canonical ratio when the canvas is exactly one', () => {
+    for (const ratio of ASPECT_RATIOS) {
+      const { width, height } = resolutionForPreset('1080p', ratio);
+      expect(exactAspectFromCanvas(width, height)).toBe(ratio);
+    }
+  });
+
+  it('returns null for a ratio the panel cannot express', () => {
+    /* 5:4 is 4:5 the other way up and has no entry — the case the nearest-match function hides. */
+    expect(exactAspectFromCanvas(1350, 1080)).toBeNull();
+    expect(exactAspectFromCanvas(2000, 1000)).toBeNull();
+  });
+
+  it('does not confuse 4:5 with its transpose', () => {
+    /* The pair that would collide if the comparison used a loose tolerance. */
+    expect(exactAspectFromCanvas(1080, 1350)).toBe('4:5');
+    expect(exactAspectFromCanvas(1350, 1080)).toBeNull();
+  });
+
+  it('falls back to null for a degenerate canvas', () => {
+    expect(exactAspectFromCanvas(0, 1080)).toBeNull();
+    expect(exactAspectFromCanvas(1920, 0)).toBeNull();
   });
 });

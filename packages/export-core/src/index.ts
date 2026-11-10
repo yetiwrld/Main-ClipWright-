@@ -16,6 +16,7 @@ export {
   computeResolution,
   resolutionForPreset,
   aspectFromCanvas,
+  exactAspectFromCanvas,
   presetForShortSide,
 } from './presets.js';
 export type {

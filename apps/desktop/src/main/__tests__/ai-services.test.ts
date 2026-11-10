@@ -580,6 +580,84 @@ describe('MomentsService', () => {
     }
   });
 
+  it('builds the canvas from a custom aspect pair, not from a fallback', async () => {
+    /*
+      `aspect: 'custom'` has no entry in `CANVAS_BY_ASPECT`, and `buildComposition` reduced it to
+      9:16 before the lookup. So a user who entered 4:5 on the start screen got a portrait clip: the
+      pair was stored in `customAspect`, survived a reload, and was read by nothing. This is the same
+      fault as the discards above — a value that exists and is never consulted — and it had been
+      written down in `docs/limitations.md` as a known gap rather than fixed.
+
+      Asserted on the canvas the composition actually carries, because that is the thing the export
+      and the preview both read. `computeResolution` sizes any ratio from a 1080 short side, so the
+      pair needs no lookup table of its own.
+    */
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'offline' });
+    storage.updateProject(project.id, {
+      settings: { ...project.settings, aspect: 'custom', customAspect: { width: 4, height: 5 } },
+    });
+
+    const analysed = await moments.analyze({ projectId: project.id });
+    const moment = analysed.moments[0];
+    expect(moment).toBeDefined();
+    if (!moment) return;
+
+    const created = moments.createClips(project.id, [moment.id], {});
+    expect(created.errors).toHaveLength(0);
+    const comp = storage.getComposition(project.id, created.created[0]!.compId);
+    expect(comp).toBeDefined();
+    if (!comp) return;
+
+    /* 4:5 at a 1080 short side is 1080×1350 — not 1080×1920. */
+    expect(comp.payload.canvas.aspect).toBe('4:5');
+    expect(comp.payload.canvas.width).toBe(1080);
+    expect(comp.payload.canvas.height).toBe(1350);
+  });
+
+  it('sizes a custom pair no preset covers, rather than falling back', async () => {
+    /*
+      The test above passes through `CANVAS_BY_ASPECT['4:5']`, which is a canonical entry — so it
+      proves the *pair* is read but not that the computed path works. A ratio outside the table is
+      the case the fix exists for: 5:4 is 4:5 the other way up and has no entry, so the canvas can
+      only come from `computeResolution`. Without this, restoring the `?? CANVAS_BY_ASPECT['9:16']`
+      fallback would keep every test green.
+    */
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'offline' });
+    storage.updateProject(project.id, {
+      settings: { ...project.settings, aspect: 'custom', customAspect: { width: 5, height: 4 } },
+    });
+
+    const analysed = await moments.analyze({ projectId: project.id });
+    const moment = analysed.moments[0];
+    if (!moment) return;
+    const created = moments.createClips(project.id, [moment.id], {});
+    const comp = storage.getComposition(project.id, created.created[0]!.compId);
+
+    /* Landscape 5:4: the short side is the height, so 1080 → 1350×1080. */
+    expect(comp?.payload.canvas.aspect).toBe('5:4');
+    expect(comp?.payload.canvas.width).toBe(1350);
+    expect(comp?.payload.canvas.height).toBe(1080);
+  });
+
+  it('still uses 9:16 when a custom aspect has no pair to build from', async () => {
+    /*
+      The fallback has to survive: `custom` with no `customAspect` is a project that was hand-edited
+      or written by an older build, and a degenerate pair must not produce a zero-sized canvas.
+    */
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'offline' });
+    storage.updateProject(project.id, { settings: { ...project.settings, aspect: 'custom' } });
+
+    const analysed = await moments.analyze({ projectId: project.id });
+    const moment = analysed.moments[0];
+    if (!moment) return;
+    const created = moments.createClips(project.id, [moment.id], {});
+    const comp = storage.getComposition(project.id, created.created[0]!.compId);
+    expect(comp?.payload.canvas).toMatchObject({ aspect: '9:16', width: 1080, height: 1920 });
+  });
+
   it('uses the project’s clip-length range, which is what the start screen now writes', async () => {
     /*
       Two slices meet here. `moments-service` has always read `project.settings.clipLengthRangeSec`

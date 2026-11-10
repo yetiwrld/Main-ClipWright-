@@ -426,6 +426,20 @@ describe('the export panel starts from the composition it is exporting', () => {
     expect((screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value).toBe('9:16');
   });
 
+  it('does not snap a custom canvas to a canonical ratio', () => {
+    /*
+      A 5:4 composition has no entry in `ASPECT_RATIOS`. Seeding the panel from the *nearest* ratio
+      would choose 4:3 and show it as the project's own — the user would export a different picture
+      and the control would agree with itself. The panel keeps its default instead, and the gap is
+      written down in `docs/limitations.md` §6.
+    */
+    renderWithCanvas({ width: 1350, height: 1080 });
+    const aspect = (screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value;
+    expect(aspect).not.toBe('4:3');
+    /* Still a value the control can hold — never blank. */
+    expect(['16:9', '9:16', '1:1', '4:5', '4:3', '21:9']).toContain(aspect);
+  });
+
   it('still lets the user change it — the canvas is a starting point, not a lock', () => {
     renderWithCanvas({ width: 1920, height: 1080 });
     const select = screen.getByLabelText('Aspect ratio') as HTMLSelectElement;

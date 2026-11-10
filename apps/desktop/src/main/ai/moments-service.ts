@@ -7,6 +7,7 @@
  * moment into a Composition.
  */
 
+import { computeResolution } from '@clipwright/export-core';
 import { CompositionRecordSchema, uuidv7, type CompositionRecord, type Moment, type ProjectRecord, type Transcript } from '@clipwright/project-schema';
 import {
   buildCaptions,
@@ -387,8 +388,25 @@ export class MomentsService {
     moment: Moment,
     params: { id: string; name: string; version: number }
   ): CompositionRecord {
-    const aspect = project.settings.aspect === 'original' || project.settings.aspect === 'custom' ? '9:16' : project.settings.aspect;
-    const canvas = CANVAS_BY_ASPECT[aspect] ?? CANVAS_BY_ASPECT['9:16'];
+    /*
+      A custom aspect is a *pair*, and it used to be thrown away: `'custom'` has no entry in
+      `CANVAS_BY_ASPECT`, so it fell through to 9:16 and a user who chose 4:5 got a portrait clip.
+      The pair was stored, survived reload, and was read by nothing — the value existed and the
+      canvas ignored it.
+
+      `computeResolution` already knows how to build a canvas from any ratio string, and the pair *is*
+      a ratio, so the fix is to translate rather than to add a second lookup table. A missing or
+      degenerate pair still falls back to 9:16, which is what a project with no custom shape should
+      get.
+    */
+    const custom = project.settings.aspect === 'custom' ? project.settings.customAspect : undefined;
+    const aspect =
+      custom && custom.width > 0 && custom.height > 0
+        ? `${custom.width}:${custom.height}`
+        : project.settings.aspect === 'original' || project.settings.aspect === 'custom'
+          ? '9:16'
+          : project.settings.aspect;
+    const canvas = CANVAS_BY_ASPECT[aspect] ?? computeResolution(1080, aspect);
     const durationUs = Math.max(1, moment.endUs - moment.startUs);
     const mediaId = project.sourceMediaIds[0] ?? transcript.mediaId;
 

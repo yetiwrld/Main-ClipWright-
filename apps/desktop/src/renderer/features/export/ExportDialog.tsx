@@ -13,7 +13,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Dialog } from '@clipwright/design-system';
 import type { TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
-import { aspectFromCanvas, presetForShortSide } from '@clipwright/export-core';
+import { exactAspectFromCanvas, presetForShortSide } from '@clipwright/export-core';
 import type { ExportJobPayload } from '../../global.js';
 import { isDesktop } from '../../api.js';
 import { DEFAULT_EXPORT_STATE, ExportPanel, type ExportPanelState } from './ExportPanel.js';
@@ -88,7 +88,17 @@ export function ExportDialog({
     fps: fps === 60 ? 60 : 30,
     ...(canvas
       ? {
-          aspect: aspectFromCanvas(canvas.width, canvas.height),
+          /*
+            Exact, not nearest. The panel's aspect is what the encoder is told, so snapping a 5:4
+            composition to 4:3 would export a different picture — and the control would show the
+            snapped value as though it were the project's. A canvas that is not one of the six
+            canonical ratios leaves the panel on its default; the mismatch is recorded in
+            `docs/limitations.md` §6 rather than hidden behind a plausible-looking nearest value.
+          */
+          ...(() => {
+            const exact = exactAspectFromCanvas(canvas.width, canvas.height);
+            return exact === null ? {} : { aspect: exact };
+          })(),
           /* The shortest side is what a resolution preset means, so a 1080p portrait canvas and a
              1080p landscape one want the same preset id. */
           preset: presetForShortSide(Math.min(canvas.width, canvas.height)),

@@ -2332,3 +2332,47 @@ Three things shaped it, each learned from a false positive on the first attempt:
 with an innocuous name. It does catch the specific thing that happened here, twice, in files where
 the gate was a deliberate design choice — which is exactly where the two failures came from. A guard
 for a mistake you have actually made is worth more than a general rule you have not.
+
+## 67. A limitation I had written down instead of fixing
+
+Besides the export panel, `docs/limitations.md` had carried this since before this session:
+
+> `aspect: 'custom'` resolves to 9:16 when a composition is built, because `CANVAS_BY_ASPECT` has no
+> entry for a pair and nothing reads `customAspect` to construct one.
+
+That is the same fault as §57–62 — a value stored and never read — described accurately, in the
+right file, and left alone. Writing a limitation down is not the same as deciding not to fix it. The
+distinction is whether the gap is *inherent* (needs a GPU, needs a Windows machine) or merely
+*unfinished*. This one was unfinished, and the fix was a template string:
+
+```ts
+const custom = project.settings.aspect === 'custom' ? project.settings.customAspect : undefined;
+const aspect = custom ? `${custom.width}:${custom.height}` : …;
+const canvas = CANVAS_BY_ASPECT[aspect] ?? computeResolution(1080, aspect);
+```
+
+`computeResolution` has sized arbitrary ratios all along. The six-entry table was an optimisation
+that had quietly become the only vocabulary the canvas could speak.
+
+**Two tests, and the second one is the interesting one.** The first uses a 4:5 pair and passes —
+but 4:5 is *in* `CANVAS_BY_ASPECT`, so it never exercises the computed path. Mutating
+`?? computeResolution(...)` back to `?? CANVAS_BY_ASPECT['9:16']` left it green. The test that
+catches it uses 5:4: the same canvas turned on its side, absent from the table, and therefore
+reachable only through `computeResolution`. **A test that goes through a lookup cannot show that the
+lookup's fallback works** — a special case of the vacuous-test pattern this repo keeps meeting.
+
+**What I did not fix, and why.** The export panel's aspect is a six-option `<select>`, and SPEC 14
+§4.1 sizes the output from `preset × aspect`. A 5:4 canvas has no value that control can hold. My
+earlier fix (§61) seeded it with `aspectFromCanvas`, which returns the *nearest* ratio — so a 5:4
+composition showed **4:3**, exported at 4:3, and displayed the substitution as the project's own
+setting. That is worse than doing nothing, and it was introduced by me three commits earlier.
+
+The dialog now asks `exactAspectFromCanvas` and leaves the panel's default when the canvas is not
+canonical. A custom project still exports at 9:16, which is a real gap — it is now described
+*precisely* in `limitations.md` (the export end, not the clip-building end that no longer has a
+problem), and closing it needs a free-text aspect in the export panel: a feature, not a repair.
+
+The general lesson, which cost two rounds of mutation testing to learn: **a fallback that returns a
+plausible value is indistinguishable from a correct one at the call site.** `aspectFromCanvas` was
+written to answer "which of these six is this canvas closest to", which is a fine question for a
+label and the wrong question for an encoder.

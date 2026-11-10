@@ -90,8 +90,8 @@ function isConcreteAspect(value: string): value is ConcreteAspect {
  *
  * `original` cannot be resolved without the source, and the schema keeps it as its own value for
  * exactly that reason — the composition builder decides once the media has been probed. `custom`
- * would be `customAspect`'s job, but nothing builds a canvas from a pair yet, so it falls back to
- * 9:16 here the same way the composition builder already does, rather than claiming a size.
+ * resolves from `customAspect`, which the composition builder reads; neither is this function's
+ * business, and both are returned unchanged by `startSettings` before it gets here.
  *
  * This mirrors `moments-service`'s `CANVAS_BY_ASPECT` lookup and exists so the two agree by
  * construction instead of by two people writing the same `??` twice.

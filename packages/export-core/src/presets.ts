@@ -89,6 +89,29 @@ export function resolutionForPreset(
  * Ties go to the earlier entry in `ASPECT_RATIOS`, which is stable and documented rather than
  * dependent on floating-point luck.
  */
+/** The ratio as a reducible pair, or `null` when it is not one of `ASPECT_RATIOS`. */
+export function exactAspectFromCanvas(width: number, height: number): string | null {
+  if (!(width > 0) || !(height > 0)) return null;
+  const ratio = width / height;
+  for (const candidate of ASPECT_RATIOS) {
+    const [w, h] = candidate.split(':').map(Number);
+    /* Within a thousandth: a canvas is integers, so 1350×1080 is exactly 5:4 but 1080×1350 is
+       exactly 4:5 and rounding must not confuse them. */
+    if (Math.abs(w / h - ratio) < 0.001) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Which of `ASPECT_RATIOS` a canvas is, or the nearest one.
+ *
+ * **Prefer `exactAspectFromCanvas` when the answer feeds an export.** This function always returns
+ * a canonical ratio, so a 5:4 composition becomes 4:3 — a different picture, silently. It is right
+ * for a *default* (a control that must show something) and wrong for a *decision* (the frame the
+ * encoder is told to produce). A custom aspect has no representation in `ASPECT_RATIOS`, and
+ * SPEC 14 §4.1's export path is sized from `preset × aspect` alone, so a custom project currently
+ * exports at the nearest preset — recorded in `docs/limitations.md` §6 rather than papered over.
+ */
 export function aspectFromCanvas(width: number, height: number): AspectRatio {
   if (!(width > 0) || !(height > 0)) return '9:16';
   const target = width / height;

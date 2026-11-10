@@ -561,12 +561,15 @@ the point where spans are computed, and both renderers inherit it.
 The start screen now writes every setting it shows, by the schema's names (§02 §4.3–4.7). What it
 still does not do:
 
-- **A custom aspect stores its pair but changes no canvas.** `aspect: 'custom'` resolves to 9:16
-  when a composition is built, because `CANVAS_BY_ASPECT` has no entry for a pair and nothing reads
-  `customAspect` to construct one. The user's 4:5 pair is saved and survives reload; the clips are
-  built at 9:16. The tile is honest about the ratios it offers, and the two Custom tiles are the
-  least-used controls on the screen — but this is a stored value with no reader, the same shape as
-  the bugs above, and it is recorded here rather than described as working.
+- **A custom aspect builds a custom-sized clip but cannot be exported at its own ratio.** The
+  composition now reads `customAspect` — a 4:5 project builds a 1080×1350 canvas, and any pair
+  `computeResolution` can size works, not just the six canonical ones. What still does not work is
+  the other end: SPEC 14 §4.1 sizes the export from `preset × aspect`, the export panel's aspect
+  control offers only `ASPECT_RATIOS`, and a 5:4 canvas therefore has no value the panel can hold.
+  The dialog deliberately leaves the control on its default rather than snapping to the nearest
+  ratio (4:3 would export a different picture and display it as the project's own), so a custom
+  project exports at 9:16 unless the user picks something else. Closing this needs a free-text
+  aspect in the export panel, which is a feature rather than a repair.
 - **The Recommended badge (§02 §4.3) is not built.** The screen has no crop preview and no
   suggestion from the source's shape or content type; the user picks a ratio and it is used.
 - **Caption style tiles are text buttons, not live animated previews** (§02 §4.4). They name the
