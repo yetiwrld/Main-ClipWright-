@@ -511,6 +511,35 @@ describe('MomentsService', () => {
     expect(edited.durationUs).toBe(moment.durationUs + 1_000_000);
   });
 
+  it('uses the project’s clip-length range, which is what the start screen now writes', async () => {
+    /*
+      Two slices meet here. `moments-service` has always read `project.settings.clipLengthRangeSec`
+      to decide how long a moment should be, and the start screen used to send `clipLength`
+      instead — an unknown key the schema passed through and nothing read, so every project was
+      analysed against the 30–60 s default whatever the user picked. Nothing tested this line, so
+      neither half of that was visible: the analyser's dependency had no test, and the field it
+      depended on had no writer.
+
+      The assertion is the *selection*, not the setting: a five-second range must choose short
+      moments from the same transcript that a ninety-second range chooses long ones from. A range
+      that is stored but ignored would return the same moments both times.
+    */
+    const project = projectWithTranscript();
+    storage.updateSettings({ processingMode: 'offline' });
+
+    const short = await moments.analyze({ projectId: project.id });
+    const shortLongest = Math.max(...short.moments.map((moment) => moment.durationUs));
+
+    /* 5 s: the schema's own floor, and well under the 30–60 s default. */
+    storage.updateProject(project.id, { settings: { ...project.settings, clipLengthRangeSec: [5, 6] } });
+    const brief = await moments.analyze({ projectId: project.id });
+    const briefLongest = Math.max(...brief.moments.map((moment) => moment.durationUs));
+
+    expect(brief.moments.length).toBeGreaterThan(0);
+    expect(briefLongest).toBeLessThan(shortLongest);
+    expect(briefLongest).toBeLessThanOrEqual(6_500_000);
+  });
+
   it('explains a missing transcript instead of returning nothing', async () => {
     const project = storage.createProject({ name: 'No transcript' });
     await expect(moments.analyze({ projectId: project.id })).rejects.toThrow(/Transcribe the video first/i);

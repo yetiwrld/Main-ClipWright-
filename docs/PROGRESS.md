@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen, project-menu and IPC-surface slices. 3566 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen, project-menu and IPC-surface slices. 3567 automated tests,
 all passing.
 
 ---
@@ -403,7 +403,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3566 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3567 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.
