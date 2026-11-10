@@ -37,6 +37,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  clampPlaybackRate,
   gainAtInstant,
   gainCurveFor,
   previewAudioRequests,
@@ -81,6 +82,21 @@ export interface PreviewAudioApi {
    * has no pan. The bus is the only node whose level is the level the export would produce.
    */
   tap: { context: AudioContext; node: AudioNode } | null;
+  /**
+   * The audio device's position in seconds, or `null` while no graph exists.
+   *
+   * This is SPEC 09 §23's master clock when sound is playing. A function returning `null` rather
+   * than a nullable function, because the graph is built in an effect: a `clock` captured as
+   * `null` and swapped for a function later would be a different identity each time it changed,
+   * and every consumer that put it in a dependency list would tear down and re-run — the transport
+   * loop among them. One stable function that answers "is there a clock yet" is both simpler to
+   * depend on and impossible to hold a stale copy of.
+   *
+   * A *number* would be wrong for the opposite reason: a caller polling once per animation frame
+   * wants the value now, and a number captured at render time is a frame or more old, which is
+   * the drift the whole exercise is about.
+   */
+  clock: () => number | null;
   /** Start or resume the context. Must be called from a user gesture (play). */
   resume: () => void;
   /** Suspend the context, so a paused preview is not spinning a clock. */
@@ -111,7 +127,18 @@ export function usePreviewAudio(
    * meter has a bus to read.
    */
   timeline: PreviewAudioTimeline | null,
-  options: { enabled: boolean; volume?: number },
+  options: {
+    enabled: boolean;
+    volume?: number;
+    /**
+     * Preview-only playback rate (SPEC 09 §23).
+     *
+     * Each element is asked to play at this rate and to preserve pitch, which is what makes 0.5×
+     * a slowed-down read rather than a dropped-octave rumble. The *clock* is not scaled here — a
+     * product of rate and clock time would double-count; the anchor carries the rate instead.
+     */
+    rate?: number;
+  },
 ): PreviewAudioApi {
   const [ready, setReady] = useState(false);
   const [tap, setTap] = useState<{ context: AudioContext; node: AudioNode } | null>(null);
@@ -311,10 +338,40 @@ export function usePreviewAudio(
         `gain.value` write per frame is a discontinuity per frame, which is a rasp on a fade.
       */
       chain.gain.gain.setTargetAtTime(gainAtInstant(request, timeUs), context.currentTime, 0.02);
+      /*
+        The rate is applied per frame rather than once, because an element that is repositioned
+        (a seek) keeps its rate but an element whose source was replaced does not, and a single
+        missed assignment is a clip playing at the wrong speed with the picture on time — which
+        reads as the *audio* being wrong rather than the setting being forgotten.
+
+        `currentTime` is element time, so the wanted position above is item time and needs no
+        scaling: the element itself runs at `rate`, and its `currentTime` advances at `rate`
+        against the wall clock. Writing `wantedUs / 1e6` is therefore already the right target.
+      */
+      const rate = clampPlaybackRate(options.rate ?? 1);
+      if (element.playbackRate !== rate) element.playbackRate = rate;
+      /*
+        `preservesPitch` is the standard property and the one Chromium honours; the older
+        `webkitPreservesPitch` spelling is set too for the engines that only had that.
+
+        Both assignments are unconditional. Guarding them with `'preservesPitch' in element`
+        looked careful and was wrong: `in` asks whether the property exists on *this* element, and
+        the answer differs between the real browser and the DOM stand-in the tests run on — so the
+        guard turned "set the pitch mode" into a line that silently did nothing wherever the
+        property is absent, which is precisely where it matters least and is tested most.
+        Assigning an unknown property is inert; skipping a known one is a bug.
+      */
+      element.preservesPitch = true;
+      (element as unknown as { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
       if (playing && element.paused) void element.play().catch(() => undefined);
       if (!playing && !element.paused) element.pause();
     }
-  }, []);
+    /*
+      `options.rate` rather than a captured rate: the transport's buttons change it mid-playback,
+      and a `seekTo` that ignored the change would keep playing at the old speed until the next
+      pause.
+    */
+  }, [options.rate]);
 
   const resume = useCallback(() => {
     const context = createContext();
@@ -350,13 +407,19 @@ export function usePreviewAudio(
   );
 
   /*
+    Read through the ref at call time, so this answers correctly before the graph exists and after
+    it does — without needing to be a new identity in between.
+  */
+  const clock = useCallback((): number | null => contextRef.current?.currentTime ?? null, []);
+
+  /*
     A stable object, because the preview puts it in effect dependency lists that subscribe to the
     playhead. A fresh literal each render would resubscribe on every frame of playback — cheap
     per frame and a leak of listeners over a long session, and the kind of thing that only shows
     up as "the preview gets slower the longer I leave it open".
   */
   return useMemo(
-    () => ({ ready, tap, resume, suspend, seekTo }),
-    [ready, tap, resume, suspend, seekTo],
+    () => ({ ready, tap, clock, resume, suspend, seekTo }),
+    [ready, tap, clock, resume, suspend, seekTo],
   );
 }

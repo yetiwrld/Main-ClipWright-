@@ -264,9 +264,12 @@ the whole envelope and one panner per audible item, summed into a bus. It closed
 symptoms that absence explained — only the bottom picture layer was audible, so an audio
 item played in the file and was silent in the editor, and pan was stored, exported and
 never previewed. The meter now taps the bus, so both it and the LUFS readout measure the
-mix instead of one layer. What is still missing from the audio system is **audio as the
-master clock** (SPEC 09 §23) and **per-track meters** in the track headers, which the
-graph has made a UI job rather than a graph one. **Text and shape items are in**, which closes the biggest
+mix instead of one layer. The preview now runs on **the audio device's clock** (SPEC 09 §23): the
+playhead is derived from `AudioContext.currentTime` through an anchor taken on the first frame
+of playback, so a dropped frame costs picture rather than sound, and playback rate
+(0.5×–2×, pitch preserved) is in the transport. What is still missing from the audio system
+is **per-track meters** in the track headers, which the graph has made a UI job rather than a
+graph one. **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without

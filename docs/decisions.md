@@ -1463,3 +1463,60 @@ same number, so it asserted nothing. A caption fixture had no `mediaId`, so a mu
 captions audible was skipped a step earlier, by the missing source rather than by the type check.
 Both are the same lesson the rest of this project keeps relearning: a fixture must contain the
 thing the rule is about, or the rule is tested by accident.
+
+## 47. The clock is whatever the sound is doing, and the rate lives on the anchor
+
+**The spec states two cases and the code had implemented one as if it were both.** SPEC 09 §23
+says the audio output position is the clock *when any audio plays*, and a monotonic timer
+otherwise. The preview accumulated `performance.now()` deltas, which is the second case and reads
+as the general one. The difference is invisible at 60 fps and permanent at 30 with a slow machine:
+an animation frame is a deadline, not a tick, so every late frame adds its lateness to the
+picture's error while the sound runs on regardless. The spec's own remedy — "drop frames, never
+slow audio" — only makes sense if the clock *is* the audio; with a timer there is no frame to drop,
+only a number that is wrong.
+
+**The anchor is the whole design.** `context.currentTime` counts from the context's creation and
+keeps counting while the playhead is paused, seeking or looping. So the playhead is an *offset*
+from an anchor — "the playhead was here at this clock reading" — and every move from outside the
+clock re-anchors. That framing is what makes the seek case fall out for free rather than needing
+its own code path: a playhead that disagrees with the anchor by more than the tolerance is a seek,
+which is the same test the preview's element seeking already used.
+
+**The anchor is taken on the first tick, not when the effect runs.** This was a real bug, found by
+the first test written against the wiring. The effect fires on a React commit, before the
+transport's own effects have resumed the context; a suspended `AudioContext` reports the same
+`currentTime` for several frames, so an anchor taken there pairs a device position that is about to
+change with a playhead that has not moved. The playhead then sat at zero while the transport
+insisted it was playing. Taking the anchor on the first frame makes the two readings come from the
+same clock state. The general lesson is the one this project has now learned three times: "the
+effect ran" and "the thing it measures started" are different moments, and code that assumes
+otherwise fails silently.
+
+**The rate is on the anchor, and it multiplies ignored-once.** A rate multiplies elapsed wall time
+to get elapsed project time; writing it the other way round plays 2× at half speed, and applying it
+at both the anchor and per frame plays 2× at 4×. Both bugs agree with the correct version at the
+first frame, where elapsed is zero, so the test for this is a walk through several frames rather
+than a point check. Keeping the rate on the anchor also means the number is validated once, at the
+boundary, and every later use is arithmetic on a value already known to be legal.
+
+**A reading before the anchor holds; a reading after it is followed.** These look like the same
+case and are not. A `currentTime` smaller than the anchor's is unambiguous — the device was reset —
+and rewinding would be a visible jump plus a burst of sound from the wrong place. A `currentTime`
+that is forward but smaller than the playhead is *not* distinguishable from a valid fresh anchor,
+and following it is the correct answer for a design whose premise is that the device is the truth.
+The limitation document says so in those words rather than claiming a correction this does not
+perform.
+
+**Two branches were deleted rather than tested.** A `writing` flag guarding the playhead
+subscription, and a `Number.isFinite` guard in the rate clamp. Neither could be made to fail, and
+in both cases the reason was structural rather than a weak fixture: `PlayheadStore.set` returns
+early when the value is unchanged, so the subscription can never see a no-op write from the tick,
+and every comparison against a non-finite distance is false, so the clamp's loop already leaves the
+safe default. An unreachable branch is worse than a comment — it reads like a guarantee, and a
+future reader who trusts it will not re-derive the reason it is unnecessary.
+
+**The rate control is absent without a graph.** SPEC 13's rule about controls that cannot work
+applies exactly here: a 2× button that moved the playhead twice as fast while the sound stayed at
+1× would produce the one thing a preview must never do — a picture that disagrees with the file.
+`preservesPitch` is set unconditionally in both spellings, after a bug where guarding it with `in`
+made the assignment vanish in precisely the environment the test ran in.

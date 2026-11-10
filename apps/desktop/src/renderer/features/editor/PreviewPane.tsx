@@ -18,7 +18,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { IconButton, Menu, type MenuItem } from '@clipwright/design-system';
+import { IconButton, Menu, SegmentedControl, type MenuItem } from '@clipwright/design-system';
 import {
   formatTimecode,
   projectDurationUs,
@@ -30,7 +30,17 @@ import {
   type TimelineState,
 } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
-import { gainAt } from '@clipwright/audio-core';
+import {
+  PLAYBACK_RATES,
+  anchorClock,
+  clampPlaybackRate,
+  gainAt,
+  needsReanchor,
+  playbackEnded,
+  playbackStopUs,
+  playheadAt,
+  type PlaybackRate,
+} from '@clipwright/audio-core';
 import {
   activeAdjustmentLayers,
   activeEffects,
@@ -415,6 +425,13 @@ export function PreviewPane({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   /*
+    Preview-only playback rate (SPEC 09 §23): 0.5×, 1×, 1.5×, 2×. It is deliberately *not* a
+    command and never reaches the project — the spec says so twice — so it lives here as view
+    state beside `muted`, and a refresh resets it to real time rather than to whatever the last
+    session was scrubbing at.
+  */
+  const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(1);
+  /*
     The Audio meters popover (SPEC 12 §6.3). Closed by default: the transport is a strip of
     controls and a popover that opened with the editor would cover the timeline. The meter itself
     is the toggle, which is where a user already looks when they want to know the level.
@@ -428,7 +445,10 @@ export function PreviewPane({
     It is fed the timeline rather than reading the store so it stays a pure function of what the
     preview already has, and it is `null` when there is no timeline (a standalone preview).
   */
-  const previewAudio = usePreviewAudio(timeline ? state : null, { enabled: !muted });
+  const previewAudio = usePreviewAudio(timeline ? state : null, {
+    enabled: !muted,
+    rate: playbackRate,
+  });
   /*
     The master meter (SPEC 12 §6.3). It taps the *mix bus* when the graph exists, so it measures
     what the user hears — every layer, panned and enveloped — rather than the bottom picture
@@ -1169,17 +1189,82 @@ export function PreviewPane({
 
 
 
-  // Playback clock (SPEC 09 §23): advance on animation frames, stop at the end.
+  /*
+    Playback clock (SPEC 09 §23).
+
+    > when any audio plays, the **audio output position is the clock**; the playhead derives from
+    > it so video never drifts from audio. With no audio, use a monotonic high-resolution timer.
+
+    This used to accumulate `performance.now()` deltas, which is the timer case and reads as the
+    general case — and it is wrong the moment there is sound, in a way that is invisible on a fast
+    machine. An animation frame is a *deadline*, not a tick: when one takes 40 ms instead of 16,
+    the accumulator advances by 40 ms and the audio, which does not care about frames, has also
+    advanced 40 ms — so the picture keeps up in duration but the two are computed on clocks with
+    different error. Deriving the playhead from the audio device means a slow frame renders an
+    *older* picture and the playhead still matches what is coming out of the speakers, which is
+    the spec's "drop frames, never slow audio".
+
+    So: anchor once when playback starts, then ask the clock where the playhead is on every
+    frame. The anchor is re-taken whenever the playhead is moved from outside the clock — a
+    scrub, a seek, the transport's jump — because the anchor's meaning is "the playhead was here
+    at this clock reading" and any other move makes that false.
+  */
   useEffect(() => {
     if (!playing) return;
+
+    /**
+     * The clock reading, in seconds, from the best source available.
+     *
+     * The audio device's position when the graph exists, `performance.now()` otherwise. Reading
+     * it through one function is what keeps the two from being mixed: the anchor records which
+     * source it came from, and only the same source can read it back.
+     */
+    const readClock = (): { seconds: number; source: 'audio' | 'timer' } => {
+      const seconds = previewAudio.clock();
+      if (seconds !== null) return { seconds, source: 'audio' };
+      return { seconds: performance.now() / 1000, source: 'timer' };
+    };
+
+    /*
+      The anchor is taken on the **first tick**, not here.
+
+      The effect runs when `playing` flips, which is a React commit — before the transport's own
+      effects have resumed the context and before the first animation frame. Taking the anchor at
+      that moment pairs a device position that is about to be resumed with a playhead that has not
+      moved yet, and an `AudioContext` that was suspended can report the same `currentTime` for
+      several frames, which reads as "no time has passed" and freezes the playhead at zero until
+      something else moves it. Anchoring on the first frame means the reading and the anchor come
+      from the same clock state.
+    */
+    let anchor: ReturnType<typeof anchorClock> | null = null;
     let frame = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      const deltaUs = (now - last) * 1000;
-      last = now;
-      const next = playheadStore.get() + deltaUs;
-      if (next >= durationUs) {
-        playheadStore.set(durationUs);
+    /*
+      The stop point is resolved once: the work area when one is set, the project end otherwise.
+      Resolving it per frame from state would be the same answer every frame and one more way for
+      a stale closure to disagree with the transport.
+    */
+    const stopUs = playbackStopUs(durationUs, state.workArea?.outUs);
+
+    const tick = () => {
+      const now = readClock();
+      if (!anchor) {
+        anchor = anchorClock(playheadStore.get(), now.seconds, now.source, playbackRate);
+        /* The first frame only establishes the origin; the next one measures from it. */
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      /*
+        A clock that changed source mid-playback (the graph finished building, or was torn down)
+        cannot be read against the old anchor — the two count from different origins. Re-anchor at
+        the current playhead rather than letting the arithmetic interpolate between two clocks,
+        which would jump the playhead by however far the context had been running.
+      */
+      if (now.source !== anchor.source) {
+        anchor = anchorClock(playheadStore.get(), now.seconds, now.source, anchor.rate);
+      }
+      const next = playheadAt(anchor, now.seconds);
+      if (playbackEnded(next, stopUs)) {
+        playheadStore.set(stopUs);
         setPlaying(false);
         return;
       }
@@ -1187,8 +1272,35 @@ export function PreviewPane({
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [durationUs, playing]);
+
+    /*
+      A seek during playback is seen as a playhead that disagrees with the anchor. Re-anchoring
+      from the subscription means the correction happens on the same frame the seek does, rather
+      than on the next animation frame — a seek that took one frame to take effect would be a
+      visible stutter every time the user scrubbed while playing.
+
+      No guard against the tick's own writes, and it is worth saying why rather than leaving the
+      absence to look like an oversight. `PlayheadStore.set` returns early when the value is
+      unchanged, so a tick that computes the playhead it already has notifies nobody; and when it
+      computes a *different* one, that value came from the anchor, so it agrees with the anchor by
+      construction and `needsReanchor` is false. The subscription therefore only ever sees writes
+      the clock did not make. A flag was written for this, could not be made to matter in a test,
+      and was removed rather than kept as an untested branch.
+    */
+    const unsubscribe = playheadStore.subscribe(() => {
+      if (!anchor) return;
+      const now = readClock();
+      const expected = playheadAt(anchor, now.seconds);
+      if (needsReanchor(anchor, expected, playheadStore.get(), 80_000)) {
+        anchor = anchorClock(playheadStore.get(), now.seconds, now.source, anchor.rate);
+      }
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe();
+    };
+  }, [durationUs, playing, previewAudio.clock, playbackRate, state.workArea?.outUs]);
 
   useEffect(() => {
     const toggle = () => setPlaying((value) => !value);
@@ -2446,6 +2558,28 @@ export function PreviewPane({
           onClick={() => playheadStore.set(durationUs)}
         />
         <TransportTimecode fps={fps} durationUs={durationUs} />
+        {/*
+          Playback rate (SPEC 09 §23), in the transport under the preview, which is where the
+          spec puts it. Preview-only: it never reaches the project, so it is not a command and
+          has no keyboard shortcut of its own.
+
+          Only offered when a graph exists, because the rate is achieved by asking the media
+          elements to play slower or faster and preserving their pitch. Without Web Audio the
+          preview still runs, but changing the rate would move the playhead at 2× while the sound
+          stayed at 1× — the picture and the audio disagreeing is worse than the control being
+          absent, and absent is what SPEC 13 says about a control that cannot work.
+        */}
+        {previewAudio.ready && (
+          <SegmentedControl
+            ariaLabel="Playback rate"
+            value={String(playbackRate)}
+            onChange={(next) => setPlaybackRate(clampPlaybackRate(Number(next)))}
+            options={PLAYBACK_RATES.map((rate) => ({
+              value: String(rate),
+              label: `${rate}×`,
+            }))}
+          />
+        )}
         <div
           style={{
             marginLeft: 'auto',

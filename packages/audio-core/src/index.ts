@@ -53,3 +53,18 @@ export {
   type PreviewAudioRequest,
   type PreviewAudioTimeline,
 } from './preview-graph.js';
+
+export {
+  PLAYBACK_RATES,
+  anchorClock,
+  clampPlaybackRate,
+  isPlaybackRate,
+  needsReanchor,
+  playbackEnded,
+  playbackStopUs,
+  playheadAt,
+  shouldDrawFrame,
+  type ClockAnchor,
+  type ClockSource,
+  type PlaybackRate,
+} from './playback-clock.js';

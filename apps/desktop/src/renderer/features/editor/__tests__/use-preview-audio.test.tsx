@@ -141,13 +141,15 @@ const timeline = (items: Record<string, ReturnType<typeof item>>): PreviewAudioT
 function Harness({
   timeline: value,
   enabled,
+  rate,
   onApi,
 }: {
   timeline: PreviewAudioTimeline | null;
   enabled: boolean;
+  rate?: number;
   onApi: (api: PreviewAudioApi) => void;
 }) {
-  const api = usePreviewAudio(value, { enabled });
+  const api = usePreviewAudio(value, { enabled, rate });
   // An effect rather than a render-time call: the graph lives in effects, so the value is only
   // final once they have run, and a test that read it during render would see the previous one.
   useEffect(() => {
@@ -388,5 +390,84 @@ describe('the preview audio graph', () => {
     */
     expect(bus.__recorded?.connects).toContain(destination);
     expect(recorded.filter((node) => node.connects.includes(destination))).toHaveLength(1);
+  });
+});
+
+describe('playback rate (SPEC 09 §23)', () => {
+  /*
+    The rate is applied to the elements, not to the clock. That division is the thing worth
+    testing: an implementation that scaled the *playhead* by the rate as well would double-count
+    it, playing at 2× while the playhead ran at 4× — the picture racing ahead of the sound.
+  */
+  it('sets every element\'s playbackRate to the transport rate', () => {
+    render(
+      <Harness
+        timeline={timeline({ a: item('a', 't1'), b: item('b', 't2') })}
+        enabled
+        rate={2}
+        onApi={capture}
+      />,
+    );
+    seek(500_000, true);
+    expect(bound).toHaveLength(2);
+    for (const element of bound) expect(element.playbackRate).toBe(2);
+  });
+
+  it('preserves pitch, so a slowed read is slow rather than an octave down', () => {
+    render(
+      <Harness timeline={timeline({ a: item('a', 't1') })} enabled rate={0.5} onApi={capture} />,
+    );
+    seek(500_000, true);
+    /*
+      Assembled from a plain object rather than written inline: `preservesPitch` does not exist on
+      the DOM type jsdom provides, so reading it through the element is the only honest way to
+      assert the assignment happened at all.
+    */
+    const element = bound[0] as unknown as { preservesPitch?: boolean };
+    expect(element.preservesPitch).toBe(true);
+  });
+
+  it('falls back to real time for a rate the transport does not offer', () => {
+    /* A stored or hand-edited value must not play at 0× (stuck) or a scramble. */
+    render(
+      <Harness timeline={timeline({ a: item('a', 't1') })} enabled rate={7} onApi={capture} />,
+    );
+    seek(500_000, true);
+    expect(bound[0]!.playbackRate).toBe(2);
+  });
+
+  it('follows a rate change mid-playback', () => {
+    const value = timeline({ a: item('a', 't1') });
+    const { rerender } = render(<Harness timeline={value} enabled rate={1} onApi={capture} />);
+    seek(500_000, true);
+    expect(bound[0]!.playbackRate).toBe(1);
+
+    rerender(<Harness timeline={value} enabled rate={1.5} onApi={capture} />);
+    seek(600_000, true);
+    /*
+      One frame later, not on the next pause: a rate that only took effect after a stop would
+      look like the buttons did nothing while the transport was running — which is exactly when
+      someone presses them.
+    */
+    expect(bound[0]!.playbackRate).toBe(1.5);
+  });
+
+  it('exposes a clock that advances with the audio context', () => {
+    render(<Harness timeline={timeline({ a: item('a', 't1') })} enabled onApi={capture} />);
+    expect(api!.clock()).not.toBeNull();
+    const before = api!.clock()!;
+    (api!.tap!.context as unknown as { currentTime: number }).currentTime += 2.5;
+    expect(api!.clock()! - before).toBeCloseTo(2.5, 5);
+  });
+
+  it('has no clock when no graph could be built', () => {
+    /*
+      The clock returning null is what makes the transport fall back to `performance.now()`.
+      A clock that returned 0 would look like a working audio clock stopped at zero, and the
+      playhead would never advance.
+    */
+    setContext(undefined);
+    render(<Harness timeline={timeline({ a: item('a', 't1') })} enabled onApi={capture} />);
+    expect(api!.clock()).toBeNull();
   });
 });

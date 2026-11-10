@@ -57,12 +57,22 @@ This document tracks architectural scope boundaries and honest limitations per `
 
 ## 3. Phase 4 notes (editor core, in progress)
 
-1. **Playback clock is the animation-frame timer, not the audio output.** SPEC 09 §23 makes
-   the audio device position the master clock whenever audio plays. This slice advances the
-   playhead from `performance.now()` and lets the graph follow it — it now follows *one* clock,
-   the playhead, rather than each element keeping its own — but the clock's source is still the
-   animation frame. A long playback can drift from the audio device by a frame, and correcting
-   that (reading `AudioContext.currentTime` back as the master) is the remaining piece of §23.
+1. **The audio device is the master clock** (SPEC 09 §23), and the animation-frame timer is the
+   fallback when no audio is playing. The playhead is derived from `AudioContext.currentTime`
+   through an anchor taken on the first frame of playback, so a slow frame renders an older
+   picture instead of letting the sound run ahead — the spec's "drop frames, never slow audio".
+   Two honest limits remain in that area:
+   * **The clock follows the device, but the device is not asked to correct a slider.** A seek
+     during playback re-anchors; residual drift inside the 80 ms tolerance is left alone rather
+     than being corrected every frame, because a correction per frame *is* jitter.
+   * **A reading before the anchor holds rather than rewinds.** If a context is recreated and
+     reports a smaller `currentTime`, the playhead stays where it was until the device catches up.
+     A reading that is merely *slow* — forward of the anchor but behind the playhead — is not
+     distinguishable from a fresh anchor and is followed, which is the correct trade: the device
+     is the clock, so when it says less time has passed, less time has passed.
+   **Playback rate** (§23: 0.5×/1×/1.5×/2×, preview-only) is in the transport, applied to the
+   elements with pitch preserved; the control is absent when no graph exists, because a rate that
+   moved the playhead while the sound stayed at 1× would be worse than no control.
    The Web Audio graph itself is **built** (SPEC 12 §6.2/§6.3): every audible item gets a
    `<audio>` element of its own, a `GainNode` carrying the full envelope and a `StereoPannerNode`,
    summed into a bus. That changed three things this document used to list as limitations:
@@ -81,8 +91,8 @@ This document tracks architectural scope boundaries and honest limitations per `
    header to draw it, which is a UI slice rather than a graph one.
    Two honest gaps in the graph itself: it builds one chain per *item*, not per track, so an
    edit that re-plans the whole graph on every timeline change is cheap at this scale and would
-   not be at a thousand clips; and **audio is not yet the master clock**, so the drift above is
-   still possible.
+   not be at a thousand clips; and the graph is rebuilt from a plan on each edit rather than
+   patched, which is the same trade at a different level.
 2. **The preview plays proxies, but seeking a `<video>` element is still the scrub
    mechanism.** Import generates a proxy for 4K, Chromium-unsafe-codec, variable
    frame-rate and HDR sources (SPEC 04 §7), the media record stores its path, and the
