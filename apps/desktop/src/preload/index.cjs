@@ -86,6 +86,14 @@ contextBridge.exposeInMainWorld('clipwright', {
   getPeaks: (mediaId) => ipcRenderer.invoke('media:getPeaks', mediaId),
   getThumbnail: (mediaId, timeUs) => ipcRenderer.invoke('media:getThumbnail', mediaId, timeUs),
 
+  // ---- Noise reduction (SPEC 12 §6.8) ----
+  reduceNoise: (request) => ipcRenderer.invoke('media:reduceNoise', request),
+  onNoiseReductionProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('media:reduceNoiseProgress', listener);
+    return () => ipcRenderer.removeListener('media:reduceNoiseProgress', listener);
+  },
+
   // ---- Transcript export ----
   exportTranscript: (transcript, format, aspect, defaultName) =>
     ipcRenderer.invoke('transcript:export', transcript, format, aspect, defaultName),

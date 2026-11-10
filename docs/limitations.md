@@ -39,7 +39,16 @@ This document tracks architectural scope boundaries and honest limitations per `
 8. **4K 60 fps CPU export speed (`specs/14` §10):** On machines without a hardware encoder (NVENC/QSV/AMF), 4K 60 fps software encoding (`libx264`) runs slower than real-time while maintaining full frame accuracy and deterministic output.
 9. **Unsigned Windows installer (`specs/15` §6.4):** When built without a commercial Authenticode certificate (`CSC_LINK`), the Windows installer and portable executable are **unsigned**. Release notes, the README, the installer, and the in-app updater clearly label builds as **Unsigned** and verify authenticity via Ed25519-signed `release-manifest.json.sig` plus SHA-256/SHA-512 checksums.
 10. **Architecture support (`specs/15` §6.1):** Windows x64 is the primary target for v1; Windows ARM64 runs via x64 emulation.
-11. **Roadmap ("LATER") features not in v1 (`specs/13` §2):** Offline speaker diarization, multi-language caption translation tracks, AI voice dubbing, key-less background removal, B-roll suggestion, and multi-speaker split-screen auto-layout are reserved for future versions and are absent from the UI.
+11. **Voiceover recording and the audio rack are deferred to a later version (`specs/12` §6.5, §6.8).** Neither is built and neither is reachable: there is no *Record* button, no mic permission prompt, and no equaliser, reverb or de-ess in the mix. This is a scope decision rather than an unfinished slice — the rest of §6 (the gain envelope, pan, fades, the preview graph, master and per-track meters, momentary loudness and noise reduction) is built — and it is listed here so no screen implies otherwise.
+12. **Noise reduction uses spectral denoising, not RNNoise, in this build (`specs/12` §6.8).** The
+    bundled ffmpeg is 4.1 (2018) and predates the `arnndn` filter, so the spec's "otherwise
+    `afftdn`" branch is what runs. The capability is probed from `-filters` at start-up rather than
+    assumed from a version string, so a newer binary that has `arnndn` uses it without a code
+    change — but the RNNoise path additionally requires a model file to be supplied, because the
+    model's own licence has to be checked before one can ship. Until then every job runs `afftdn`
+    and the panel says so. This is a build fact rather than a scope decision, and it is listed here
+    so a user comparing voice quality against another tool knows why it differs.
+13. **Roadmap ("LATER") features not in v1 (`specs/13` §2):** Offline speaker diarization, multi-language caption translation tracks, AI voice dubbing, key-less background removal, B-roll suggestion, and multi-speaker split-screen auto-layout are reserved for future versions and are absent from the UI.
 
 ---
 

@@ -16,7 +16,7 @@ import {
   setItemProperties,
   type TimelineState,
 } from '../index.js';
-import { enablePatches } from 'immer';
+import { applyPatches, enablePatches } from 'immer';
 
 enablePatches();
 
@@ -361,5 +361,121 @@ describe('setItemProperties across a selection', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.affectedItemIds).toEqual(['item-1']);
+  });
+});
+
+describe('noise reduction on an item (SPEC 12 §6.8)', () => {
+  /*
+    The field is what makes the cleaned copy reachable: the preview and the export both read the
+    item, so a job whose result lived only in the inspector would produce a preview that sounded
+    cleaned and a file that did not. These tests are about the two transitions that matter — apply,
+    and revert — and about revert being a real command rather than a mutation of a hidden copy.
+  */
+
+  it('applies a cleaned copy to the item that asked for it', () => {
+    const state = makeState();
+    const result = setItemProperties(state, {
+      itemIds: ['item-1'],
+      patch: {
+        noiseReduction: {
+          strength: 'high',
+          path: '/project/derived/enhanced/abc.wav',
+          method: 'afftdn',
+        },
+      },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['item-1']!.noiseReduction).toEqual({
+      strength: 'high',
+      path: '/project/derived/enhanced/abc.wav',
+      method: 'afftdn',
+    });
+  });
+
+  it('reverts by clearing the field, and leaves no null behind', () => {
+    /*
+      `undefined`, not `null`. The schema distinguishes absent from null, and a project carrying
+      `noiseReduction: null` would read as "has this field" to every `!== undefined` check
+      downstream — which is the sort of difference that only shows up in a saved file.
+    */
+    const withCopy = setItemProperties(makeState(), {
+      itemIds: ['item-1'],
+      patch: { noiseReduction: { strength: 'low', path: '/x.wav' } },
+      fps: 30,
+    });
+    expect(withCopy.ok).toBe(true);
+    if (!withCopy.ok) return;
+
+    const reverted = setItemProperties(withCopy.state, {
+      itemIds: ['item-1'],
+      patch: { noiseReduction: null },
+      fps: 30,
+    });
+    expect(reverted.ok).toBe(true);
+    if (!reverted.ok) return;
+    /*
+      `toBeUndefined` alone would pass on a null too, and `'noiseReduction' in item` passes for an
+      assigned `undefined` — both were checked and neither distinguishes the two states. What
+      distinguishes them is the *value*: a revert that wrote `null` would survive `toBeUndefined`'s
+      sibling (`toBeNull`) and neither of these, so this asserts the value is exactly `undefined`
+      and says why, rather than asserting a property that is true either way.
+    */
+    expect(reverted.state.items['item-1']!.noiseReduction).toBeUndefined();
+    /*
+      And the round trip that would catch a `null`: the schema's own parse. A project with
+      `noiseReduction: null` fails `.optional()`'s object shape at the type level and would be
+      preserved as null by `.passthrough()` — so the check that matters is what a save writes.
+    */
+    const serialised = JSON.stringify(reverted.state.items['item-1']);
+    expect(serialised).not.toContain('noiseReduction":null');
+  });
+
+  it('is undoable, because a revert the user cannot take back is a trap', () => {
+    /*
+      Revert is safe on disk — the original was never written to — but it is still an edit to the
+      project: the item goes back to playing different audio. Undo is what makes that a decision
+      the user can change their mind about rather than a one-way door.
+    */
+    const applied = setItemProperties(makeState(), {
+      itemIds: ['item-1'],
+      patch: { noiseReduction: { strength: 'medium', path: '/y.wav' } },
+      fps: 30,
+    });
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const reverted = setItemProperties(applied.state, {
+      itemIds: ['item-1'],
+      patch: { noiseReduction: null },
+      fps: 30,
+    });
+    expect(reverted.ok).toBe(true);
+    if (!reverted.ok) return;
+    /* The inverse patches, replayed, put the copy back. */
+    const restored = applyPatches(reverted.state, reverted.inverse);
+    expect(restored.items['item-1']!.noiseReduction?.path).toBe('/y.wav');
+  });
+
+  it('leaves other items alone when one is cleaned', () => {
+    const state = makeState();
+    const second = createMediaItem({
+      id: 'item-2',
+      trackId: state.items['item-1']!.trackId,
+      label: 'Second',
+      mediaId: 'media-2',
+      startUs: state.items['item-1']!.startUs + state.items['item-1']!.durationUs,
+      durationUs: 1_000_000,
+      sourceDurationUs: 1_000_000,
+    });
+    const twoItems: TimelineState = { ...state, items: { ...state.items, 'item-2': second } };
+    const result = setItemProperties(twoItems, {
+      itemIds: ['item-1'],
+      patch: { noiseReduction: { strength: 'low', path: '/z.wav' } },
+      fps: 30,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.items['item-2']!.noiseReduction).toBeUndefined();
   });
 });

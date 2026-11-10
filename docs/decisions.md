@@ -1579,3 +1579,73 @@ fake `AudioContext` on every render, so the effect re-ran every render, and the 
 a render loop that allocated until `Ineffective mark-compacts near heap limit`. The fix is one
 context per test, and the comment explains why it must be stable, because a *caller* can make the
 same mistake with a real context and get the same hang.
+
+## 49. Noise reduction is a new file and a plan that says what it can do
+
+SPEC 12 §6.8 asks for noise reduction with three strengths, a background job, an A/B toggle and a
+Revert, and it prefers RNNoise "when available, otherwise ffmpeg `afftdn`". Three things about this
+build changed the shape of the slice, and all three are decisions rather than discoveries.
+
+**The bundled ffmpeg has no `arnndn`.** It is 4.1, from 2018; `arnndn` arrived in 4.3. So the
+spec's "otherwise" branch is the only one that can run here, and the capability is *probed* from
+`-filters` at start-up rather than assumed from the version — a future binary with `arnndn` needs
+no code change beyond the probe seeing it, and a build that assumed it would fail at run time with
+"No such filter", which reads to a user as the feature being broken rather than as a version fact.
+The probe is cached, because it costs ~50 ms and cannot change while the app runs.
+
+**RNNoise's model is a licence decision, not an engineering one.** Even with `arnndn` present, the
+plan falls back to spectral denoising when no model path is supplied. RNNoise's model files carry
+their own terms, and shipping one without checking them is the kind of problem that cannot be fixed
+by a patch. The fallback is reported in the plan's `description` — the panel says which method ran
+— so the downgrade is visible rather than silent. This is the same rule `docs/limitations.md`
+records for checksums.
+
+**A denoiser is not obviously an improvement.** It can remove the noise floor and the presence from
+a voice in the same pass, so the level of the result goes *down* whether or not the audio got
+better. `describeNoiseReduction` is therefore descriptive and never celebratory: it reports the
+measured change and says to compare, because a sentence that treated a bigger drop as a better
+result would push users toward the setting that thins their voice. The spec's own warning — "can
+affect voice quality; compare before using" — is quoted verbatim in the panel, where it is a
+sentence the UI has to be able to earn rather than a tooltip.
+
+**Never destructive, and Revert is a no-op on disk.** The output is a new, content-addressed file
+under `<derived>/enhanced/`, keyed on the media, the range and the exact filter chain — so the same
+strength twice is a cache hit and a *changed* strength is a different file, which is the difference
+between a setting that works and one that appears to do nothing. Nothing writes to the source, so
+Revert clears the item's `noiseReduction` field through `setItemProperties`: it is a command like
+any other, it is undoable, and it needs no confirmation dialog because nothing is being destroyed.
+A dialog there would imply a risk that does not exist and train the user to dismiss the ones that
+do.
+
+**Where the copy goes, and the bug that taught us to test it.** `derivedDirectoryFor` reads the
+directory from the media's proxy (`derived/proxy/<mediaId>/proxy.mp4`, three levels up) or its
+peaks, and only falls back to `dirname(media.path)` when neither exists. The fallback is right for a
+*managed* import and wrong for a *reference* one, where that path is the user's camera card —
+writing beside it would succeed, look fine in the app, and leave files on someone's disk. The first
+version of the function was two levels up, which lands on `derived/proxy`: a directory that exists
+and therefore *accepts* the write, so the bug produced a file in the wrong place rather than an
+error. The test that caught it is a pure path assertion, which is the reason the arithmetic lives in
+an exported helper rather than inline in an IPC handler.
+
+**The job's result is a command, not panel state.** It goes through `setItemProperties` so the
+cleaned copy is what the preview plays and what an export contains — the same document, the same
+undo stack. It is applied to the item that *asked*, not to the current selection: a job takes
+seconds, the user can select something else while it runs, and attaching the result to whatever
+happened to be selected at the end is how a cleaned copy lands on the wrong clip. The A/B toggle is
+the opposite — view state only, never written to the project — because a comparison that dirtied
+the file and entered the undo stack every time would turn auditioning into an edit.
+
+**One thing the checker had to learn.** `main.ts` reaches the module with `await import(...)` so
+ffmpeg is not loaded at start-up for users who never open the panel, and `scripts/check-repo.mjs`
+looked only for `from '…'` — so it reported a genuinely wired module as an orphan. The rule's own
+words are "a module only a test can reach", and this one is reachable from the app. The regex now
+matches both forms, and a planted orphan still fails, which is the check that the widening did not
+simply make the rule slack.
+
+Seventeen tests on the main-process job and the directory arithmetic — against the real bundled
+binary, with a noisy fixture generated by it — twelve on the pure plan, and nineteen on the row and
+its decisions. Sixteen mutations all bite: an unescaped Windows model path, a cache key without the
+filters, `-ss` moved to the wrong side of `-i`, a non-monotonic profile, an inverted delta, a key
+that ignores the range. The one that survived longest was `-ss` after `-i`, which produces an
+identical file — slower, by decoding everything before the range — so a duration assertion could
+never see it; it is now pinned by position.

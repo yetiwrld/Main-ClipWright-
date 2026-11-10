@@ -560,6 +560,73 @@ function registerIPC(): void {
     return media.isSupportedFile(filePath);
   });
 
+  /*
+    Noise reduction (SPEC 12 §6.8).
+
+    A background job in the spec's sense: the handler awaits the render and a non-zero exit comes
+    back as `ok: false` with a sentence, rather than throwing, because every failure a user can act
+    on here is a setting or the source's own content. A missing file is the exception and throws,
+    since the answer to it is a relink and not a different strength.
+
+    The media's derived directory comes from the record, so the cleaned copy lands beside the proxy
+    and the peaks rather than in a directory of its own invention — one place per media to look in
+    when something has to be cleaned up.
+  */
+  ipcMain.handle(
+    'media:reduceNoise',
+    async (
+      event,
+      request: {
+        mediaId: string;
+        inUs: number;
+        durationUs: number;
+        strength: string;
+        hasAudio?: boolean;
+      },
+    ) => {
+      const storage = requireStorage();
+      const media = storage.getMedia(request.mediaId);
+      if (!media) throw new Error('Media not found');
+      const { derivedDirectoryFor, runNoiseReduction } = await import('./audio-enhance.js');
+      const result = await runNoiseReduction({
+        mediaId: request.mediaId,
+        sourcePath: media.path,
+        /*
+          The project's `derived` directory, found from an artefact that already lives there rather
+          than rebuilt from a guess.
+
+          `dirname(media.path)` is wrong for a **reference** import — that path is the user's
+          footage, and writing beside it would put the app's files in their camera card. The proxy
+          lives at `derived/proxy/<mediaId>/`, so two levels up is the directory wanted, and the
+          peaks files sit directly inside it. Either is a fact about where this media's derived
+          files belong; the arithmetic is in `derivedDirectoryFor`, where it has a test.
+        */
+        derivedDir: derivedDirectoryFor(media),
+        inUs: request.inUs,
+        durationUs: request.durationUs,
+        strength: request.strength,
+        ...(request.hasAudio === undefined ? {} : { hasAudio: request.hasAudio }),
+        onProgress: (progress) => {
+          /* Sent to the window that asked, so a second window does not show another's progress. */
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('media:reduceNoiseProgress', {
+              mediaId: request.mediaId,
+              ...progress,
+            });
+          }
+        },
+      });
+      return {
+        ok: result.ok,
+        ...(result.outputPath ? { path: result.outputPath } : {}),
+        message: result.message,
+        method: result.plan.method,
+        strength: result.plan.strength,
+        ...(result.cached ? { cached: true } : {}),
+      };
+    },
+  );
+
   // ---- Media assets: peaks and thumbnails (SPEC 09 §19) ----
   ipcMain.handle('media:getPeaks', async (_event, mediaId: string) => {
     const storage = requireStorage();

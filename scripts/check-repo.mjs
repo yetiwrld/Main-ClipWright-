@@ -236,8 +236,18 @@ for (const file of productionSources) {
   const name = lastSegment(file);
   if (ENTRY_POINTS.has(name)) continue;
   const base = name.replace(/\.tsx?$/, '');
+  /*
+    Static imports, *and* dynamic ones. `main.ts` reaches for `await import('./audio-enhance.js')`
+    deliberately — the ffmpeg module is a heavy dependency that only a noise-reduction job needs,
+    and a static import would load it at start-up for everyone. The check used to look only for
+    `from '…'`, so a module wired exclusively through a dynamic import was reported as an orphan
+    while being genuinely reachable: the rule's own words are "a module only a test can reach", and
+    this one was reachable from the app.
+  */
   const imported = productionSources.some(
-    (other) => other !== file && new RegExp(`from '[^']*/${base}\\.js'`).test(readFileSync(other, 'utf8')),
+    (other) =>
+      other !== file &&
+      new RegExp(`(from |import\\()\\s*'[^']*/${base}\\.js'`).test(readFileSync(other, 'utf8')),
   );
   if (!imported) {
     fail(

@@ -3106,6 +3106,14 @@ export function setItemProperties(
        * name said otherwise.
        */
       iconName?: string;
+      /**
+       * Noise reduction for this item (SPEC 12 §6.8).
+       *
+       * `null` clears it — that is *Revert*, and it is a command like any other, so it is undoable
+       * and appears in the history the way a user expects an edit to. The original audio was never
+       * written to, so clearing this field is the whole of the revert: there is no file to restore.
+       */
+      noiseReduction?: TimelineItem['noiseReduction'] | null;
     };
     fps: Fps;
   },
@@ -3229,6 +3237,14 @@ export function setItemProperties(
       // Crop and transform merge per field: the inspector edits one corner at a
       // time, and replacing the whole object would reset the other three.
       if (patch.shapeKind !== undefined) target.shapeKind = patch.shapeKind;
+      if (patch.noiseReduction !== undefined) {
+        /*
+          `null` means revert, and produces `undefined` rather than a null on the item — the schema
+          treats absent and null differently, and a project carrying `noiseReduction: null` would
+          read as "has this field" to every `!== undefined` check downstream.
+        */
+        target.noiseReduction = patch.noiseReduction ?? undefined;
+      }
       if (patch.iconStrokeWidth !== undefined) target.iconStrokeWidth = patch.iconStrokeWidth;
       if (patch.iconName !== undefined) {
         target.iconName = patch.iconName;

@@ -15,6 +15,8 @@ import {
 } from '@clipwright/compositor';
 import type { TimelineApi } from './use-timeline.js';
 import { IconPicker } from './IconPicker.js';
+import { NoiseReductionRow } from './NoiseReductionRow.js';
+import { useNoiseReduction } from './use-noise-reduction.js';
 import { playheadStore, usePlayheadUs } from './playhead-store.js';
 import {
   adjacentKeyTime,
@@ -340,6 +342,24 @@ function KeyframeRow({
 export function ItemInspector({ state, timeline }: { state: TimelineState; timeline: TimelineApi }) {
   const selected = timeline.selection.map((id) => state.items[id]).filter(Boolean);
   /*
+    The noise-reduction job, wired above the early returns because a hook cannot sit after one.
+
+    The result is written back as a command on whichever item asked for it. It is keyed on the
+    target rather than on "the selection" deliberately: a job takes seconds, the user can select
+    something else while it runs, and attaching the result to whatever happened to be selected when
+    it finished is how a cleaned copy lands on the wrong clip.
+  */
+  const noise = useNoiseReduction(({ target, reply }) => {
+    timeline.setItemProperties([target.itemId], {
+      noiseReduction: {
+        strength: reply.strength,
+        path: reply.path!,
+        method: reply.method,
+        createdAt: new Date().toISOString(),
+      },
+    });
+  });
+  /*
     Which item's icon is being re-picked, if any. Holding an id rather than a boolean keeps
     the dialog bound to the item it was opened for: the selection can change under an open
     dialog, and a pick would then land on whatever was selected instead.
@@ -634,6 +654,39 @@ export function ItemInspector({ state, timeline }: { state: TimelineState; timel
           onChange={(value) => timeline.setItemProperties([item.id], { pan: value })}
         />
       </Field>
+
+      {/*
+        Noise reduction (SPEC 12 §6.8) sits with the other audio controls, which is where a user
+        looks after deciding a take is noisy.
+
+        The job is a background one and the *result* is a command on the timeline, so the cleaned
+        copy is what the preview plays and what an export contains — the same document, the same
+        undo stack. A panel-local state would give a preview that sounds cleaned and an export that
+        does not, which is the divergence this project keeps having to fix.
+      */}
+      <NoiseReductionRow
+        item={item}
+        running={noise.running}
+        onReduce={(strength) => {
+          void noise.reduce(
+            {
+              itemId: item.id,
+              mediaId: item.mediaId ?? item.id,
+              inUs: item.sourceInUs,
+              durationUs: item.sourceDurationUs ?? item.durationUs,
+            },
+            strength,
+          );
+        }}
+        onRevert={() => timeline.setItemProperties([item.id], { noiseReduction: null })}
+      />
+
+      {noise.message ? (
+        /* The job's own sentence. `role="status"` so it is announced rather than merely shown. */
+        <p role="status" className="inspector__job-message">
+          {noise.message}
+        </p>
+      ) : null}
 
       <Field label="Speed">
         <Slider

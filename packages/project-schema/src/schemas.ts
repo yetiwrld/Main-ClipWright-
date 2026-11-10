@@ -235,6 +235,31 @@ export const TimelineItemSchema = z
     fadeInUs: z.number().int().min(0).default(0),
     fadeOutUs: z.number().int().min(0).default(0),
     fadeCurve: z.enum(['linear', 'equal-power', 'exponential']).default('equal-power'),
+    /**
+     * Noise reduction, when the user has asked for it (SPEC 12 §6.8).
+     *
+     * The spec's rule is that the item **points to the derived file** and *Revert* restores the
+     * original — so this stores the strength and the path of the cleaned copy, and the original
+     * media is never touched. Optional throughout: an item without it plays its source, which is
+     * what every project written before this field existed does.
+     *
+     * `path` is stored rather than recomputed because the derived file is content-addressed on the
+     * range and filter chain: recomputing it needs the same inputs the job ran with, and an item
+     * whose range was later trimmed would compute a *different* key and silently lose its cleaned
+     * audio. The path is the fact.
+     */
+    noiseReduction: z
+      .object({
+        strength: z.enum(['low', 'medium', 'high']),
+        /** Absolute path of the denoised WAV under the media's `derived/enhanced` directory. */
+        path: z.string().min(1),
+        /** Which denoiser produced it, so the panel can say so and a re-run can be explained. */
+        method: z.enum(['arnndn', 'afftdn']).optional(),
+        /** When it was made, for the panel's own line. Not used for ordering anything. */
+        createdAt: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     muted: z.boolean().default(false),
     opacity: z.number().min(0).max(1).default(1),
     blendMode: z

@@ -4,7 +4,8 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `3ac8481`. 2949 automated tests, all passing.
+Last updated after commit `224a638`, plus the noise-reduction slice. 3458 automated tests,
+all passing.
 
 ---
 
@@ -20,7 +21,7 @@ the work is committed and tagged.
 | **2 — Start flow & transcription** | Start screen, file import, URL download (yt-dlp), ffprobe inspection, proxies, Whisper transcription, transcript editor | ✅ Done, tagged `phase-2-complete` |
 | **3 — AI & moments** | AI provider settings, Ollama, moment detection and scoring, moments screen, clip creation | ✅ Done, tagged `phase-3-complete` |
 | **4 — Editor core** | Editor layout, media library, timeline, playhead, preview, undo/redo, autosave, recovery | ⚠️ Mostly done, not tagged |
-| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ⚠️ Mostly done: captions, keyframes, effects, transitions, audio envelope and text/shape items built; brand kits, equaliser, metering and voiceover not built |
+| **5 — Editor advanced** | Captions UI, text/graphics, keyframes, effects, transitions, audio tools, AI editing tools, brand kits | ⚠️ Mostly done: captions, keyframes, effects, transitions, audio envelope, text/shape items, the full preview graph, per-track metering and noise reduction built; **voiceover recording and the audio rack are deferred to a later version by decision** (see below) |
 | **6 — Export, updates, packaging** | Export engine, queue, updates, installer, GitHub release, docs | ⚠️ Built, one big gap (see below) |
 
 So: **three phases fully done (1, 2, 3) and three partial (4, 5, 6)** — every phase
@@ -80,7 +81,14 @@ recent colours: it is absent rather than disabled where Chromium's API is missin
 and the caption style editor — which had its own private copy of the colour row, and was
 therefore the screen apologising for the missing eyedropper — now uses the shared control.
 
-Still open in Phase 5: the voiceover recorder, the equaliser, and the full Web Audio graph. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
+**Deferred out of Phase 5 by decision, not by omission.** The **voiceover recorder** (SPEC 12
+§6.5) and the **audio rack** — equaliser, reverb, de-ess (§6.8's optional stretch) — are moved to a
+later version. They are recorded in `docs/limitations.md` §1 as v1 scope boundaries rather than
+left in the phase as unfinished work, so nothing in the build claims them. Everything else §6 asks
+for is built: the envelope, pan, the fades, the preview graph, the master and per-track meters,
+momentary loudness, and noise reduction.
+
+The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
 format, the placement maths and the application plan live in `packages/brand-kits` (36
 tests), and the commands that apply, reapply, remove, detach and insert an intro or
 outro live in `packages/timeline-engine` (26 tests). An intro is an *insert*, not a
@@ -344,7 +352,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 2949 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3458 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.
