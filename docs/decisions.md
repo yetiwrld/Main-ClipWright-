@@ -2233,3 +2233,35 @@ would leave the wrong branch unchecked on every machine without ffmpeg — which
 them, and on the developer's machine is exactly when nobody is looking.
 
 Six mutations bite, the original literal among them.
+
+## 64. A test that reached for the binary it was carefully not gated on
+
+The clash tests in §63 are deliberately outside `skipIf(!HAS_FFMPEG)`: `ask` is decided before any
+render is planned, so the branch runs everywhere and there is no excuse for leaving it unchecked on a
+machine without ffmpeg.
+
+The second of those tests then started a real export, to prove that a *free* name does not prompt.
+It passed locally. CI went red with **0 failed tests** — 3488 passed, 134 skipped, exit code 1 — and
+the annotations API could only tell me the step failed, not why; the job logs were unreachable.
+
+The test had not failed. It had *passed*, and queued a render that failed afterwards in a worker CI
+never heard from. Locally the bundled `resources/bin/ffmpeg` made that render succeed; CI has no such
+binary, which is the entire reason 134 tests skip there.
+
+**The rule this earns:** a test placed outside a binary gate must not reach the binary even
+indirectly. "It is only checking the return value" is not enough when the return value is *queued*,
+because the interesting work happens after the assertion has already passed. The test now asserts
+what the clash logic actually decides — no `resolve-clash` action, no numbered sibling written — and
+nothing else. Re-run with `resources/bin/ffmpeg` moved aside, the file reports 24 passed, 9 skipped,
+0 failed, which is what CI will see.
+
+**And the debugging note, because it cost more than the fix:** `gh run view --log-failed` returned
+`EOF`, the jobs-log API returned `EOF`, and the annotations carried only "Process completed with exit
+code 1". The one usable datapoint was the annotation `0 failed, 3488 passed, 134 skipped` — which
+looks like success. What broke the deadlock was reading `.github/workflows/*.yml` and noticing
+`pnpm verify` gates on *exit code*, not on the failure count, and that `pnpm test` is only the third
+of five steps. A run that says "0 failed" can still fail the build, by design: skipped-and-failing is
+not the same as skipped.
+
+The reproduction was then a single move — `mv resources/bin/ffmpeg /tmp` — which is worth reaching
+for before another round trip to the API.

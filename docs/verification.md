@@ -659,6 +659,18 @@ tests are **not** ffmpeg-gated — the clash is detected before any rendering is
 matters, because a gated test would leave the wrong branch unchecked on every machine that cannot
 run it.
 
+The last sentence cost a CI cycle to earn. The first version of the second service test started a
+real export to prove that a *free* name does not prompt, and it passed locally because this
+checkout has a bundled ffmpeg. CI does not, so `start()` returned a queued job whose render failed
+later, and the run went red with **0 failed tests** — every assertion that ran had passed, and the
+report's only unusual figure was 134 skipped. The test now asserts the absence of a clash answer and
+the absence of a numbered sibling, neither of which needs an encoder, and the file was re-run with
+`resources/bin/ffmpeg` moved aside to confirm the CI condition: 24 passed, 9 skipped, 0 failed.
+
+The lesson is narrow and worth keeping: a test placed *outside* a binary gate must not reach the
+binary even indirectly. Local green is not evidence for it, because the local checkout has the
+binary and CI does not.
+
 ---
 
 ## 4. Updates (SPEC 15)

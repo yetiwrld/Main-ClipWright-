@@ -693,8 +693,12 @@ describe('the "ask" clash policy actually asks', () => {
 
   it('does not ask when there is nothing to clash with', async () => {
     /*
-      The policy is about a collision, not about prompting. With a free name the export proceeds —
-      otherwise "Ask" would make every first export of a clip fail with a question.
+      The policy is about a collision, not about prompting: with a free name the export starts
+      normally. Asserted through the *absence of the clash answer* rather than through a successful
+      render, because starting one needs an encoder — and the whole point of this file's placement
+      outside `skipIf(!HAS_FFMPEG)` is that the clash logic runs on machines without one. A test
+      that begins a real render here would pass on a developer's machine and fail in CI, which is
+      how this test was first written.
     */
     const service = new ExportService({ storage: makeStorage() });
     const result = await service.start({
@@ -707,6 +711,9 @@ describe('the "ask" clash policy actually asks', () => {
       createFrameSource: () => solidColourFrameSource({ width: 1280, height: 720, luma: 30 }),
       fullDecode: false,
     });
-    expect(result.ok).toBe(true);
+    /* Whatever the encoder does later, the *start* must not be a clash question. */
+    if (!result.ok) expect(result.action).not.toBe('resolve-clash');
+    /* And no numbered sibling was created for a name that was free. */
+    expect(existsSync(join(dir, 'free 2.mp4'))).toBe(false);
   });
 });
