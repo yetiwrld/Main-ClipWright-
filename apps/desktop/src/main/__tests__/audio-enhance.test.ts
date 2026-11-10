@@ -32,7 +32,17 @@ let derivedDir = '';
   than fails, because a machine without the bundled binary (a bare CI checkout of one package)
   cannot run these at all and should say so rather than report a broken denoiser.
 */
+/**
+ * Whether there is an ffmpeg this machine can actually run — not merely a file at the path.
+ *
+ * The binaries under `resources/bin` are untracked: `pnpm install` creates Linux symlinks into
+ * `node_modules`, and `scripts/release/fetch-binaries.mjs` installs real executables on Windows.
+ * Those symlinks are absolute, so a worktree whose `node_modules` was reinstalled elsewhere — or
+ * the Windows runner — has a path that `existsSync` accepts while `spawnSync` fails with ENOENT.
+ * Running `-version` is the check that means the same thing on both platforms.
+ */
 const hasFfmpeg = (() => {
+  if (!existsSync(FFMPEG)) return false;
   try {
     execFileSync(FFMPEG, ['-version'], { stdio: 'ignore' });
     return true;

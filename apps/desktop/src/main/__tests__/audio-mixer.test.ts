@@ -29,7 +29,33 @@ import {
 } from '@clipwright/export-core';
 
 const TMP = join(process.cwd(), '.tmp-audio-mixer');
-const HAS_FFMPEG = existsSync(ffmpegPath()) && existsSync(ffprobePath());
+
+/**
+ * Whether there is an ffmpeg this machine can actually *run*.
+ *
+ * `existsSync` is not the question, and answering it as though it were is what broke CI. The
+ * binaries under `resources/bin` are **not tracked**: `pnpm install` creates Linux symlinks into
+ * `node_modules`, and `scripts/release/fetch-binaries.mjs` installs real executables on Windows.
+ * The symlinks are absolute, pointing at the machine that created them — so a copied or restored
+ * worktree has `existsSync` true for a target that is not there, `spawnSync` fails with ENOENT,
+ * and a `describe.skipIf(!existsSync(...))` block runs and fails instead of skipping. That is
+ * exactly what happened on `windows-latest`: three tests red while the same suite passed on Linux.
+ *
+ * Running the binary with `-version` is the only check that means the same thing on both
+ * platforms: it passes for a real executable, fails for a symlink into a directory that is not
+ * there, and fails for a file without the execute bit.
+ */
+function usableBinary(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    execFileSync(path, ['-version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HAS_FFMPEG = usableBinary(ffmpegPath()) && usableBinary(ffprobePath());
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
@@ -1055,7 +1081,7 @@ describe('planAudioItems', () => {
   });
 });
 
-describe('a music bed that ducks under speech (SPEC 12 §6.7)', () => {
+describe.skipIf(!HAS_FFMPEG)('a music bed that ducks under speech (SPEC 12 §6.7)', () => {
   /*
     The ducking *arithmetic* has been tested since the audio slice. What had never been tested — and
     could not have passed — is that a real project ever reaches it, and this block is the third

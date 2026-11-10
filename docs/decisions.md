@@ -1707,3 +1707,27 @@ difference attributable rather than merely observed.
 Nineteen tests across the bed, the forwarding and the produced audio; thirteen mutations, all
 biting after the two fixes — including the bug this slice started from (`plan.music` read and never
 applied), the flag dropped on the way through, and the trigger built from the padded length.
+
+### The guard was asking the wrong question, and CI said so
+
+The first push of this slice went red on `windows-latest`: three tests, `spawnSync ffmpeg ENOENT`.
+The ducking block was the only one in `audio-mixer.test.ts` without a `describe.skipIf`, which is
+how it got noticed — but the more interesting finding is that **the guard every other block used was
+wrong too**.
+
+`HAS_FFMPEG` was `existsSync(ffmpegPath()) && existsSync(ffprobePath())`. The binaries under
+`resources/bin` are untracked: `pnpm install` creates Linux symlinks into `node_modules`, and
+`fetch-binaries.mjs` installs real executables on Windows. Those symlinks are absolute, so
+`existsSync` answers "is there a path here" — and there is, pointing at a target that may not exist,
+which is exactly what a copied worktree or a Windows runner has. The check passed, the block ran,
+the spawn failed.
+
+`usableBinary()` now runs `-version` and catches. It answers the question the guard was always
+trying to ask — *can this machine run ffmpeg* — and it is the same answer on both platforms, which
+is the property that was missing. Applied to the three files this slice touched; the eight older
+files with the `existsSync` pattern are left alone rather than swept, because they pass today for a
+reason none of them states and changing them all is a separate, testable change.
+
+The process lesson is the one this project keeps relearning: **the local suite passing is evidence
+about the local machine**. A test that gates on the presence of a binary has to gate on its
+*runnability*, and only CI on the other platform can tell you that you did not.

@@ -305,7 +305,25 @@ function hasFilter(name: string): boolean {
   }
 }
 
-const HAS_FFMPEG = existsSync(FFMPEG);
+/**
+ * Whether there is an ffmpeg this machine can actually run.
+ *
+ * `existsSync` is not the question. The binaries under `resources/bin` are untracked: `pnpm
+ * install` makes Linux symlinks into `node_modules`, and `fetch-binaries.mjs` installs real
+ * executables on Windows. An absolute symlink whose target is absent still *exists* as far as
+ * `existsSync` is concerned, so this file got away with the weaker check only because `hasFilter`
+ * below spawns the binary and returns `false` on failure — the guard was correct by accident, one
+ * call deeper.
+ */
+const HAS_FFMPEG = (() => {
+  if (!existsSync(FFMPEG)) return false;
+  try {
+    execFileSync(FFMPEG, ['-version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 const HAS_AFFTDN = HAS_FFMPEG && hasFilter('afftdn');
 
 let workDir = '';
