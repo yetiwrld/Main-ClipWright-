@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `f8efdb2`. 3622 automated tests, all passing.
+Last updated after commit `f8efdb2`. 3623 automated tests, all passing.
 
 **The last seven commits repaired the app's connections to itself rather than adding features.** Every
 one was a value, a name or a channel that two files disagreed about: the start screen sent settings
@@ -411,7 +411,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3622 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3623 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

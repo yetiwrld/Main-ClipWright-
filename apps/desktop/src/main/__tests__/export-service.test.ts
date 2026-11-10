@@ -14,6 +14,7 @@ import {
   ExportService,
   applyNameTemplate,
   defaultFileName,
+  decideOutputPath,
   estimateOutputBytes,
   qualityBitrate,
   resolveOutputDir,
@@ -691,29 +692,31 @@ describe('the "ask" clash policy actually asks', () => {
     expect(existsSync(join(dir, 'taken 2.mp4'))).toBe(false);
   });
 
-  it('does not ask when there is nothing to clash with', async () => {
+  it('does not ask when there is nothing to clash with', () => {
     /*
-      The policy is about a collision, not about prompting: with a free name the export starts
-      normally. Asserted through the *absence of the clash answer* rather than through a successful
-      render, because starting one needs an encoder — and the whole point of this file's placement
-      outside `skipIf(!HAS_FFMPEG)` is that the clash logic runs on machines without one. A test
-      that begins a real render here would pass on a developer's machine and fail in CI, which is
-      how this test was first written.
+      The policy is about a collision, not about prompting: a free name is not a question.
+
+      Called through `decideOutputPath` rather than `start()`. An earlier version started an export
+      and checked the result; it passed here and failed in CI, because `start()` queues a render, the
+      render spawns ffmpeg, and on a machine without ffmpeg that reaches vitest as an *unhandled*
+      error — 24 tests passed, 0 failed, exit code 1. The decision is pure; only the `mkdir` around
+      it is not, and that is not what this test is about.
     */
-    const service = new ExportService({ storage: makeStorage() });
-    const result = await service.start({
-      jobId: `ask-free-${Date.now().toString(36)}`,
-      name: 'Ask',
-      settings: makeSettings(),
-      fileName: 'free',
-      outputDir: dir,
-      clashPolicy: 'ask',
-      createFrameSource: () => solidColourFrameSource({ width: 1280, height: 720, luma: 30 }),
-      fullDecode: false,
-    });
-    /* Whatever the encoder does later, the *start* must not be a clash question. */
-    if (!result.ok) expect(result.action).not.toBe('resolve-clash');
-    /* And no numbered sibling was created for a name that was free. */
+    expect(decideOutputPath(dir, 'free', '.mp4', 'ask')).toEqual({ ok: true, path: join(dir, 'free.mp4') });
+    /* Nothing was written, and no numbered sibling was invented for a name that was free. */
+    expect(existsSync(join(dir, 'free.mp4'))).toBe(false);
     expect(existsSync(join(dir, 'free 2.mp4'))).toBe(false);
+  });
+
+  it('auto-numbers, replaces and asks per the policy — decided without touching a render', () => {
+    /*
+      All three policies against the same occupied name. These are the assertions that would have
+      caught the original fault (ask falling through to auto-number) without any of the machinery
+      that made the first version of this block flaky.
+    */
+    const taken = join(dir, 'taken.mp4');
+    expect(decideOutputPath(dir, 'taken', '.mp4', 'auto-number')).toEqual({ ok: true, path: join(dir, 'taken 2.mp4') });
+    expect(decideOutputPath(dir, 'taken', '.mp4', 'replace')).toEqual({ ok: true, path: taken });
+    expect(decideOutputPath(dir, 'taken', '.mp4', 'ask')).toEqual({ ok: false, error: taken, action: 'resolve-clash' });
   });
 });

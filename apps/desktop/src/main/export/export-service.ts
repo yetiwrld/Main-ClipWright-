@@ -112,6 +112,46 @@ export interface ExportStorageLike {
   getTranscript?(projectId: string): { words: Array<{ id: string; text: string }> } | undefined;
 }
 
+/** What the clash policy decided, before anything is written. */
+export type OutputPathDecision =
+  | { ok: true; path: string }
+  | { ok: false; error: string; action?: 'resolve-clash' };
+
+/**
+ * The clash policy on its own: given a folder, a name and a policy, where would the file go?
+ *
+ * Extracted from the service because the decision is pure and the *act* around it is not. The only
+ * caller inside the service does `mkdir` first; everything here reads the filesystem and decides.
+ * The split matters for tests: reaching this through `start()` drags in a render, a render spawns
+ * ffmpeg, and on a machine without one that rejection lands *after* the assertion — as an unhandled
+ * error that fails the run with every test passed. A pure function cannot do that.
+ */
+export function decideOutputPath(
+  outputDir: string,
+  baseName: string,
+  extension: string,
+  policy: ClashPolicy,
+): OutputPathDecision {
+  const sanitised = sanitiseFileName(baseName);
+  const candidate = join(outputDir, `${sanitised}${extension}`);
+  if (!existsSync(candidate)) return { ok: true, path: candidate };
+  if (policy === 'replace') return { ok: true, path: candidate };
+  /*
+    SPEC 14 §5's *Ask*. This used to fall through to auto-number behind a comment claiming "the UI
+    resolves before calling us" — a resolution nothing implemented, so choosing *Ask* numbered the
+    file and never asked. The dialog now answers it and re-submits with an explicit policy; the
+    error names the path so it can.
+  */
+  if (policy === 'ask') {
+    return { ok: false, error: candidate, action: 'resolve-clash' };
+  }
+  for (let counter = 2; counter < 1000; counter += 1) {
+    const numbered = join(outputDir, `${sanitised} ${counter}${extension}`);
+    if (!existsSync(numbered)) return { ok: true, path: numbered };
+  }
+  return { ok: false, error: `There are too many files named ${sanitised} in that folder.` };
+}
+
 export class ExportService {
   private readonly queue: ExportQueue;
   private readonly storage: ExportStorageLike;
@@ -348,30 +388,13 @@ export class ExportService {
     baseName: string,
     extension: string,
     policy: ClashPolicy,
-  ): Promise<{ ok: true; path: string } | { ok: false; error: string; action?: 'resolve-clash' }> {
+  ): Promise<OutputPathDecision> {
     try {
       await mkdir(outputDir, { recursive: true });
     } catch {
       return { ok: false, error: `Clipwright can't write to ${outputDir}.` };
     }
-    const sanitised = sanitiseFileName(baseName);
-    const candidate = join(outputDir, `${sanitised}${extension}`);
-    if (!existsSync(candidate)) return { ok: true, path: candidate };
-    if (policy === 'replace') return { ok: true, path: candidate };
-    /*
-      SPEC 14 §5's *Ask*. This used to fall through to auto-number behind a comment claiming "the UI
-      resolves before calling us" — a resolution nothing implemented, so choosing *Ask* numbered the
-      file and never asked. The dialog now answers it and re-submits with an explicit policy; the
-      error names the path so it can.
-    */
-    if (policy === 'ask') {
-      return { ok: false, error: candidate, action: 'resolve-clash' };
-    }
-    for (let counter = 2; counter < 1000; counter += 1) {
-      const numbered = join(outputDir, `${sanitised} ${counter}${extension}`);
-      if (!existsSync(numbered)) return { ok: true, path: numbered };
-    }
-    return { ok: false, error: `There are too many files named ${sanitised} in that folder.` };
+    return decideOutputPath(outputDir, baseName, extension, policy);
   }
 
   /** Estimated size × 1.5 must fit, with a small floor for the temp file. */

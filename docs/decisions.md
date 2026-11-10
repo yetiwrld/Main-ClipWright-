@@ -2265,3 +2265,43 @@ not the same as skipped.
 
 The reproduction was then a single move — `mv resources/bin/ffmpeg /tmp` — which is worth reaching
 for before another round trip to the API.
+
+## 65. `spawn ffmpeg ENOENT` — or, the test that queued work it never joined
+
+§64 described a test that passed and a CI run that failed anyway. The fix in that commit moved the
+assertion but kept calling `start()`, and the run went red again with the same shape: 3488 passed,
+134 skipped, exit code 1.
+
+Reproducing it properly — `mv resources/bin/ffmpeg /tmp`, then run the file — gave the sentence the
+annotations never did:
+
+```
+Unhandled Errors
+Error: spawn ffmpeg ENOENT
+    at onErrorNT node:internal/child_process:483:16
+      Tests  24 passed | 9 skipped (33)
+     Errors  1 error
+```
+
+`start()` *queues* a render. The render spawns ffmpeg in a detached worker. On a machine with no
+ffmpeg the spawn rejects, and that rejection reaches vitest as an unhandled error — **after** the
+assertion that was supposed to be testing the same call has already passed. So the test genuinely
+passed and the build genuinely failed, and the two facts were about the same line of code.
+
+**The rule, stated better than §64 stated it:** a test must not call a function whose *contract*
+is to return a result and whose *effect* is to start work. Asserting on the return value is not
+protection, because the failure arrives from the effect, later, in a context the test does not own.
+The gate (`skipIf(!HAS_FFMPEG)`) exists precisely because that effect is unavailable in CI — so a
+test outside the gate must not trigger the effect at all.
+
+The fix separates the two things `resolveOutputPath` was doing: `decideOutputPath` is pure — it reads
+the filesystem and says where a file would go — and the service keeps the `mkdir` around it. The
+tests call the pure one. Coverage went **up** (all three policies against one occupied name, not two
+of three), the encoder is unreachable from the test, and with ffmpeg moved aside the file reports
+25 passed, 9 skipped, 0 errors.
+
+**What made this expensive.** The annotation said `0 failed, 3488 passed, 134 skipped`, which reads
+as success. `gh run view --log-failed` and the job-logs API both returned `EOF`. What broke it open
+was local reproduction under the CI condition — one `mv` — which should have been the first move
+after the first red run rather than the third. A skip count that matches the last green run's skip
+count tells you where to look: at whatever is *not* gated.
