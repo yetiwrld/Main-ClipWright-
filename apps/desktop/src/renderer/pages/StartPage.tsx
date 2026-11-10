@@ -2,6 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Route } from '../App.js';
 import { api, describeError, isDesktop } from '../api.js';
 import type { ProjectRecord } from '../global.js';
+import {
+  startSettings,
+  type StartClipLength,
+  type StartChoices,
+} from '@clipwright/project-schema/start-settings';
 
 interface Props {
   onNavigate: (r: Route) => void;
@@ -53,20 +58,87 @@ const CLIP_COUNTS = [
   { id: 'custom', label: 'Custom' },
 ];
 
+/**
+ * A small numeric field for the two Custom popovers.
+ *
+ * Clamped as it is typed rather than on blur: the spec gives each of these a hard range (1–32 for a
+ * ratio, 10 s–10 min for a length), and letting a 900 through until blur means the value in the
+ * store depends on whether the user clicked away before pressing the button.
+ */
+function NumberField({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  min: number;
+  max: number;
+}) {
+  return (
+    <input
+      type="number"
+      aria-label={label}
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => {
+        const parsed = Number(e.target.value);
+        if (!Number.isFinite(parsed)) {
+          onChange(String(min));
+          return;
+        }
+        onChange(String(Math.min(max, Math.max(min, Math.round(parsed)))));
+      }}
+      style={{
+        width: 64,
+        padding: '6px 8px',
+        border: '1px solid var(--line-default)',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--surface-raised)',
+        color: 'var(--text-primary)',
+        fontSize: 'var(--fs-xs)',
+      }}
+    />
+  );
+}
+
 export function StartPage({ onNavigate }: Props) {
   const [source, setSource] = useState<SourceSummary | null>(null);
-  const [aspectRatio, setAspectRatio] = useState('9:16');
+  /*
+    Typed with the shared module's own unions, so a tile the module cannot name is a compile error
+    rather than a value that silently falls into a default at runtime.
+  */
+  const [aspectRatio, setAspectRatio] = useState<StartChoices['aspect']>('9:16');
+  /*
+    SPEC 02 §4.3: Custom opens a pair of ratio inputs, each 1–32.
+    Held as strings so a half-typed number is not coerced to 0 mid-keystroke; resolved on create.
+  */
+  const [customAspect, setCustomAspect] = useState({ width: '4', height: '5' });
   const [captionStyle, setCaptionStyle] = useState('bold-creator');
-  const [clipLength, setClipLength] = useState('medium');
-  const [clipCount, setClipCount] = useState('auto');
+  const [clipLength, setClipLength] = useState<StartClipLength>('medium');
+  /* SPEC 02 §4.5: Custom is a two-handle range, 10 s to 10 min. Defaults to the Medium preset. */
+  const [customLength, setCustomLength] = useState({ min: '30', max: '60' });
+  /*
+    The tile is held as the tile, not as the number it resolves to.
+
+    `Number('custom')` is NaN, and a NaN count is rejected by the schema's integer check — the same
+    shape of failure this page was already making. Keeping the id and resolving it in one place
+    means the Custom tile has somewhere to put its value instead of a `NaN` in the store.
+  */
+  const [clipCountTile, setClipCountTile] = useState('auto');
+  const [customClipCount, setCustomClipCount] = useState(5);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [clipFocus, setClipFocus] = useState('');
-  const [contentType, setContentType] = useState('auto');
+  const [contentType, setContentType] = useState<StartChoices['contentType']>('auto');
   const [language, setLanguage] = useState('auto');
-  const [processingMode, setProcessingMode] = useState('automatic');
-  const [downloadQuality, setDownloadQuality] = useState('1080p');
-  const [storageMode, setStorageMode] = useState('copy');
+  const [processingMode, setProcessingMode] = useState<StartChoices['processingMode']>('automatic');
+  const [downloadQuality, setDownloadQuality] = useState<StartChoices['downloadQuality']>('1080p');
+  const [storageMode, setStorageMode] = useState<StartChoices['storageMode']>('copy');
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [recent, setRecent] = useState<ProjectRecord[]>([]);
@@ -180,19 +252,38 @@ export function StartPage({ onNavigate }: Props) {
     setIsCreating(true);
     setCreateError('');
     try {
+      /*
+        Schema keys, built by the shared module rather than spelled here.
+
+        This page used to send `aspectRatio`, `captionStyle`, `clipLength` and `storageMode: 'copy'`.
+        None are settings keys: `copy` is not in the storage enum, so `ProjectRecordSchema.parse`
+        threw and **no project could be created at all**; the other three were passed through by the
+        schema and read by nobody, so 4:3 or Karaoke or Short were silently ignored. Keeping the
+        mapping in `@clipwright/project-schema/start-settings` is what lets it have a test that runs without a
+        window — the reason this went unnoticed is that nothing ever checked the two sides agreed.
+      */
       const project = await api.createProject({
         name: projectName.trim() || 'Untitled project',
         settings: {
-          aspectRatio,
-          captionStyle,
-          clipLength,
-          clipCount,
-          contentType,
-          language,
-          processingMode,
-          downloadQuality,
-          storageMode,
-          clipFocus: clipFocus.trim(),
+          ...startSettings({
+            aspect: aspectRatio,
+            ...(aspectRatio === 'custom'
+              ? { customAspect: { width: Number(customAspect.width), height: Number(customAspect.height) } }
+              : {}),
+            captionStyleId: captionStyle,
+            clipLength,
+            ...(clipLength === 'custom'
+              ? { clipLengthRangeSec: [Number(customLength.min), Number(customLength.max)] as [number, number] }
+              : {}),
+            clipCount:
+              clipCountTile === 'auto' ? 'auto' : clipCountTile === 'custom' ? customClipCount : Number(clipCountTile),
+            contentType,
+            language,
+            processingMode,
+            downloadQuality,
+            storageMode,
+            clipFocus: clipFocus.trim(),
+          }),
           sourcePath: source?.path ?? urlInput.trim(),
         },
       });
@@ -202,7 +293,35 @@ export function StartPage({ onNavigate }: Props) {
     } finally {
       setIsCreating(false);
     }
-  }, [canCreate, source, urlState, urlInput, onNavigate]);
+    /*
+      Every setting is a dependency.
+
+      The array held only the source and the navigation, so the callback was memoised on the first
+      render and closed over the *initial* values: a user could pick 4:3, Karaoke and Short and the
+      payload would still say 9:16, bold-creator and medium. With the wrong key names as well, the
+      two bugs hid each other — nothing read the values, so nothing noticed they were stale.
+    */
+  }, [
+    canCreate,
+    source,
+    urlState,
+    urlInput,
+    onNavigate,
+    projectName,
+    aspectRatio,
+    customAspect,
+    captionStyle,
+    clipLength,
+    customLength,
+    clipCountTile,
+    customClipCount,
+    clipFocus,
+    contentType,
+    language,
+    processingMode,
+    downloadQuality,
+    storageMode,
+  ]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && canCreate) {
@@ -389,6 +508,14 @@ export function StartPage({ onNavigate }: Props) {
               </button>
             ))}
           </div>
+          {aspectRatio === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <NumberField label="Custom aspect width" value={customAspect.width} onChange={(width) => setCustomAspect((pair) => ({ ...pair, width }))} min={1} max={32} />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>:</span>
+              <NumberField label="Custom aspect height" value={customAspect.height} onChange={(height) => setCustomAspect((pair) => ({ ...pair, height }))} min={1} max={32} />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>1–32 each</span>
+            </div>
+          )}
         </SettingCard>
 
         <SettingCard title="Caption style">
@@ -422,7 +549,7 @@ export function StartPage({ onNavigate }: Props) {
             {CLIP_LENGTHS.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setClipLength(c.id)}
+                onClick={() => setClipLength(c.id as StartClipLength)}
                 style={{
                   padding: '6px 12px',
                   borderRadius: 'var(--radius-pill)',
@@ -437,6 +564,14 @@ export function StartPage({ onNavigate }: Props) {
               </button>
             ))}
           </div>
+          {clipLength === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <NumberField label="Shortest clip in seconds" value={customLength.min} onChange={(min) => setCustomLength((range) => ({ ...range, min }))} min={10} max={600} />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>to</span>
+              <NumberField label="Longest clip in seconds" value={customLength.max} onChange={(max) => setCustomLength((range) => ({ ...range, max }))} min={10} max={600} />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>seconds</span>
+            </div>
+          )}
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
             Target range — detection may exceed by 20%
           </div>
@@ -447,13 +582,13 @@ export function StartPage({ onNavigate }: Props) {
             {CLIP_COUNTS.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setClipCount(c.id)}
+                onClick={() => setClipCountTile(c.id)}
                 style={{
                   padding: '6px 12px',
                   borderRadius: 'var(--radius-pill)',
-                  border: clipCount === c.id ? '2px solid var(--brand)' : '1px solid var(--line-default)',
-                  background: clipCount === c.id ? 'var(--brand-tint)' : 'transparent',
-                  color: clipCount === c.id ? 'var(--text-brand)' : 'var(--text-secondary)',
+                  border: clipCountTile === c.id ? '2px solid var(--brand)' : '1px solid var(--line-default)',
+                  background: clipCountTile === c.id ? 'var(--brand-tint)' : 'transparent',
+                  color: clipCountTile === c.id ? 'var(--text-brand)' : 'var(--text-secondary)',
                   fontSize: 'var(--fs-xs)',
                   cursor: 'pointer',
                 }}
@@ -462,6 +597,25 @@ export function StartPage({ onNavigate }: Props) {
               </button>
             ))}
           </div>
+          {clipCountTile === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={customClipCount}
+                aria-label="Number of clips"
+                onChange={(e) => {
+                  /* Clamped as it is typed: the schema refuses 0 and 51, and a number field is the
+                     one control where a user can reach both. */
+                  const next = Math.round(Number(e.target.value));
+                  setCustomClipCount(Number.isFinite(next) ? Math.min(50, Math.max(1, next)) : 1);
+                }}
+                style={{ width: 72, padding: '6px 8px', border: '1px solid var(--line-default)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-raised)', color: 'var(--text-primary)', fontSize: 'var(--fs-xs)' }}
+              />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>1–50 clips</span>
+            </div>
+          )}
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
             You'll still see more moments to choose from
           </div>
@@ -505,7 +659,7 @@ export function StartPage({ onNavigate }: Props) {
             </div>
             <div>
               <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Content type</label>
-              <select value={contentType} onChange={(e) => setContentType(e.target.value)}
+              <select value={contentType} onChange={(e) => setContentType(e.target.value as StartChoices['contentType'])}
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--line-default)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-raised)', color: 'var(--text-primary)', fontSize: 'var(--fs-sm)', marginTop: 4 }}>
                 <option value="auto">Auto-detect</option>
                 <option value="podcast">Podcast/interview</option>
@@ -534,7 +688,7 @@ export function StartPage({ onNavigate }: Props) {
               <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Processing mode</label>
               <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                 {['offline', 'online', 'automatic'].map((m) => (
-                  <button key={m} onClick={() => setProcessingMode(m)}
+                  <button key={m} onClick={() => setProcessingMode(m as StartChoices['processingMode'])}
                     style={{
                       padding: '6px 12px', borderRadius: 'var(--radius-pill)',
                       border: processingMode === m ? '2px solid var(--brand)' : '1px solid var(--line-default)',
@@ -548,7 +702,7 @@ export function StartPage({ onNavigate }: Props) {
             </div>
             <div>
               <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Download quality (URL only)</label>
-              <select value={downloadQuality} onChange={(e) => setDownloadQuality(e.target.value)}
+              <select value={downloadQuality} onChange={(e) => setDownloadQuality(e.target.value as StartChoices['downloadQuality'])}
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--line-default)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-raised)', color: 'var(--text-primary)', fontSize: 'var(--fs-sm)', marginTop: 4 }}>
                 <option value="720p">720p</option>
                 <option value="1080p">1080p</option>

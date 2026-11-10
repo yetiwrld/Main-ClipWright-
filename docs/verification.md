@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  146 passed (146)
-     Tests  3520 passed (3520)
+Test Files  149 passed (149)
+     Tests  3545 passed (3545)
 ```
 
 | Area | Tests | What they actually check |
@@ -114,10 +114,10 @@ Test Files  146 passed (146)
 | `packages/timeline-engine` | 294 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation, and the curve editor's write path: bezier handles stored on a keyframe, handle x clamped to 0–1 while y is free to overshoot so ease-back stays expressible, setting handles also switching the key to bezier interpolation (storing them on a linear key would leave them ignored and the edit would silently do nothing), and a refusal when there is no key at that time (§09 §17), plus the brand kit commands: applying a kit as ordinary tagged items on their own track, replacing rather than duplicating on reapply, detach as a one-way door, and inserting an intro or outro with the whole project rippling right (§13 §8.2, §09 §13.2) |
 | `packages/audio-core` | 160 | The gain envelope: dB conversion, fade curves, keyframe interpolation and easing, and the preview/export agreement that SPEC 10 §7.1 requires; plus momentary loudness — K-weighting, the 400 ms gate, energy (not decibel) averaging, and the sample-count-vs-millisecond distinction that decides whether a reading is final; plus the preview's audio plan: which items the graph should play (mute, solo, hidden), where each one starts, its pan, and the gain sampled at an instant rather than at a curve's first point; plus the playback clock — rate applied once at the anchor, the stop point from the work area, and a device reading before the anchor holding rather than rewinding |
 | `packages/media-core` | 41 | Probing, peaks, path resolution; and noise reduction (SPEC 12 §6.8): which denoiser the build has, the strength→filter mapping, the escaping a Windows model path needs, the cache key, and — run against the bundled binary rather than described — that the argument list is accepted, that the range is cut to the length asked for, and that the denoised file measurably loses energy |
-| `packages/project-schema` | 11 | Schema validation and migration |
+| `packages/project-schema` | 24 | Schema validation and migration; and the start screen's settings mapping (§02 §4.3–4.7) — the schema keys the page has to send, the two names storage is called by, a preset's seconds, and the resolution of the two Custom tiles |
 | `packages/design-system` | 24 | Component contracts; the eyedropper's three non-picked outcomes and the recent-colours ordering (newest first, move-not-duplicate, no half-typed colour, re-capped on merge) |
 | `packages/brand-kits` | 109 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, capturing a kit from the current clip by measuring geometry back into percentages, and missing-font substitution that keeps a serif a serif |
-| **Total** | **3520** | 146 files |
+| **Total** | **3545** | 149 files |
 
 ### Tests that run real processes
 
@@ -350,7 +350,57 @@ performs (deleted) and a `muted` filter whose test had removed the muted item fr
 instead of muting it (test rewritten to hold the item and mute it, plus a second for a hidden track;
 both mutations then bit).
 
+### The start screen could not create a project
+
+The first screen in the app, the only place a project is created, and pressing **"Find clips"**
+failed every time. The page sent `storageMode: 'copy'` — its own word for what the schema calls
+`managed` — and `ProjectRecordSchema.parse` threw `invalid_enum_value` in main, so no row was
+inserted, no project appeared, and the error surfaced as raw JSON in a red box.
+
+Three more keys were wrong in a quieter way: `aspectRatio`, `captionStyle` and `clipLength` were not
+settings keys either, but the schema passes unknown keys through, so they were stored and read by
+nothing. A user who chose 4:3, Karaoke and Short got 9:16, Bold creator and 30–60 s, with no error
+and no way to tell.
+
+Underneath both was a third: `handleCreate`'s dependency array held only the source and the
+navigation. The callback was memoised on the first render and closed over the *initial* values, so
+even with correct key names every setting would have been sent as its default. The two bugs hid each
+other — nothing read the values, so nothing noticed they were stale.
+
+**Why nothing caught it.** No test crossed the boundary. `StartPage` had no test at all, and the
+schema's tests never saw a payload shaped like the page's; `clockSource`-style seams exist all over
+this codebase but not here, because the page was written against an imagined settings shape while
+the schema evolved separately.
+
+What is now asserted:
+
+- **`start-settings.test.ts` (13 tests)** — the mapping, and that it produces a record
+  `ProjectRecordSchema` accepts. Each field is set to a value its schema default is *not*, because
+  the first version of the suite asserted `bold-creator` and `auto` and a mutation deleting the
+  caption style survived eleven green tests: the assertion and the default were the same value.
+  Also the reversed custom range (ordered, not stored backwards), the out-of-bounds range and aspect
+  pair (clamped, because a button that silently does nothing is worse than a clamped value), and a
+  leftover `customAspect` not riding along on a 16:9 project.
+- **`start-project.test.ts` (6 tests)** — the same payload through the **real `StorageService`**,
+  written as the page writes it (`copy`, `short`), so a test written in the schema's own words could
+  not pass against the broken code. One test asserts the *old* payload is still refused, which is
+  what stops the others going vacuous if the store ever loosened.
+- **`start-page.test.tsx` (6 tests)** — the page itself: click a tile, click Find clips, assert the
+  payload, parse it with the real schema. **One change per test**, after the first version clicked
+  Karaoke *and* Short and removing the caption-style dependency still passed — the clip-length
+  dependency rebuilt the callback and carried the new caption style with it.
+
+Fifteen mutations: the original bug restored (`copy` → `copy`), each of the three ignored keys, the
+preset range, the two clamps, the leaked custom aspect, the clip count, and each of the four
+dependency entries removed one at a time. Four survived the first pass, and **all four were weak
+tests rather than missing code**: the schema suite asserted defaults (fixed by asserting non-default
+values), the page suite made two changes at once (split), and storage had no test (added). The
+dependency mutants now bite individually, which is the property that makes the closure bug
+non-recurring.
+
 ---
+
+## 4. Updates (SPEC 15)
 
 ## 4. Updates (SPEC 15)
 

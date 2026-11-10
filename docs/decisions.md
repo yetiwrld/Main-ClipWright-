@@ -1790,3 +1790,60 @@ Twenty-one tests on the module, nine on the preview plan, eight on the command, 
 produced audio against the real ffmpeg — including one that asks for −3 dB and one for −24 dB and
 requires the two files to differ, which is the assertion that the depth is the track's rather than
 the mixer's hardcoded default.
+
+## 52. The start screen never worked, and four settings hid it
+
+Pressing **"Find clips"** on the first screen of the app created no project. The page sent
+`storageMode: 'copy'`; the schema's enum is `managed | reference`; `ProjectRecordSchema.parse`
+threw before the insert. The user saw raw JSON in a red box, and the app's front door was shut.
+
+Three more keys were wrong without throwing. `aspectRatio`, `captionStyle` and `clipLength` are not
+settings keys, but the schema is `.passthrough()` — so they were stored, read by nothing, and a user
+who chose 4:3, Karaoke and Short got 9:16, "Bold creator" and 30–60 s. The schema's real keys
+(`aspect`, `captionStyleId`, `clipLengthPreset` plus `clipLengthRangeSec`) were never sent.
+
+Underneath both, `handleCreate`'s dependency array listed only the source and the navigation. The
+callback was memoised on the first render, closing over the initial values, so even after renaming
+the keys every setting would still have arrived as its default. This is the same class of bug as the
+volume keyframes and the ducking flag: **a value with a writer that no reader consults, and a reader
+whose input nothing writes.**
+
+**Why it survived.** There was no test that crossed the boundary. `StartPage` had no test at all —
+it is 700 lines of inline-styled JSX and an IPC call — and every schema test built its own payload
+in the schema's own vocabulary. Each side was internally consistent and they disagreed with each
+other. That is the precise failure mode the *"same code feeds preview and export"* decisions
+elsewhere in this file are written to avoid, and it went unnoticed here because the two halves live
+in different processes.
+
+**The fix is a shared module, not a corrected literal.** `startSettings` lives in
+`packages/project-schema` — the dependency both the renderer and main already have — and returns a
+partial the page spreads over the intake details (`sourcePath` and friends). Putting the mapping on
+one side or the other would have left the other side able to drift again; putting it in the shared
+package means the test that checks it needs no window and no IPC, which is why this one can exist.
+
+Decisions the mapping had to make:
+
+- **A preset's seconds are written, not just its name.** `clipLengthPreset` is read by nothing;
+  `moments-service` reads `clipLengthRangeSec`. Writing only the name would have made the new
+  control exactly as decorative as the one it replaced. Both are written, so the name is available
+  to a future reader and the analysis gets its number today.
+- **Out-of-range values are clamped, not refused.** A reversed two-handle range is ordered; a 1-second
+  or 9000-second range is clamped to 5–600; a ratio pair to 1–32. A project with a clamped setting
+  is a better outcome than a button that does nothing, which is the failure being repaired.
+- **`custom` stays `custom` in `aspect`.** Nothing builds a canvas from a pair yet, so the value
+  resolves to 9:16 at composition time — the same fallback `moments-service` already performs. The
+  pair is still stored, so the day something reads it the user's choice is there.
+- **One change per test.** The first page test clicked Karaoke *and* Short; deleting the caption-style
+  dependency still passed, because the clip-length dependency rebuilt the callback and carried the
+  new caption style with it. A test that makes two changes cannot say which one mattered.
+- **Assert a value the default is not.** The first schema test asserted `bold-creator` and `auto` —
+  which are also the schema's defaults — so a mutation that stopped sending them passed eleven tests.
+
+Fifteen mutations, four survivors, and **all four were weak tests rather than missing code**. That
+is the useful outcome: the code was right, and the tests were writing down the answer instead of
+checking it.
+
+The two Custom tiles also gained their inputs. A "Custom" tile that stores the default is the same
+bug in miniature: the aspect tile opened nothing to type a ratio into, and the clip-count tile
+resolved `Number('custom')` to `NaN`, which the schema refuses — the identical failure as `copy`,
+one click away.

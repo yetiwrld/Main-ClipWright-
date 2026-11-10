@@ -553,3 +553,23 @@ version would be more accurate about speech while disagreeing with the file.
 The threshold setting (`thresholdDb`, default −42) is stored and round-tripped but does not yet
 gate anything: placement is treated as unconditional speech. When a detector exists, it belongs at
 the point where spans are computed, and both renderers inherit it.
+
+---
+
+## 6. The start screen is a form, not the full setting set
+
+The start screen now writes every setting it shows, by the schema's names (§02 §4.3–4.7). What it
+still does not do:
+
+- **A custom aspect stores its pair but changes no canvas.** `aspect: 'custom'` resolves to 9:16
+  when a composition is built, because `CANVAS_BY_ASPECT` has no entry for a pair and nothing reads
+  `customAspect` to construct one. The user's 4:5 pair is saved and survives reload; the clips are
+  built at 9:16. The tile is honest about the ratios it offers, and the two Custom tiles are the
+  least-used controls on the screen — but this is a stored value with no reader, the same shape as
+  the bugs above, and it is recorded here rather than described as working.
+- **The Recommended badge (§02 §4.3) is not built.** The screen has no crop preview and no
+  suggestion from the source's shape or content type; the user picks a ratio and it is used.
+- **Caption style tiles are text buttons, not live animated previews** (§02 §4.4). They name the
+  style; they do not show it.
+- **A project's `sourcePath` is remembered from the start screen only.** Choosing a different source
+  for an existing project means starting a new one — the import stage reads that one field.

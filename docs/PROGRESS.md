@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction and auto-ducking slices. 3520 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction, auto-ducking and start-screen slices. 3545 automated tests,
 all passing.
 
 ---
@@ -41,6 +41,23 @@ The app is real and runs. A user can:
 - export a video file with ffmpeg, validated afterwards
 
 That is Phase 1, 2 and 3 complete plus most of Phase 4.
+
+---
+
+## The bug that had been there all along
+
+The start screen — the first thing anyone sees — **could not create a project.** Pressing "Find
+clips" sent `storageMode: 'copy'` where the schema says `managed`, the schema threw, and nothing was
+written. Alongside it, three settings the page offered (`aspectRatio`, `captionStyle`, `clipLength`)
+were keys nothing read, so every project was created at 9:16 with Bold creator and a 30–60 s target
+whatever the user picked. And the create callback's dependency array was missing every one of them,
+so the values were the initial ones regardless.
+
+All three are now fixed by one shared module, and the reason they lasted is the part worth keeping:
+**no test crossed the boundary between the page and the store.** The page had no test at all; the
+schema's tests built payloads in the schema's own words. Fifteen mutations were run against the
+fix, and four survived — every one of them a test that wrote down the answer instead of checking it.
+That is the recurring lesson of this build, and this is the clearest example of it.
 
 ---
 
@@ -372,7 +389,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3520 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3545 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.

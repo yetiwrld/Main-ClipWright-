@@ -15,6 +15,10 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./schemas": "./src/schemas.ts"
+    "./schemas": "./src/schemas.ts",
+    "./start-settings": {
+      "types": "./src/start-settings.ts",
+      "default": "./src/start-settings.ts"
+    }
   }
 }
