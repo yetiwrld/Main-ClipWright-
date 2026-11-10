@@ -31,6 +31,8 @@ import { detectMoments, guessContentType, selectMoments } from '../moments/pipel
 import {
   DIMENSIONS,
   weightsForContentType,
+  contentTypeFromProject,
+  CONTENT_TYPES,
   weightsSum,
   CONTENT_TYPE_ADJUSTMENTS,
   type Candidate,
@@ -851,5 +853,52 @@ describe('guessContentType', () => {
       'auto'
     );
     expect(['tutorial', 'lecture']).toContain(guess);
+  });
+});
+
+describe('content types cross the project boundary without losing their meaning', () => {
+  /*
+    A project stores `contentType: 'talking'` (SPEC 02 §4.7's "Talking head/vlog" tile); the
+    scoring model is keyed by `talking_head`. `moments-service` passed one into the other behind a
+    cast, so a user who picked that tile got `CONTENT_TYPE_ADJUSTMENTS['talking']` — `undefined` —
+    and the generic `other` weights. Their choice was silently discarded and the panel gave no sign.
+
+    Every project-schema value is translated by name here, not by "the interesting one": a test for
+    `talking` alone would let the next divergent member through.
+  */
+  const PROJECT_CONTENT_TYPES = ['auto', 'podcast', 'talking', 'tutorial', 'gaming', 'lecture', 'other'];
+
+  it('maps every value the project schema can hold onto a scoring type', () => {
+    for (const projectType of PROJECT_CONTENT_TYPES) {
+      const translated = contentTypeFromProject(projectType);
+      expect(CONTENT_TYPES).toContain(translated);
+    }
+  });
+
+  it('translates talking to talking_head, which is the only member that differs', () => {
+    expect(contentTypeFromProject('talking')).toBe('talking_head');
+    for (const same of ['auto', 'podcast', 'tutorial', 'gaming', 'lecture', 'other']) {
+      expect(contentTypeFromProject(same)).toBe(same);
+    }
+  });
+
+  it('gives the talking-head profile real weights rather than the generic ones', () => {
+    /*
+      The consequence, stated in the units the bug was measured in. `weightsForContentType('talking')`
+      returns DEFAULT_WEIGHTS because the lookup misses; the translated value must not.
+    */
+    const translated = weightsForContentType(contentTypeFromProject('talking'));
+    const generic = weightsForContentType('other');
+    expect(translated).not.toEqual(generic);
+    expect(translated.emotion).toBeGreaterThan(generic.emotion);
+    expect(translated.value).toBeLessThan(generic.value);
+    /* The adjustment table keeps the total at 100 whatever the content type. */
+    expect(Object.values(translated).reduce((sum, n) => sum + n, 0)).toBe(100);
+  });
+
+  it('falls back to auto for a value from neither vocabulary', () => {
+    /* A hand-edited or future project value must not throw in the middle of an analysis. */
+    expect(contentTypeFromProject('nonsense')).toBe('auto');
+    expect(contentTypeFromProject('')).toBe('auto');
   });
 });

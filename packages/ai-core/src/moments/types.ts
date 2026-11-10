@@ -28,6 +28,37 @@ export type ContentType =
   | 'lecture'
   | 'other';
 
+/**
+ * The project schema's spelling of the content types, mapped onto this module's.
+ *
+ * The two vocabularies differ in exactly one member and neither was wrong on its own: a project
+ * stores `talking` (§02 §4.7's "Talking head/vlog" tile) and the scoring model is keyed by
+ * `talking_head`. `moments-service` passed one into the other behind a cast, so a user who chose
+ * the talking-head tile got `CONTENT_TYPE_ADJUSTMENTS['talking']` — `undefined` — and the generic
+ * `DEFAULT_WEIGHTS`. Their choice was silently discarded, and the only visible sign was that
+ * choosing a content type did less than the panel implied.
+ *
+ * A translation, not a widened union: the scoring table stays keyed by its own names, so a missing
+ * entry is still visible here rather than becoming a silent `undefined` lookup two files away.
+ */
+export function contentTypeFromProject(value: string): ContentType {
+  const translated = value === 'talking' ? 'talking_head' : value;
+  return (CONTENT_TYPES as readonly string[]).includes(translated)
+    ? (translated as ContentType)
+    : 'auto';
+}
+
+/** The members of `ContentType`, for callers that have a string and need to check it. */
+export const CONTENT_TYPES = [
+  'auto',
+  'podcast',
+  'talking_head',
+  'tutorial',
+  'gaming',
+  'lecture',
+  'other',
+] as const satisfies readonly ContentType[];
+
 export type Confidence = 'high' | 'medium' | 'low';
 
 export type MomentBasis = 'llm' | 'heuristic';

@@ -511,6 +511,37 @@ describe('MomentsService', () => {
     expect(edited.durationUs).toBe(moment.durationUs + 1_000_000);
   });
 
+  it('applies the talking-head profile when the project says talking', async () => {
+    /*
+      The cast that was here: `(project.settings.contentType ?? 'auto') as ContentType`. A project
+      stores `talking` and the scoring table is keyed by `talking_head`, so the lookup missed,
+      `CONTENT_TYPE_ADJUSTMENTS['talking']` was `undefined`, and the analysis ran on the generic
+      weights. Choosing "Talking head/vlog" on the start screen changed nothing.
+
+      Asserted through the *result* rather than the setting, because the result is what a user can
+      see: the same transcript scored with the talking-head profile must differ from the same
+      transcript scored with the generic one. Both runs are offline and heuristic, so the only
+      difference between them is the content type.
+    */
+    const analyse = async (contentType: 'talking' | 'other') => {
+      const project = projectWithTranscript();
+      storage.updateSettings({ processingMode: 'offline' });
+      storage.updateProject(project.id, {
+        settings: { ...project.settings, contentType, clipLengthRangeSec: [5, 60] },
+      });
+      const result = await moments.analyze({ projectId: project.id });
+      return result.moments.map((moment) => ({ startUs: moment.startUs, score: moment.score }));
+    };
+
+    const talking = await analyse('talking');
+    const generic = await analyse('other');
+
+    expect(talking.length).toBeGreaterThan(0);
+    /* The profiles weight emotion and story differently, so the ranked moments cannot come out
+       identical — unless the content type was dropped on the way in. */
+    expect(talking).not.toEqual(generic);
+  });
+
   it('builds the clip at the chosen aspect, with the chosen caption style on every caption', async () => {
     /*
       The other two settings the start screen had been dropping. `buildComposition` reads

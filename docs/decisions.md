@@ -2021,3 +2021,40 @@ putting the literal back.
 The general note, since this is the seventh instance: **a default at a call site is a claim that
 the caller has nothing to say.** Sometimes that is true. Here the caller had the project in scope
 and had already used it for everything else on the screen.
+
+## 58. "Talking head" was spelled two ways, and a cast hid the difference
+
+A project stores `contentType: 'talking'` — the *Talking head/vlog* tile on the start screen. The
+scoring model is keyed by `'talking_head'`. One word apart, and `moments-service` crossed the
+boundary with:
+
+```ts
+const contentType = (request.contentType ?? project.settings.contentType ?? 'auto') as ContentType;
+```
+
+A cast is the assertion that two types are the same thing. Here they were not: `'talking'` is not a
+member of `ContentType`, so the cast was a lie that compiled. `CONTENT_TYPE_ADJUSTMENTS['talking']`
+was `undefined`, `?? {}` swallowed it, and the analysis ran on `DEFAULT_WEIGHTS`. Choosing *Talking
+head/vlog* did nothing.
+
+**Why it survived.** The failure has no edge. The analysis still returns moments, still ranks them,
+still scores in range; the weights are just the generic ones. A user cannot see the difference
+without analysing the same video twice with two content types and comparing — which nobody does.
+The tests did not, and the type system was told not to.
+
+**The fix is a translation, not a widened union.** Widening `ContentType` to include both spellings
+would put the ambiguity inside the scoring table, where every future lookup would have to remember
+it. `contentTypeFromProject` sits at the boundary that actually has two vocabularies — a project
+file and a scoring model — maps the one member that differs, and returns `auto` for anything from
+neither, so a hand-edited project degrades instead of throwing mid-analysis.
+
+The test asserts the consequence rather than the spelling: the ranked moments from the same
+transcript must differ between `talking` and `other`. A test that checked
+`contentTypeFromProject('talking') === 'talking_head'` would have been satisfied by the function
+existing; this one is not satisfied unless the weights actually change.
+
+**The general shape, now the eighth instance in this run:** two files that each hold a name the
+other needs. Where the compiler can check it, a cast is how it stops being checked. The channel-list
+test (§54), the settings-key module (§52) and this translation are three answers to one question —
+which file owns the name — and the answer is always "the one that has the other file's vocabulary in
+front of it", never a cast.

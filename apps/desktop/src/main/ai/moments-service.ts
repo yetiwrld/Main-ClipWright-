@@ -11,6 +11,7 @@ import { CompositionRecordSchema, uuidv7, type CompositionRecord, type Moment, t
 import {
   buildCaptions,
   detectMoments,
+  contentTypeFromProject,
   getAdapter,
   type ContentType,
   type DetectionInput,
@@ -511,7 +512,12 @@ export class MomentsService {
   /* ------------------------------------------------------------- internals */
 
   private momentSettings(project: ProjectRecord, request: AnalyzeRequest): MomentSettings {
-    const contentType = (request.contentType ?? project.settings.contentType ?? 'auto') as ContentType;
+    /*
+      Translated, not cast. A project stores `talking`; the scoring table is keyed by
+      `talking_head`. The cast this replaces compiled and produced `undefined` for the adjustment,
+      so choosing "Talking head/vlog" applied the generic `other` weights and nothing said so.
+    */
+    const contentType = contentTypeFromProject(request.contentType ?? project.settings.contentType ?? 'auto');
     const settings = this.storage.getSettings();
     const [min, max] = project.settings.clipLengthRangeSec;
     return {
