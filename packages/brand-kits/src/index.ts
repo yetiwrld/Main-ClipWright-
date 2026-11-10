@@ -24,6 +24,7 @@ export {
   ALL_KIT_PARTS,
   diagnoseKit,
   findKitAppliedItems,
+  kitProvenance,
   kitSwatches,
   planKitApplication,
   resolvePlacement,

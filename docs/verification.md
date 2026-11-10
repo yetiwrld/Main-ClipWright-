@@ -16,8 +16,8 @@ pnpm test:unit
 ```
 
 ```
-Test Files  123 passed (123)
-     Tests  3045 passed (3045)
+Test Files  124 passed (124)
+     Tests  3063 passed (3063)
 ```
 
 | Area | Tests | What they actually check |
@@ -111,13 +111,13 @@ Test Files  123 passed (123)
  **Linked selection** (SPEC 09 §9.6): a video and its detached audio share a `linkId` so the two travel together — and *none* of the five commands that must honour it expanded the ids they were given. Moving the picture left the sound behind, deleting it left audio playing over black, and splitting it left one long sound under two short clips. The schema carried the coupling and the `linkedSelection` toggle from the start; `linkedTrackIds` existed but was read only by the ripple paths. `withLinkedSelection` is now the one expansion, applied by `moveItems`, `trimItem`, `splitItems`, `deleteItems` and `duplicateItems`, and a new `setToggles` command plus a toolbar button make the flag reachable — it was document state with no control and no writer, so every project was permanently linked and could not say so. The rules that needed deciding: a partner moves by the **delta**, never to the same absolute position, or a deliberate offset closes on the first drag and the sound drifts against the lip; a trimmed partner trims its **own** edge by the delta, not to the picture's new end, which only an offset fixture can distinguish; a duplicated pair is re-linked to each other under a fresh shared id, since one id per copy would leave the copies unlinked and move the same bug onto them; a partner on a locked track is left behind rather than refusing the whole operation; and groups expand as a second, separate relation. Two real bugs were found by the tests while writing them: trimming a partner to the picture's absolute end collapsed an offset sound to one frame, and `closeMainGaps` pulled a linked group member back after it had correctly moved — the gap-closing pass only skipped the ids the *caller* named, not the partners the command had added. Nine mutations all bite, but one only after a fixture was fixed: every trim test had the pair starting together, where the two formulas agree to the microsecond. The **Auto** render ladder §5.1 also asks for is *not* built and is recorded as a limitation: the preview draws DOM layers at each element's own resolution, so there is no internal render scale to step down, and a "Preview ½" chip would describe a resolution nothing is rendered at. |
 | `packages/ai-core` | 120 | Provider clients, scoring, connectivity |
 | `packages/update-core` | 177 | Version rules, manifest verification, signatures, update state machine, journal and recovery text, yt-dlp updater rules |
-| `packages/timeline-engine` | 244 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation, and the curve editor's write path: bezier handles stored on a keyframe, handle x clamped to 0–1 while y is free to overshoot so ease-back stays expressible, setting handles also switching the key to bezier interpolation (storing them on a linear key would leave them ignored and the edit would silently do nothing), and a refusal when there is no key at that time (§09 §17) |
+| `packages/timeline-engine` | 262 | Commands, invariants, undo/redo, caption editing (§11 §2.5), item properties and their validation, and the curve editor's write path: bezier handles stored on a keyframe, handle x clamped to 0–1 while y is free to overshoot so ease-back stays expressible, setting handles also switching the key to bezier interpolation (storing them on a linear key would leave them ignored and the edit would silently do nothing), and a refusal when there is no key at that time (§09 §17), plus the brand kit commands: applying a kit as ordinary tagged items on their own track, replacing rather than duplicating on reapply, detach as a one-way door (§13 §8.2) |
 | `packages/audio-core` | 48 | The gain envelope: dB conversion, fade curves, keyframe interpolation and easing, and the preview/export agreement that SPEC 10 §7.1 requires |
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
 | `packages/brand-kits` | 36 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, and what applying a kit reports |
-| **Total** | **3045** | 123 files |
+| **Total** | **3063** | 124 files |
 
 ### Tests that run real processes
 
@@ -657,9 +657,60 @@ reported at all — a checkbox that is off is not a failure.
 running past the composition's end, the provenance filter ignoring the kit id, and unknown
 fields dropped on import or not restored on export.
 
-**Not built yet, and deliberately not claimed:** the kit editor UI, apply/detach/reapply as
-commands, `.cwbrand` zip packaging with assets, and the "from the current clip" capture. They
-are recorded in `docs/limitations.md` rather than half-wired into the app.
+### Brand kits: applying one
+
+**Applying is composing commands, not a command of its own kind.** `applyBrandKit` creates
+image items through the same `createMediaItem` the media importer uses and writes
+`captionStyleId` the way the inspector does; `removeKitItems` is an ordinary delete. A separate
+module rather than a branch inside `commands.ts`, because the kit *is* a composition of the
+timeline's existing operations, and keeping it beside them made the composition legible. Its
+plan comes from `packages/brand-kits`, so the geometry is tested without a timeline and the
+timeline is tested without the geometry.
+
+**The applied item is an ordinary image item.** Not a special "kit logo" type: an `image`
+media item on a `Brand kit` graphics track, with a full `transform` — position as a fraction of
+the frame and the factory's rotation, anchor and flips intact. Measured: the kit's
+bottom-right logo lands at `x 0.44375, y 0.4` of the frame on 1920×1080, which is the centre
+of the 129.6 px box the placement maths produced. `scaleX`/`scaleY` stay at 1 by default and
+`assetScale` is the separate, explicit step for fitting an asset of a known size into the
+box — it returns 1 rather than `NaN`/0 when the asset has not been probed, because a logo at
+zero scale draws nothing and looks like a bug in the kit.
+
+**What makes reapply and detach possible is the tag on the item.** `aiProvenance:
+{tool: 'brand-kit', kitId, appliedAt, version}` is written onto the item, not into a side
+table, so it survives a save, a duplicate and a copy between projects. `appliedAt` is not
+decoration: two applications of *the same kit* are told apart by it, which is what lets a
+report name the items the current application created without a second bookkeeping pass.
+
+**Reapply replaces, and covers both halves in one undo.** It removes the kit's items and then
+applies, returning `removed` so the UI can say what it replaced. An undo that restored the
+items but not the caption style would leave the project in a state the user never made.
+
+**Detach is a deliberate one-way door.** It clears the tag and keeps the items. A later
+reapply then leaves them alone and adds its own alongside — two logos, which is correct rather
+than a bug: detaching means "this one is mine". That is asserted rather than described,
+because it is the only kit operation that applying the kit again cannot undo, and it is the
+one the UI has to confirm.
+
+**Nothing is written where the user locked.** A caption on a locked track keeps its old style
+and the rest of the kit applies — the same rule `setItemProperties` follows, tested here so
+the two cannot drift apart. A text item that is not a caption is never restyled, even when its
+id is named explicitly: the selection the UI passes is a request, and a mixed selection must
+not turn a title into a caption.
+
+**Mutations.** 12, all bite — and two only after the tests were strengthened. Removing the
+centre subtraction, letting a locked track be written, accepting a plan with nothing to do,
+leaving the previous application in place, removing without cleaning the track's `itemIds`,
+detaching by deleting rather than untagging, `assetScale` returning zero, and dropping the
+provenance tag or the opacity all failed a test immediately. Two survived first: with the
+automatic caption path already filtering to `type === 'caption'`, the inner guard was only
+load-bearing on the `captionItemIds` path, so the named list needed a non-caption in it; and
+reapply filtered by `tool` alone produced the right *items* and the wrong `removed` count, so
+the count for a two-kit project is asserted.
+
+**Not built yet, and deliberately not claimed:** the kit editor UI, `.cwbrand` zip packaging
+with assets, and the "from the current clip" capture. They are recorded in `docs/limitations.md`
+rather than half-wired into the app.
 
 **Mutations.** 19 were run against the arc maths, the parser, the tokeniser and the wiring;
 all bite. Two survived the first pass and were resolved rather than left: a `largeArc` delta

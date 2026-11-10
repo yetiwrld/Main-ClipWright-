@@ -55,6 +55,21 @@ export const ALL_KIT_PARTS: KitApplyParts = {
 export interface KitProvenance {
   tool: 'brand-kit';
   kitId: string;
+  /**
+   * When the kit was applied, ISO 8601.
+   *
+   * Required by the schema, and not merely bookkeeping: *Reapply* needs to tell "this item
+   * came from the last time I applied the kit" from "this came from a run before the kit
+   * changed", and the timestamp is the only thing on the item that says which.
+   */
+  appliedAt: string;
+  /** The provenance format's own version, so a future shape can be told apart. */
+  version: number;
+}
+
+/** The provenance a kit writes onto every item it creates. */
+export function kitProvenance(kitId: string, appliedAt: string): KitProvenance {
+  return { tool: 'brand-kit', kitId, appliedAt, version: 1 };
 }
 
 /** What the caller needs to know about the project to place things sensibly. */

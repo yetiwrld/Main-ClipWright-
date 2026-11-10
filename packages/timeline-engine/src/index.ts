@@ -110,6 +110,21 @@ export {
   type TrimParams,
 } from './commands';
 
+/*
+ * Brand kit commands (SPEC 13 §8.2) live in their own module because they are *composed*
+ * of the commands above — a kit application is image items, a style assignment and, later,
+ * clips. Re-exported here so a caller does not need a second import path.
+ */
+export {
+  applyBrandKit,
+  assetScale,
+  detachKitItems,
+  reapplyBrandKit,
+  removeKitItems,
+  type AppliedKitItem,
+  type ApplyBrandKitParams,
+} from './kit-commands';
+
 export { TimelineHistory, type HistoryStep, type UndoResult } from './history';
 export { checkInvariants } from './invariants';
 export {

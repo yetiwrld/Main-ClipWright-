@@ -288,6 +288,9 @@ importers:
 
   packages/timeline-engine:
     dependencies:
+      '@clipwright/brand-kits':
+        specifier: workspace:*
+        version: link:../brand-kits
       '@clipwright/project-schema':
         specifier: workspace:*
         version: link:../project-schema

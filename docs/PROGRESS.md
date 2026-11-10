@@ -65,9 +65,14 @@ export path:
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
-Still open in Phase 5: the colour eyedropper, brand kit **UI** (the format, the plan and
-the diagnosis are built and tested in `packages/brand-kits`; no screen reads them yet),
-the voiceover recorder and the equaliser. Three entries left this list
+Still open in Phase 5: the colour eyedropper, brand kit **UI**, the voiceover recorder and
+the equaliser. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
+format, the placement maths and the application plan live in `packages/brand-kits` (36
+tests), and the commands that apply, reapply, remove and detach one live in
+`packages/timeline-engine` (18 tests). Applying a kit produces ordinary items tagged
+`aiProvenance: {tool: 'brand-kit'}`, which is what makes "delete the kit, keep its work" a
+property of the design rather than a promise. What is missing is the list, the editor, the
+buttons and the `.cwbrand` zip. Three entries left this list
 rather than being rephrased. The **shape row** is in — a shape offers its kind, an icon
 offers its stroke width, and neither appears for the other. **Re-picking** an icon on an
 existing item is in too: the picker gained the caller it never had, so its `value` and

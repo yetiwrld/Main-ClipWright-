@@ -941,3 +941,37 @@ hunting for a logo that was never placed.
 **The UI is deliberately absent.** No screen mentions brand kits yet. An unfinished CORE tool
 that appears as a card, a disabled menu entry or a "coming soon" chip is forbidden by
 `specs/13` §2, and the format being ready is not the same as the feature being usable.
+
+## 33. A brand kit is applied by composing existing commands, and provenance lives on the item
+
+**The command layer is a separate module that calls `commands.ts`'s pieces, not a new branch
+inside it.** `applyBrandKit` builds its items with `createMediaItem` and writes
+`captionStyleId` the way the inspector does; `removeKitItems` is an ordinary delete. Keeping
+the composition in `kit-commands.ts` means the timeline's rules — track ordering, the item
+factory's full transform, the locked-track rule — are reused rather than restated, and the
+file that does restate them is a page long instead of a branch buried in four thousand lines.
+
+**Provenance is a field on the item, keyed by kit and by the moment of application.**
+`aiProvenance: {tool: 'brand-kit', kitId, appliedAt, version}`. On the item because the item is
+what survives a save, a duplicate and a copy between projects — a side table would have to be
+migrated, reconciled and would lose entries the moment a project was edited by a version that
+did not know the table existed. The schema already had `aiProvenance` for AI edits, so a kit
+application is the same kind of fact: something a tool made, that the user can detach. `kitId`
+alone is not enough, because reapplying the *same* kit must be able to tell the new items from
+the old ones, and `appliedAt` is how the command reports what the current application created
+without a second pass over a diff.
+
+**Locked tracks are skipped, not refused.** Applying a kit to a project with a locked caption
+track writes the other captions and the logo. Refusing the whole application because one track
+was locked would be a straight-faced version of "the button did nothing", and the user's lock
+is a statement about that track, not a veto over the kit.
+
+**Detach is one-way on purpose.** It clears the tag and keeps the items, so a later reapply
+leaves them alone and adds its own. The alternative — a detached item staying in a hidden
+registry so reapply could still find it — would make "this is mine now" untrue, which is the
+entire content of the command. The UI that arrives with this will confirm it, because it is
+the only kit operation that applying the kit again cannot undo.
+
+**An empty plan fails.** If every part is off, or every asset is missing, the command returns
+`invalid` rather than succeeding with no patches. A success with nothing to show is
+indistinguishable from a broken button, and the plan's `report` already carries the reason.

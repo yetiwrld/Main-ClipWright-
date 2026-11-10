@@ -460,16 +460,22 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **Brand kits are specified, validated and planned — but there is no UI.** SPEC 13 §8
-    lists them as CORE for v1 acceptance, and the honest state is this: the `.cwbrand`
-    format, its bounds, import/export with unknown-field preservation, placement resolution
-    across aspect ratios, the application plan and the diagnosis are all **built and tested**
-    (`packages/brand-kits`, 36 tests, 8 mutations). What does not exist is everything a user
-    would touch — the kit list and editor, the apply/detach/reapply commands, the `.cwbrand`
-    zip with its assets, and capturing a kit from a clip. Nothing in the app mentions brand
-    kits, which is the correct state for an unbuilt feature (`specs/13` §2: an unfinished
-    tool is never shown as a teaser). The project schema's `brandKits: string[]` and the
-    `BrandKits/` directory are still empty placeholders until the commands land.
+13. **Brand kits are specified, validated, planned and applicable — but there is no UI.**
+    SPEC 13 §8 lists them as CORE for v1 acceptance, and the honest state is this: the
+    `.cwbrand` format, its bounds, import/export with unknown-field preservation, placement
+    resolution across aspect ratios, the application plan, the diagnosis, and the commands
+    that apply, reapply, remove and detach a kit are all **built and tested**
+    (`packages/brand-kits`, 36 tests; the commands in `packages/timeline-engine`, 18 tests;
+    20 mutations between them, all biting). Applying produces ordinary items carrying
+    `aiProvenance: {tool: 'brand-kit'}`, so a removed kit leaves its work standing. What does
+    not exist is everything a user would touch — the kit list and editor, the `.cwbrand` zip
+    with its assets, capturing a kit from a clip, and the buttons that call the commands.
+    Nothing in the app mentions brand kits, which is the correct state for an unbuilt feature
+    (`specs/13` §2: an unfinished tool is never shown as a teaser). The project schema's
+    `brandKits: string[]` and the `BrandKits/` directory are still empty placeholders until
+    the UI lands. Two parts of the spec remain unimplemented in the commands themselves:
+    intro/outro clips (the plan does not emit them yet) and the missing-font substitution
+    flag, since the caption style is assigned by id and resolution happens elsewhere.
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on

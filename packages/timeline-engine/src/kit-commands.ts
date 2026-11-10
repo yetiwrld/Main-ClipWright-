@@ -1,0 +1,336 @@
+/**
+ * SPEC 13 §8.2 — applying, reapplying and detaching a brand kit.
+ *
+ * These live beside `commands.ts` rather than inside it because they are **composed** of the
+ * commands that already exist: a kit application is image items on a graphics track, a
+ * `captionStyleId` written onto the captions in range, and (later) clips at the ends. Nothing
+ * here introduces a new kind of item, which is what makes the spec's own rules true rather
+ * than maintained:
+ *
+ * - *Deleting a kit leaves applied items untouched* — they are ordinary items.
+ * - *Reapply replaces* — the provenance tag on the items is enough to find what the previous
+ *   run made.
+ * - *Detach* — the same query, clearing the tag rather than deleting the items.
+ *
+ * Everything is one undo step, because an apply that could be half-undone would leave a
+ * project with two logos and no record of why.
+ */
+import { produceWithPatches } from 'immer';
+import type { TimelineItem } from '@clipwright/project-schema';
+import type { BrandKit, KitApplicationPlan } from '@clipwright/brand-kits';
+import { findKitAppliedItems, kitProvenance } from '@clipwright/brand-kits';
+import { createMediaItem, nextId } from './factory.js';
+import { quantizeUs, type Fps } from './time.js';
+import type { CommandResult, TimelineState } from './commands.js';
+
+/** Where a kit's graphics go when the project has no graphics track yet. */
+const KIT_TRACK_NAME = 'Brand kit';
+
+/** Shape of what `applyBrandKit` needs, kept narrow so the UI can build it from a plan. */
+export interface ApplyBrandKitParams {
+  kit: BrandKit;
+  plan: KitApplicationPlan;
+  /** The composition's size, so a logo can be placed as a fraction of it. */
+  canvas: { widthPx: number; heightPx: number };
+  fps: Fps;
+  /** Which captions the kit's style applies to. Empty means every caption. */
+  captionItemIds?: string[];
+  /** ISO timestamp, injected so the command is deterministic in tests. */
+  appliedAt: string;
+}
+
+/** One item a kit created, so the caller can select or report them. */
+export interface AppliedKitItem {
+  itemId: string;
+  kind: 'logo' | 'watermark';
+}
+
+/**
+ * The transform that puts a placed box where the kit asked.
+ *
+ * The timeline's `transform` is a *fraction of the canvas* plus a scale, not pixels
+ * (`docs/decisions.md` on the anchor): storing pixels would put a logo in the wrong place the
+ * moment the composition's resolution changed. So the placed box is divided back out here, at
+ * the one boundary that knows both the pixels and the canvas.
+ *
+ * `x`/`y` are treated as the *centre* offset from the canvas centre, which is what
+ * `effectiveScale`/`anchor` resolve against; a box is top-left, so half its size is added
+ * back before centring.
+ */
+function transformForBox(
+  box: { x: number; y: number; width: number; height: number },
+  canvas: { widthPx: number; heightPx: number },
+): { x: number; y: number; scaleX: number; scaleY: number } {
+  const centreX = box.x + box.width / 2;
+  const centreY = box.y + box.height / 2;
+  return {
+    // Offset from the frame's centre, as a fraction of the frame — the same convention the
+    // inspector's position rows show as a percentage.
+    x: (centreX - canvas.widthPx / 2) / canvas.widthPx,
+    y: (centreY - canvas.heightPx / 2) / canvas.heightPx,
+    // The item is drawn at its natural size scaled by this; a logo designed to be 12% of the
+    // short side is a 12% scale of the source only if the source is the short side, so the
+    // caller's asset dimensions decide the rest (see `assetScale`).
+    scaleX: 1,
+    scaleY: 1,
+  };
+}
+
+/**
+ * How much an asset must be scaled to fit a placed box.
+ *
+ * Separate from `transformForBox` because it needs the asset's own pixel dimensions, which
+ * the plan deliberately does not carry: a plan is a description of intent ("12% of the short
+ * side"), and the asset's size is a property of the media, not the kit. Returns `1` when
+ * either dimension is unknown, so a project with an unprobed asset still places the logo at
+ * its natural size rather than at `NaN` scale.
+ */
+export function assetScale(
+  asset: { widthPx?: number; heightPx?: number },
+  box: { width: number; height: number },
+): { scaleX: number; scaleY: number } {
+  if (!asset.widthPx || !asset.heightPx) return { scaleX: 1, scaleY: 1 };
+  return { scaleX: box.width / asset.widthPx, scaleY: box.height / asset.heightPx };
+}
+
+/**
+ * Put a kit's graphics tracks and items into the timeline.
+ *
+ * Returns the new state in the same `CommandResult` shape the rest of the engine uses, so
+ * callers do not need a second convention. `applied` lists what was created, and the plan's
+ * own `report` is the caller's business — this command never invents a warning of its own.
+ */
+export function applyBrandKit(
+  state: TimelineState,
+  params: ApplyBrandKitParams,
+): CommandResult & { applied?: AppliedKitItem[]; trackId?: string } {
+  const { kit, plan, canvas, fps, appliedAt } = params;
+
+  const hasGraphics =
+    plan.logo !== undefined || plan.watermark !== undefined || plan.lowerThird !== undefined;
+  const hasCaptions = plan.captionStyleId !== undefined;
+  if (!hasGraphics && !hasCaptions) {
+    /*
+      A plan with nothing to do fails rather than succeeding with no visible effect. "It
+      worked and nothing happened" is the worst outcome for a button that was meant to
+      produce a logo, and the caller has the plan's `report` to show why.
+    */
+    return { ok: false, code: 'invalid', message: 'This kit has nothing to apply here.' };
+  }
+
+  const provenance = kitProvenance(kit.id, appliedAt);
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    /* ---- Captions: assign the style, skipping manual overrides unless the kit asks. ---- */
+    if (plan.captionStyleId !== undefined) {
+      const targets =
+        params.captionItemIds && params.captionItemIds.length > 0
+          ? params.captionItemIds
+          : Object.values(draft.items)
+              .filter((item) => item.type === 'caption')
+              .map((item) => item.id);
+      for (const id of targets) {
+        const item = draft.items[id] as TimelineItem | undefined;
+        if (!item || item.type !== 'caption') continue;
+        const track = draft.tracks.find((candidate) => candidate.id === item.trackId);
+        // A locked track is left alone rather than half-applied: the same rule the property
+        // command follows, so the two cannot disagree about what "locked" means.
+        if (track?.locked) continue;
+        item.captionStyleId = plan.captionStyleId;
+        if (plan.captionOverrides) {
+          item.styleOverrides = { ...(item.styleOverrides ?? {}), ...plan.captionOverrides };
+        }
+      }
+    }
+
+    /* ---- Graphics: one track, created on demand. ---- */
+    const graphics = plan.logo ?? plan.watermark;
+    if (graphics !== undefined) {
+      let track = draft.tracks.find((candidate) => candidate.kind === 'text' && candidate.name === KIT_TRACK_NAME);
+      if (!track) {
+        /*
+          A dedicated track rather than borrowing a title's: the kit's graphics have a
+          provenance and a lifecycle (reapply removes them), and putting them on a track the
+          user also uses for titles would make "remove everything this kit made" a query
+          over somebody else's work.
+        */
+        const topOrder = draft.tracks.reduce((top, candidate) => Math.max(top, candidate.order), -1);
+        track = {
+          id: `trk_kit_${kit.id}`,
+          role: 'graphics',
+          kind: 'text',
+          name: KIT_TRACK_NAME,
+          order: topOrder + 1,
+          hidden: false,
+          locked: false,
+          muted: false,
+          solo: false,
+          heightPx: 48,
+          itemIds: [],
+          auto: false,
+        } as (typeof draft.tracks)[number];
+        draft.tracks.push(track);
+      }
+      const trackId = track.id;
+      if (!track.itemIds) track.itemIds = [];
+
+      const place = (
+        kind: 'logo' | 'watermark',
+        graphic: NonNullable<KitApplicationPlan['logo']>,
+      ): void => {
+        const id = nextId(kind === 'logo' ? 'kitlogo' : 'kitmark');
+        const startUs = quantizeUs(graphic.startUs, fps);
+        const durationUs = Math.max(quantizeUs(graphic.endUs - graphic.startUs, fps), 1);
+        const item = createMediaItem({
+          id,
+          trackId,
+          label: kind === 'logo' ? `${kit.name} logo` : `${kit.name} watermark`,
+          mediaId: graphic.assetId,
+          type: 'image',
+          startUs,
+          durationUs,
+          sourceDurationUs: durationUs,
+        });
+        item.opacity = graphic.opacity;
+        /*
+          Merged into the item's existing transform rather than replacing it: the factory
+          wrote a full default (`rotation`, the anchor, the flips) and assigning a partial
+          object would drop them, silently resetting an anchor that the placement maths
+          depends on.
+        */
+        item.transform = { ...item.transform, ...transformForBox(graphic.box, canvas) };
+        /*
+          The provenance tag is what makes reapply and detach possible at all, and it is on
+          the item rather than in a side table because the item is the thing that survives a
+          save, a duplicate and a copy between projects.
+        */
+        item.aiProvenance = provenance;
+        draft.items[id] = item;
+        const target = draft.tracks.find((candidate) => candidate.id === trackId);
+        if (target && !target.itemIds.includes(id)) {
+          target.itemIds.push(id);
+          target.itemIds.sort((a, b) => {
+            const left = draft.items[a] as TimelineItem | undefined;
+            const right = draft.items[b] as TimelineItem | undefined;
+            return (left?.startUs ?? 0) - (right?.startUs ?? 0);
+          });
+        }
+      };
+
+      if (plan.logo) place('logo', plan.logo);
+      if (plan.watermark) place('watermark', plan.watermark);
+    }
+  });
+
+  const applied: AppliedKitItem[] = Object.values(nextState.items)
+    .filter(
+      (item) =>
+        item.aiProvenance?.tool === 'brand-kit' &&
+        item.aiProvenance.kitId === kit.id &&
+        item.aiProvenance.appliedAt === appliedAt,
+    )
+    .map((item) => ({
+      itemId: item.id,
+      kind: item.label?.includes('watermark') ? 'watermark' : 'logo',
+    }));
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: applied.map((entry) => entry.itemId),
+    notes: [],
+    applied,
+  };
+}
+
+/**
+ * Remove what a previous application of this kit created, then apply the current version.
+ *
+ * The spec's *Reapply*: "remove previously kit-created items and apply the new version". One
+ * undo step covers both halves — an undo that restored the items but not the style would
+ * leave the project in a state the user never created.
+ */
+export function reapplyBrandKit(
+  state: TimelineState,
+  params: ApplyBrandKitParams,
+): CommandResult & { applied?: AppliedKitItem[]; removed?: number } {
+  const previous = findKitAppliedItems(Object.values(state.items), params.kit.id);
+  let cleaned = state;
+  if (previous.length > 0) {
+    const removal = removeKitItems(state, params.kit.id);
+    if (!removal.ok) return removal;
+    cleaned = removal.state;
+  }
+  const result = applyBrandKit(cleaned, params);
+  if (!result.ok) return result;
+  return { ...result, removed: previous.length };
+}
+
+/**
+ * Delete every item a kit created. Ordinary items, ordinary delete — no special case.
+ *
+ * The track is left in place even when it becomes empty: removing it would renumber the
+ * stack, and a project whose tracks move on their own after a button press is worse to use
+ * than one with an empty track the user can delete themselves.
+ */
+export function removeKitItems(state: TimelineState, kitId: string): CommandResult {
+  const doomed = findKitAppliedItems(Object.values(state.items), kitId);
+  if (doomed.length === 0) {
+    return { ok: true, state, patches: [], inverse: [], affectedItemIds: [], notes: [] };
+  }
+  const ids = new Set(doomed.map((item) => item.id));
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of ids) {
+      const item = draft.items[id] as TimelineItem | undefined;
+      if (!item) continue;
+      delete draft.items[id];
+      const track = draft.tracks.find((candidate) => candidate.id === item.trackId);
+      if (track) track.itemIds = track.itemIds.filter((existing) => existing !== id);
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [...ids],
+    notes: [],
+  };
+}
+
+/**
+ * Detach: clear the provenance tag, keeping everything the kit made.
+ *
+ * The spec's *Detach from kit*. After this the items are the user's — a later Reapply will
+ * not remove them, because nothing says they came from the kit. That is a deliberate one-way
+ * door and the UI confirms it, since it is the only kit operation that cannot be undone by
+ * applying the kit again.
+ */
+export function detachKitItems(state: TimelineState, kitId: string): CommandResult {
+  const tagged = findKitAppliedItems(Object.values(state.items), kitId);
+  if (tagged.length === 0) {
+    return { ok: true, state, patches: [], inverse: [], affectedItemIds: [], notes: [] };
+  }
+  const ids = new Set(tagged.map((item) => item.id));
+
+  const [nextState, patches, inverse] = produceWithPatches(state, (draft) => {
+    for (const id of ids) {
+      const item = draft.items[id] as TimelineItem | undefined;
+      if (!item) continue;
+      delete item.aiProvenance;
+    }
+  });
+
+  return {
+    ok: true,
+    state: nextState,
+    patches,
+    inverse,
+    affectedItemIds: [...ids],
+    notes: [],
+  };
+}
