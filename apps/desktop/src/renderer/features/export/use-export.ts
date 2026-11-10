@@ -55,7 +55,12 @@ export function toExportSettings(input: {
     includeAudio: input.panel.includeAudio,
     burnCaptions: input.panel.burnCaptions,
     saveSubtitles: input.panel.saveSubtitles,
-    subtitleFormats: input.panel.saveSubtitles ? ['srt'] : [],
+    /*
+      The panel's choice, not a hardcoded 'srt'. `subtitleFormats` was always on the plan and the
+      export core could always write WebVTT; this line is what made the spec's "SRT / WebVTT"
+      mean SRT only.
+    */
+    subtitleFormats: input.panel.saveSubtitles ? input.panel.subtitleFormats : [],
     embedProjectName: true,
     normaliseLoudness: input.panel.normaliseLoudness,
     targetLufs: input.panel.targetLufs,

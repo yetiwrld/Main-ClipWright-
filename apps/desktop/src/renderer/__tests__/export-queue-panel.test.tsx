@@ -262,6 +262,41 @@ describe('toExportSettings', () => {
     ).toEqual(['srt']);
   });
 
+  it('writes the subtitle formats the user chose, not a hardcoded SRT', () => {
+    /*
+      SPEC 14 §4 asks for "SRT / WebVTT"; the export core can render both and the profile counts
+      the files it expects. `use-export` hardcoded `['srt']`, so a WebVTT file could not be
+      produced by a build that had the code for it — and the panel had no control either, so the
+      request and the ability were both present and unreachable from each other.
+    */
+    const settings = (formats: Array<'srt' | 'vtt'>) =>
+      toExportSettings({
+        projectId: 'p',
+        compositionId: 'c',
+        rangeUs: [0, 1] as [number, number],
+        compositionDurationUs: 1,
+        compositionFps: 30,
+        items: [],
+        panel: { ...DEFAULT_EXPORT_STATE, saveSubtitles: true, subtitleFormats: formats },
+      }).subtitleFormats;
+
+    expect(settings(['vtt'])).toEqual(['vtt']);
+    expect(settings(['srt', 'vtt'])).toEqual(['srt', 'vtt']);
+
+    /* The toggle is what decides *whether*; naming formats with it off still writes nothing. */
+    expect(
+      toExportSettings({
+        projectId: 'p',
+        compositionId: 'c',
+        rangeUs: [0, 1] as [number, number],
+        compositionDurationUs: 1,
+        compositionFps: 30,
+        items: [],
+        panel: { ...DEFAULT_EXPORT_STATE, saveSubtitles: false, subtitleFormats: ['srt', 'vtt'] },
+      }).subtitleFormats,
+    ).toEqual([]);
+  });
+
   it('carries the loudness target through', () => {
     const settings = toExportSettings({
       panel: { ...DEFAULT_EXPORT_STATE, normaliseLoudness: true, targetLufs: -14 },

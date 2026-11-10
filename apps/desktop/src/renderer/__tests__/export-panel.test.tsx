@@ -231,3 +231,45 @@ describe('ExportPanel', () => {
     expect(screen.getByText(/720×1280/)).toBeTruthy();
   });
 });
+
+describe('subtitle formats', () => {
+  function renderPanel(state: ExportPanelState, onChange: (patch: Partial<ExportPanelState>) => void) {
+    render(
+      <ExportPanel state={state} onChange={onChange} onExport={() => {}} onCancel={() => {}} />,
+    );
+  }
+
+  it('offers no format choice until saving subtitle files is on', () => {
+    /* The formats only matter if a file is being written; showing them beside an off toggle
+       invites a user to set something that will be ignored. */
+    renderPanel({ ...DEFAULT_EXPORT_STATE, saveSubtitles: false }, () => {});
+    expect(screen.queryByLabelText('SubRip (.srt)')).toBeNull();
+  });
+
+  it('offers both formats the spec names, with SRT on by default', () => {
+    renderPanel({ ...DEFAULT_EXPORT_STATE, saveSubtitles: true }, () => {});
+    const srt = screen.getByLabelText('SubRip (.srt)') as HTMLInputElement;
+    const vtt = screen.getByLabelText('WebVTT (.vtt)') as HTMLInputElement;
+    expect(srt.checked).toBe(true);
+    expect(vtt.checked).toBe(false);
+  });
+
+  it('adds and removes a format without disturbing the other', () => {
+    const patches: Array<Partial<ExportPanelState>> = [];
+    renderPanel(
+      { ...DEFAULT_EXPORT_STATE, saveSubtitles: true, subtitleFormats: ['srt'] },
+      (patch) => patches.push(patch),
+    );
+    fireEvent.click(screen.getByLabelText('WebVTT (.vtt)'));
+    expect(patches.at(-1)?.subtitleFormats).toEqual(['srt', 'vtt']);
+
+    cleanup();
+    const removals: Array<Partial<ExportPanelState>> = [];
+    renderPanel(
+      { ...DEFAULT_EXPORT_STATE, saveSubtitles: true, subtitleFormats: ['srt', 'vtt'] },
+      (patch) => removals.push(patch),
+    );
+    fireEvent.click(screen.getByLabelText('SubRip (.srt)'));
+    expect(removals.at(-1)?.subtitleFormats).toEqual(['vtt']);
+  });
+});

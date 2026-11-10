@@ -37,6 +37,15 @@ export interface ExportPanelState {
   includeAudio: boolean;
   burnCaptions: boolean;
   saveSubtitles: boolean;
+  /**
+   * Which sidecar files to write when `saveSubtitles` is on (SPEC 14 §4: "SRT / WebVTT").
+   *
+   * Both were always available: the planner carries `subtitleFormats`, the export core can render
+   * either, and the validation step counts the files it expects. Nothing chose between them —
+   * `use-export` hardcoded `['srt']` — so a WebVTT file could not be produced by a build that had
+   * the code for it.
+   */
+  subtitleFormats: Array<'srt' | 'vtt'>;
   normaliseLoudness: boolean;
   targetLufs: number;
 }
@@ -51,6 +60,7 @@ export const DEFAULT_EXPORT_STATE: ExportPanelState = {
   includeAudio: true,
   burnCaptions: true,
   saveSubtitles: false,
+  subtitleFormats: ['srt'],
   normaliseLoudness: false,
   targetLufs: -16,
 };
@@ -206,6 +216,30 @@ export function ExportPanel({
         checked={state.saveSubtitles}
         onChange={(v) => onChange({ saveSubtitles: v })}
       />
+      {state.saveSubtitles && (
+        <div role="group" aria-label="Subtitle file formats" style={{ display: 'flex', gap: 12, paddingLeft: 8 }}>
+          {(['srt', 'vtt'] as const).map((format) => (
+            <label key={format} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              <input
+                type="checkbox"
+                aria-label={format === 'srt' ? 'SubRip (.srt)' : 'WebVTT (.vtt)'}
+                checked={state.subtitleFormats.includes(format)}
+                onChange={(e) =>
+                  onChange({
+                    /* Never empty while the toggle is on: a request to save subtitles that names no
+                       format would write nothing and report success. Unticking the last one turns
+                       the toggle off instead. */
+                    subtitleFormats: e.target.checked
+                      ? [...new Set([...state.subtitleFormats, format])]
+                      : state.subtitleFormats.filter((f) => f !== format),
+                  })
+                }
+              />
+              {format === 'srt' ? 'SubRip (.srt)' : 'WebVTT (.vtt)'}
+            </label>
+          ))}
+        </div>
+      )}
       <ToggleRow
         label="Normalise loudness"
         checked={state.normaliseLoudness}

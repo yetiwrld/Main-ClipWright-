@@ -1966,3 +1966,32 @@ worse than a missing one — the missing one is an honest gap.
 
 `Buffer.alloc(1024)` in the neighbouring test is left alone: it is the corrupt-file case, and 1 KB
 is both cheap and deliberate.
+
+## 56. WebVTT was written, tested and unreachable
+
+SPEC 14 §4 lists *"Also save subtitle file(s) (SRT / WebVTT)"*. The pipeline for both formats was
+complete: `ExportPlan.subtitleFormats` is `('srt' | 'vtt')[]`, `export-service` renders either from
+the same cue list, `validation` counts the sidecars it expects, and `generateVtt` has its own tests
+including a timestamp-format check.
+
+Two lines made that unreachable, one at each end:
+
+- the settings panel had a *Save subtitle files* toggle and no way to choose a format;
+- `use-export` did `subtitleFormats: input.panel.saveSubtitles ? ['srt'] : []`.
+
+So "SRT / WebVTT" meant SRT, and the `.vtt` writer was dead code with tests. Same anatomy as the
+ducking object and the AI channels: the capability was built, the join was missing, and each side's
+tests passed.
+
+**Two decisions the control needed:**
+
+- **The formats appear only when the toggle is on.** A format checkbox next to an off switch invites
+  a user to set something that will be ignored, which is the bug being repaired rather than a
+  layout preference.
+- **Naming formats with the toggle off still writes nothing**, and there is a test for exactly that
+  combination. `subtitleFormats` is what the planner reads; `saveSubtitles` is what decides whether
+  to read it. A patch that reordered the two would write files the user had turned off.
+
+The panel cannot reach an empty selection by clicking — the state keeps whatever was checked, and
+unticking both leaves `[]`, which the export honours. That is deliberate: the toggle is the off
+switch, and having two ways to express "write nothing" only creates a way for them to disagree.

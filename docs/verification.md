@@ -17,7 +17,7 @@ pnpm test:unit
 
 ```
 Test Files  152 passed (152)
-     Tests  3568 passed (3568)
+     Tests  3572 passed (3572)
 ```
 
 | Area | Tests | What they actually check |
@@ -117,7 +117,7 @@ Test Files  152 passed (152)
 | `packages/project-schema` | 24 | Schema validation and migration; and the start screen's settings mapping (§02 §4.3–4.7) — the schema keys the page has to send, the two names storage is called by, a preset's seconds, and the resolution of the two Custom tiles |
 | `packages/design-system` | 24 | Component contracts; the eyedropper's three non-picked outcomes and the recent-colours ordering (newest first, move-not-duplicate, no half-typed colour, re-capped on merge) |
 | `packages/brand-kits` | 109 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, the `.cwbrand` archive written by hand and verified with a real `unzip`, capturing a kit from the current clip by measuring geometry back into percentages, and missing-font substitution that keeps a serif a serif |
-| **Total** | **3568** | 152 files |
+| **Total** | **3572** | 152 files |
 
 ### Tests that run real processes
 
@@ -492,6 +492,20 @@ project set to 16:9 with Karaoke now has to produce a 1920×1080 canvas and capt
 tell "the setting was read" from "the fallback matched". Three mutations bite: the aspect ignored,
 the caption style ignored, and a canonical ratio that misses the canvas lookup and silently lands
 on 9:16.
+
+### Subtitles the spec asked for and the code hardcoded away
+
+SPEC 14 §4 asks for *"Also save subtitle file(s) (SRT / WebVTT)"*. Everything downstream of the
+choice existed and was tested: the planner carries `subtitleFormats`, `export-service` renders
+either format from the same cues, and validation counts the files it expects. Two things were
+missing, one at each end — the panel had no control, and `use-export` hardcoded `['srt']`. A build
+with a complete WebVTT writer could not produce a `.vtt`.
+
+The panel now shows the two formats when *Save subtitle files* is on (and only then — a format
+choice beside an off toggle invites a setting that will be ignored), and the request carries
+whatever was chosen. Four panel tests and one on the request: the choice reaches the plan, both
+formats can be requested together, removing one leaves the other, and naming formats with the
+toggle off still writes nothing. Five mutations bite, including the original hardcoded `['srt']`.
 
 ---
 
