@@ -1070,3 +1070,23 @@ refused — a font is still worth carrying.
 and carry on. A `.cwbrand` that refuses to be created because one logo vanished is worse than
 one that says which file is absent, and a kit whose logo is missing can still be opened, edited
 and applied.
+
+## 37. A test that needs a tool says so, and skips with a reason
+
+**`unzip` is not assumed; it is checked.** The archive's central tests open the file with a
+real implementation, because a writer and reader that agree only with each other ship an
+unreadable file that round-trips perfectly. But CI runs on Windows, where `unzip` ships with
+Git and `zip` does not exist — and the first version of this suite failed a green branch with
+`spawnSync zip ENOENT`. That is an environment difference, not a defect, and a test that fails
+for one gets deleted by the next person who hits it, taking the coverage with it.
+
+**So each binary-dependent test names its tool and skips without it** (`it.skipIf(!HAS_UNZIP)`),
+and the deflated-read path — the one thing only a foreign archive can prove — is built in code
+from Node's `zlib` plus raw zip headers instead of by running `zip`. That keeps the compressed
+path covered on every platform, leaves the third-implementation check running where it can, and
+makes the skip honest: 6 tests skip on a machine with neither tool, and the reason is written
+next to them rather than inferred from a build log.
+
+**A fixture should not share code with the thing under test.** `buildDeflatedArchive` duplicates
+the header writing on purpose. The overlap is a dozen lines; the alternative is a reader tested
+only against the writer's own bugs, which is the failure this whole file exists to avoid.

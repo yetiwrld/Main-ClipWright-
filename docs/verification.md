@@ -17,7 +17,7 @@ pnpm test:unit
 
 ```
 Test Files  125 passed (125)
-     Tests  3105 passed (3105)
+     Tests  3106 passed (3106)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,8 +116,8 @@ Test Files  125 passed (125)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 70 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, and the `.cwbrand` archive written by hand and verified with a real `unzip` |
-| **Total** | **3105** | 125 files |
+| `packages/brand-kits` | 71 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, safe-area-aware placement pinned to `assets/safe-areas.json`, and the `.cwbrand` archive written by hand and verified with a real `unzip` |
+| **Total** | **3106** | 125 files |
 
 ### Tests that run real processes
 
@@ -805,6 +805,15 @@ caller gets `missingAssets`; on import the same list is computed by matching the
 a kit whose logo went missing can still be opened, edited and applied. A kit imported from a
 clean workspace — nothing left on disk to be found by accident — compares equal to the original,
 with assets attached.
+
+**Those tests say which tool they need, and skip with a reason when it is absent.** CI runs on
+Windows, where `unzip` exists (it ships with Git) and `zip` does not. The first version of this
+file assumed both and failed a build with `spawnSync zip ENOENT` — an environment difference,
+not a defect, and a test that fails for one is a test that will be deleted by whoever hits it
+next. Each binary-dependent test now declares its tool and skips without it; the deflated-read
+path moved to a fixture built from Node's `zlib` and raw headers, so **the compressed path is
+covered on every platform** while the third-implementation check runs where `zip` exists.
+Verified both ways: 21 tests run with the tools present, 6 skip without them.
 
 **Mutations.** 11, all bite: the final CRC inversion, the table index, the central-directory
 offset, a zeroed compressed size, the duplicate and unsafe-path guards, deflated reads, the

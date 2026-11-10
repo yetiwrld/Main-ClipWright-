@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +38,27 @@ afterAll(() => rmSync(temporary, { recursive: true, force: true }));
 
 const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
+/**
+ * Whether a real zip tool is on this machine.
+ *
+ * The archive is an interchange format, so the tests that matter most use something that is
+ * not this package. `unzip` ships with the Git installation CI runs under and with every
+ * desktop Linux and macOS, but `zip` does not exist on the Windows runner — so each test that
+ * needs one says which, and skips with a reason instead of failing a build for an environment
+ * difference. The deflated-read test uses Node's own `zlib` instead, so the compressed path is
+ * covered everywhere.
+ */
+function hasBinary(name: string): boolean {
+  try {
+    execFileSync(name, ['-v'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const HAS_UNZIP = hasBinary('unzip');
+const HAS_ZIP = hasBinary('zip');
+
 function kit(overrides: Partial<BrandKit> = {}): BrandKit {
   return {
     format: CwbrandFormat,
@@ -55,6 +77,71 @@ function kit(overrides: Partial<BrandKit> = {}): BrandKit {
     safeAreaPreset: 'none',
     ...overrides,
   } as BrandKit;
+}
+
+/**
+ * A minimal deflated zip, written independently of `writeArchive`.
+ *
+ * Deliberately not shared with the code under test: a fixture built by the writer would prove
+ * only that the reader agrees with it. The only borrowed implementation here is `zlib`'s
+ * deflate.
+ */
+function buildDeflatedArchive(files: Array<[string, Uint8Array]>): Uint8Array {
+  const local: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+  for (const [name, data] of files) {
+    const nameBytes = new TextEncoder().encode(name);
+    const packed = new Uint8Array(deflateRawSync(data));
+    const checksum = crc32(data);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(localHeader.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 8, true); // deflate
+    lv.setUint32(14, checksum, true);
+    lv.setUint32(18, packed.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    localHeader.set(nameBytes, 30);
+    local.push(localHeader, packed);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(centralHeader.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 8, true);
+    cv.setUint32(16, checksum, true);
+    cv.setUint32(20, packed.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+    central.push(centralHeader);
+
+    offset += localHeader.length + packed.length;
+  }
+  const centralSize = central.reduce((total, part) => total + part.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+
+  const all = [...local, ...central, end];
+  const out = new Uint8Array(all.reduce((total, part) => total + part.length, 0));
+  let cursor = 0;
+  for (const part of all) {
+    out.set(part, cursor);
+    cursor += part.length;
+  }
+  return out;
 }
 
 /** Write bytes to a temp `.cwbrand` and list what a real `unzip` sees. */
@@ -80,7 +167,7 @@ describe('crc32', () => {
 });
 
 describe('writeArchive', () => {
-  it('writes an archive a real unzip can list', () => {
+  it.skipIf(!HAS_UNZIP)('writes an archive a real unzip can list', () => {
     /*
       The claim that matters: not "our reader reads it", but "the file is a zip". `unzip -Z1`
       reads the central directory so a wrong offset, size or signature fails here rather than
@@ -93,7 +180,7 @@ describe('writeArchive', () => {
     expect(unzipList(bytes)).toEqual(['kit.json', 'logo-1.png']);
   });
 
-  it('writes bytes a real unzip can extract intact', () => {
+  it.skipIf(!HAS_UNZIP)('writes bytes a real unzip can extract intact', () => {
     // Listing only reads the directory; extraction reads the data and verifies the CRC. Both
     // checks are needed, because a directory can be perfect while every payload is garbage.
     const target = mkdtempSync(join(temporary, 'extract-'));
@@ -111,7 +198,7 @@ describe('writeArchive', () => {
     expect(new Uint8Array(readFileSync(join(target, 'mark-1.png')))).toEqual(PNG);
   });
 
-  it('fails its own integrity check when a byte is flipped', () => {
+  it.skipIf(!HAS_UNZIP)('fails its own integrity check when a byte is flipped', () => {
     // `unzip -t` verifies CRCs; this proves the archive carries a correct one rather than a
     // zero that a reader would have to ignore.
     const bytes = writeArchive([{ name: 'kit.json', data: new TextEncoder().encode('{"a":1}') }]);
@@ -139,20 +226,29 @@ describe('writeArchive', () => {
 });
 
 describe('readArchive', () => {
-  it('round-trips an archive through a real zip, not just its own writer', async () => {
+  it('reads a deflated archive, which this writer never produces', async () => {
     /*
-      A deflated archive made by `zip` — the deflated path this writer never produces and the
-      reader must still accept, because a kit may have been exported by another tool.
+      The compressed path: a kit exported by another tool. The deflate stream comes from
+      Node's `zlib` — a real implementation, not ours — and the headers are built here so the
+      fixture is independent of `writeArchive`'s. Built in code rather than by running `zip`,
+      which does not exist on the Windows runner.
     */
-    const source = mkdtempSync(join(temporary, 'deflated-'));
+    const parsed = await readArchive(buildDeflatedArchive([
+      ['kit.json', new TextEncoder().encode('{"format":"cwbrand","formatVersion":1}')],
+      ['logo-1.png', PNG],
+    ]));
+    expect(text(parsed.kitJson)).toContain('cwbrand');
+    expect(parsed.assets.get('logo-1.png')).toEqual(PNG);
+  });
+
+  it.skipIf(!HAS_ZIP)('reads an archive made by the zip program itself', async () => {
+    // The same claim against a third implementation, on the platforms that have one.
+    const source = mkdtempSync(join(temporary, 'zipped-'));
     writeFileSync(join(source, 'kit.json'), '{"format":"cwbrand","formatVersion":1}');
     writeFileSync(join(source, 'logo-1.png'), PNG);
-    execFileSync('zip', ['-q', '-r', join(source, 'kit.cwbrand'), 'kit.json', 'logo-1.png'], {
-      cwd: source,
-    });
+    execFileSync('zip', ['-q', '-r', 'kit.cwbrand', 'kit.json', 'logo-1.png'], { cwd: source });
 
     const parsed = await readArchive(new Uint8Array(readFileSync(join(source, 'kit.cwbrand'))));
-    expect(text(parsed.kitJson)).toContain('cwbrand');
     expect(parsed.assets.get('logo-1.png')).toEqual(PNG);
   });
 
@@ -239,7 +335,7 @@ describe('writeBrandKitArchive and readBrandKitArchive', () => {
     expect(imported.assets.get('music-1.jpg')).toEqual(JPG);
   });
 
-  it('writes an archive a real unzip can list, with kit.json first', async () => {
+  it.skipIf(!HAS_UNZIP)('writes an archive a real unzip can list, with kit.json first', async () => {
     const written = await writeBrandKitArchive(fullKit(), { fetchAsset });
     const listing = unzipList(written.bytes, 'full.cwbrand');
     expect(listing[0]).toBe('kit.json');
@@ -291,7 +387,7 @@ describe('writeBrandKitArchive and readBrandKitArchive', () => {
     await expect(readBrandKitArchive(bytes)).rejects.toThrow(/not valid JSON/);
   });
 
-  it('names an asset file after its id so the archive can be opened by hand', async () => {
+  it.skipIf(!HAS_UNZIP)('names an asset file after its id so the archive can be opened by hand', async () => {
     // The kit's JSON names `logo-1`; the archive holds `logo-1.png`. A user unzipping the file
     // sees a PNG they can look at, and the reader finds it by prefix.
     const written = await writeBrandKitArchive(
