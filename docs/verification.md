@@ -522,6 +522,20 @@ preview/export-parity campaign; the new one asserts the aspect reaches the bridg
 §9's formats do, that the default applies only when no aspect is supplied, and that a `.vtt` is not
 saved as `.srt`. Four mutations bite, the original hardcoded value among them.
 
+### "Show in folder", the action with no channel
+
+The project menu shipped with five of SPEC 03 §10's six actions; **Show in folder** was absent
+because no IPC channel existed for it — `shell.showItemInFolder` was wired for export output only.
+The store has published `getProjectDir` all along, because it is what creates and deletes the same
+directory, so this was one handler, one bridge entry and one menu item rather than a design
+question.
+
+The path is asked for, not assembled: `workspace:revealProject` calls `getProjectDir`, so a change
+to the project layout moves one function. A test asserts the renderer passes only the project id and
+that the menu closes before the OS takes focus. Two mutations bite — the entry removed, and the id
+replaced with an empty string — and the channel-coverage test above would catch the handler being
+dropped again.
+
 ---
 
 ## 4. Updates (SPEC 15)
