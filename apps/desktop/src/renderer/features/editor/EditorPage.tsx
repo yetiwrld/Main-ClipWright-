@@ -516,6 +516,7 @@ export function EditorPage({
         fps={timeline.fps}
         workAreaUs={state?.workArea ? [state.workArea.inUs, state.workArea.outUs] : null}
         durationUs={state ? projectDurationUs(state) : 0}
+        canvas={state ? { width: state.canvas.width, height: state.canvas.height } : undefined}
         captionStyles={captionStyles.styles}
       />
 

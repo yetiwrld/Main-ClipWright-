@@ -2130,3 +2130,37 @@ at.
 
 The fallbacks kept the old literals for projects created before these keys existed, so an old
 project imports exactly as it always did. That is deliberate: this is a repair, not a migration.
+
+## 61. The export panel started from a constant, not from the composition
+
+`ExportDialog` seeded its panel from `DEFAULT_EXPORT_STATE`, which fixes the aspect ratio at 9:16.
+The panel's aspect is not a preference — it decides the **output frame**. So a 16:9 composition
+exported without anyone touching the control produced a portrait file: the thing the user built and
+the thing they got disagreed, and neither side said anything.
+
+This is §57 and §60 a third time, and by now the shape is unmistakable: **a value exists as data,
+and a constant is passed in its place.** Here it was worse than a literal at a call site, because
+the constant was a shared default object — an honest-looking `DEFAULT_EXPORT_STATE` — and the
+dialog's state was initialised from it once, so nothing downstream could tell a deliberate default
+from a substituted one.
+
+The composition's canvas was in scope the whole time. The fix reads it: `aspectFromCanvas` snaps to
+the nearest ratio in `ASPECT_RATIOS` by *value* (9:16 and 16:9 are both "portrait or landscape", and
+a 4:3 snapped by orientation lands in 16:9), and `presetForShortSide` reads the resolution preset off
+the shortest side, because a preset names its short edge — 1080×1920 and 1920×1080 are both 1080p,
+and reading the width would call every portrait canvas 1080p and every landscape one 1080p too.
+
+**The test found a second bug.** `getByLabelText('Aspect ratio')` threw before it could assert
+anything: the panel's `Field` rendered a `<label>` with no `htmlFor` wrapping nothing, so all six
+selects were unnamed to assistive technology. The toggles immediately below were correct — they wrap
+their input — which is why the markup had looked fine for so long: it sat next to a working example
+of the same pattern. `Field` now derives an id from `useId` and clones it onto its child.
+
+`useId` rather than an id from the label text, because one of these labels reads
+"Audio bitrate: 192 kbps" and changes as you use it; a text-derived id would break its own
+association on the first change. There is a test for that specifically.
+
+**Note on the fallback.** With no composition the dialog keeps 9:16 — the documented default, and
+the app's default project shape. Hiding the control until a timeline exists would be worse; a
+default that is visible and wrong for a given project is a control the user can fix, and a control
+that is absent is not.

@@ -15,6 +15,8 @@ export {
   parseAspect,
   computeResolution,
   resolutionForPreset,
+  aspectFromCanvas,
+  presetForShortSide,
 } from './presets.js';
 export type {
   ExportPresetId,

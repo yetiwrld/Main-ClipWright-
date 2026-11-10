@@ -379,3 +379,114 @@ describe('collectExportItems — what the plan carries', () => {
     });
   });
 });
+
+describe('the export panel starts from the composition it is exporting', () => {
+  /*
+    SPEC 14 §3. The panel's aspect decides the *output frame*, and it used to start at a constant
+    9:16 whatever the composition was — so exporting a 16:9 project from a panel nobody adjusted
+    produced a portrait file. The composition's canvas is the truth, and the dialog already had the
+    timeline state.
+  */
+  function renderWithCanvas(canvas?: { width: number; height: number }) {
+    bridge.desktop = false;
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+        canvas={canvas}
+      />,
+    );
+  }
+
+  it('reads the aspect off a landscape canvas', () => {
+    renderWithCanvas({ width: 1920, height: 1080 });
+    expect((screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value).toBe('16:9');
+  });
+
+  it('keeps 9:16 for a portrait canvas, which is the app’s default project', () => {
+    renderWithCanvas({ width: 1080, height: 1920 });
+    expect((screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value).toBe('9:16');
+  });
+
+  it('takes the resolution preset from the short side', () => {
+    /* 1080×1920 and 1920×1080 are both 1080p; a 720-short-side canvas is 720p. */
+    renderWithCanvas({ width: 1280, height: 720 });
+    expect((screen.getByLabelText('Resolution') as HTMLSelectElement).value).toBe('720p');
+  });
+
+  it('falls back to the documented default when there is no composition yet', () => {
+    /* The dialog is also rendered before a timeline exists; hiding the control would be worse. */
+    renderWithCanvas(undefined);
+    expect((screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value).toBe('9:16');
+  });
+
+  it('still lets the user change it — the canvas is a starting point, not a lock', () => {
+    renderWithCanvas({ width: 1920, height: 1080 });
+    const select = screen.getByLabelText('Aspect ratio') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '1:1' } });
+    expect((screen.getByLabelText('Aspect ratio') as HTMLSelectElement).value).toBe('1:1');
+  });
+});
+
+describe('every export control is named for assistive technology', () => {
+  /*
+    The panel's `Field` rendered a `<label>` with no `htmlFor` that wrapped nothing, so all six
+    selects reached a screen reader as "combobox, combobox, …". The toggles were fine — they wrap
+    their input — which is exactly why this went unnoticed: the pattern looked correct next to a
+    working one.
+
+    Asserted through `getByLabelText`, which only resolves a label that is actually associated with a
+    control. A test that queried by the label *text* would pass against the broken markup.
+  */
+  it('associates each select with its label', () => {
+    bridge.desktop = false;
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+      />,
+    );
+    for (const label of ['Resolution', 'Aspect ratio', 'Frame rate', 'Format', 'Quality']) {
+      expect(screen.getByLabelText(label).tagName).toBe('SELECT');
+    }
+    /* The bitrate label carries its value, so it is matched by prefix. */
+    expect(screen.getByLabelText(/^Audio bitrate/).tagName).toBe('SELECT');
+  });
+
+  it('gives the bitrate select a stable id as its value changes', () => {
+    /*
+      An id derived from the label text would break the association every time the value changed —
+      the label reads "Audio bitrate: 192 kbps" — which is a trap a `Field` keyed on its own text
+      walks straight into.
+    */
+    bridge.desktop = false;
+    render(
+      <ExportDialog
+        open
+        onClose={() => {}}
+        projectId="proj-1"
+        compositionId="comp-1"
+        compositionName="Clip"
+        state={makeState()}
+        fps={30}
+        durationUs={5_000_000}
+      />,
+    );
+    const before = screen.getByLabelText(/^Audio bitrate/).id;
+    fireEvent.change(screen.getByLabelText(/^Audio bitrate/), { target: { value: '256' } });
+    expect(screen.getByLabelText(/^Audio bitrate/).id).toBe(before);
+    expect(screen.getByLabelText('Audio bitrate: 256 kbps')).toBeTruthy();
+  });
+});

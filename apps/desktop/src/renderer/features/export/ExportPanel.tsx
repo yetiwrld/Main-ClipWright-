@@ -6,7 +6,7 @@
  * quality, audio, captions, and output location.
  */
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
   BUILT_IN_QUICK_PRESETS,
   EXPORT_PRESETS,
@@ -327,11 +327,26 @@ function QuickPresetButton({ preset, onApply }: { preset: QuickPreset; onApply: 
   );
 }
 
+/**
+ * A labelled row.
+ *
+ * The `<label>` here carried no `htmlFor` and wrapped nothing, so every control in the export panel
+ * reached assistive technology unnamed — six selects and the toggles below them. A sighted user
+ * reads the text beside the control; a screen reader announced "combobox" six times.
+ *
+ * The id comes from `useId`, not from the label text: "Audio bitrate: 192 kbps" changes with the
+ * value, and an id derived from it would break the association on every change.
+ */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = useId();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>{label}</label>
-      {children}
+      <label htmlFor={id} style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+        {label}
+      </label>
+      {React.isValidElement(children)
+        ? React.cloneElement(children as React.ReactElement<{ id?: string }>, { id })
+        : children}
     </div>
   );
 }

@@ -7,6 +7,9 @@ import {
   EXPORT_PRESETS,
   QUALITY_PRESETS,
   OUTPUT_FORMATS,
+  ASPECT_RATIOS,
+  aspectFromCanvas,
+  presetForShortSide,
 } from '../presets.js';
 
 describe('roundEven', () => {
@@ -155,5 +158,67 @@ describe('presets', () => {
     expect(mp4.audioCodec).toBe('aac');
     expect(webm.videoCodec).toBe('vp9');
     expect(webm.audioCodec).toBe('opus');
+  });
+});
+
+describe('aspectFromCanvas', () => {
+  /*
+    The export dialog's aspect decides the output frame. It used to start from a constant 9:16
+    whatever the composition was, so a 16:9 project exported a portrait file unless the user noticed
+    the control — the composition they built and the file they got disagreed, and neither side
+    complained.
+  */
+  it('reads a landscape canvas as 16:9 and a portrait one as 9:16', () => {
+    expect(aspectFromCanvas(1920, 1080)).toBe('16:9');
+    expect(aspectFromCanvas(1080, 1920)).toBe('9:16');
+  });
+
+  it('does not confuse square, 4:5, 4:3 and 21:9', () => {
+    /* Every ratio in the list must round-trip; a classifier that only knows portrait from
+       landscape would put 4:3 into 16:9 and 1:1 into 4:5. */
+    expect(aspectFromCanvas(1080, 1080)).toBe('1:1');
+    expect(aspectFromCanvas(1080, 1350)).toBe('4:5');
+    expect(aspectFromCanvas(1440, 1080)).toBe('4:3');
+    expect(aspectFromCanvas(2560, 1080)).toBe('21:9');
+  });
+
+  it('round-trips every ratio in ASPECT_RATIOS at 1080 on the short side', () => {
+    for (const ratio of ASPECT_RATIOS) {
+      const { width, height } = resolutionForPreset('1080p', ratio);
+      expect(aspectFromCanvas(width, height)).toBe(ratio);
+    }
+  });
+
+  it('snaps a custom canvas to the nearest ratio rather than failing', () => {
+    /* A 2:1 canvas is nearest 16:9 (1.78 against 2.0) — closer than 21:9 at 2.33. */
+    expect(aspectFromCanvas(2000, 1000)).toBe('16:9');
+  });
+
+  it('falls back for a degenerate canvas instead of dividing by zero', () => {
+    expect(aspectFromCanvas(0, 1080)).toBe('9:16');
+    expect(aspectFromCanvas(1920, 0)).toBe('9:16');
+  });
+});
+
+describe('presetForShortSide', () => {
+  /*
+    A resolution preset names its *short* side, so a 1080×1920 portrait canvas and a 1920×1080 one
+    are both 1080p. Reading the width instead would call every portrait composition 1080p and every
+    landscape one 1080p too — and a 1080-wide portrait canvas 720p.
+  */
+  it('names the preset by the short side, not the width', () => {
+    expect(presetForShortSide(1080)).toBe('1080p');
+    expect(presetForShortSide(720)).toBe('720p');
+    expect(presetForShortSide(2160)).toBe('4k-uhd');
+  });
+
+  it('snaps an in-between canvas to the nearest preset', () => {
+    expect(presetForShortSide(1000)).toBe('1080p');
+    expect(presetForShortSide(800)).toBe('720p');
+  });
+
+  it('falls back rather than throwing on a degenerate canvas', () => {
+    expect(presetForShortSide(0)).toBe('1080p');
+    expect(presetForShortSide(Number.NaN)).toBe('1080p');
   });
 });

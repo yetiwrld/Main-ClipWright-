@@ -73,6 +73,63 @@ export function resolutionForPreset(
   return computeResolution(preset.shortSide, aspect);
 }
 
+/**
+ * Which of `ASPECT_RATIOS` a canvas is, or the nearest one.
+ *
+ * The export dialog starts from defaults, and its aspect decides the *output frame*. A dialog that
+ * always starts at 9:16 exports a 16:9 composition letterboxed into a portrait file unless the user
+ * notices the control — the composition they built and the file they got disagree, and neither side
+ * complains.
+ *
+ * The canvas is the composition's own truth (SPEC 07 §9.1: canvas from the project's aspect ratio),
+ * so the nearest ratio is the right starting point. Matching is by value, not by orientation: 9:16
+ * and 16:9 are both "portrait" or "landscape" and telling them apart only by that would put a 4:3
+ * composition into 16:9.
+ *
+ * Ties go to the earlier entry in `ASPECT_RATIOS`, which is stable and documented rather than
+ * dependent on floating-point luck.
+ */
+export function aspectFromCanvas(width: number, height: number): AspectRatio {
+  if (!(width > 0) || !(height > 0)) return '9:16';
+  const target = width / height;
+  let best: AspectRatio = ASPECT_RATIOS[0];
+  let bestDistance = Infinity;
+  for (const candidate of ASPECT_RATIOS) {
+    const [w, h] = candidate.split(':').map(Number);
+    const distance = Math.abs(w / h - target);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
+ * The nearest resolution preset for a canvas's shortest side.
+ *
+ * The preset names a short side (720p is 720 on the short edge), which is why the *shortest* side is
+ * the input rather than the width: a 1080×1920 portrait canvas and a 1920×1080 one are both 1080p.
+ * Nearest rather than exact, because a canvas can be any size — a custom aspect at 900×1600 should
+ * offer 720p or 1080p rather than nothing.
+ *
+ * Ties go to the smaller preset: exporting a canvas one pixel over 1080 at 1440 would upscale it,
+ * and quietly upscaling is the least useful thing an export control can do.
+ */
+export function presetForShortSide(shortSide: number): ExportPresetId {
+  if (!(shortSide > 0)) return '1080p';
+  let best: ExportPresetId = EXPORT_PRESETS[0].id;
+  let bestDistance = Infinity;
+  for (const preset of EXPORT_PRESETS) {
+    const distance = Math.abs(preset.shortSide - shortSide);
+    if (distance < bestDistance) {
+      best = preset.id;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** Quality presets mapping to encoder settings. */
 export const QUALITY_PRESETS = [
   { id: 'draft', label: 'Draft', x264Crf: 26, x264Preset: 'veryfast', vp9Crf: 38 },

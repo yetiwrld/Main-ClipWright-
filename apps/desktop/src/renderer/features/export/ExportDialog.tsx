@@ -13,6 +13,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Dialog } from '@clipwright/design-system';
 import type { TimelineState } from '@clipwright/timeline-engine';
 import type { CaptionStyle } from '@clipwright/caption-styles';
+import { aspectFromCanvas, presetForShortSide } from '@clipwright/export-core';
 import type { ExportJobPayload } from '../../global.js';
 import { isDesktop } from '../../api.js';
 import { DEFAULT_EXPORT_STATE, ExportPanel, type ExportPanelState } from './ExportPanel.js';
@@ -32,6 +33,15 @@ export interface ExportDialogProps {
   workAreaUs?: [number, number] | null;
   /** Duration of the whole composition. */
   durationUs: number;
+  /**
+   * The composition's canvas. The export panel starts from defaults, and its aspect decides the
+   * output frame — a 16:9 composition exported from a panel that started at 9:16 produces a
+   * portrait file unless the user notices. The canvas is the composition's own truth.
+   *
+   * Optional because the dialog is also rendered from places that have no composition yet; without
+   * it the panel keeps its documented default.
+   */
+  canvas?: { width: number; height: number };
   /**
    * Project-local caption styles. Without these a burn-in falls back to the preset
    * each caption's style started from, silently ignoring every edit made in the
@@ -53,9 +63,20 @@ export function ExportDialog({
   fps,
   workAreaUs,
   durationUs,
+  canvas,
   captionStyles,
 }: ExportDialogProps) {
-  const [panel, setPanel] = useState<ExportPanelState>(DEFAULT_EXPORT_STATE);
+  const [panel, setPanel] = useState<ExportPanelState>(() =>
+    canvas
+      ? {
+          ...DEFAULT_EXPORT_STATE,
+          aspect: aspectFromCanvas(canvas.width, canvas.height),
+          /* The shortest side is what a resolution preset means, so a 1080p portrait canvas and a
+             1080p landscape one want the same preset id. */
+          preset: presetForShortSide(Math.min(canvas.width, canvas.height)),
+        }
+      : DEFAULT_EXPORT_STATE,
+  );
   const [rangeChoice, setRangeChoice] = useState<RangeChoice>(workAreaUs ? 'work-area' : 'whole');
   const [message, setMessage] = useState('');
   const [detailsFor, setDetailsFor] = useState<ExportJobPayload | null>(null);
