@@ -1007,3 +1007,33 @@ inserted — which is precisely what the intro just did.
 so a caller that can build a composition from a template has what it needs. The command cannot,
 and returns `invalid` with a sentence rather than placing a media-less clip that would draw
 nothing and be selectable — the failure mode the rest of this feature exists to avoid.
+
+## 35. Safe areas move corner graphics additively, and never `custom` placements
+
+**The inset is added to the margin rather than replacing it.** `margin` is the user's own
+distance from the edge; the platform band is where its chrome begins. Honouring one alone
+gives the wrong answer at both extremes — flush against the safe area, or under the buttons —
+and the sum is the only position that satisfies both. The box's size is still subtracted
+afterwards, so it is the box that ends up inside the band, not its top-left corner.
+
+**Only corners move.** `custom` is a point the user dragged to; the two axes are fractions of
+the frame, not distances from an edge, and the whole reason `custom` is resolved differently
+from a corner is that it means a different intention. Moving it because a preset was set
+would be overriding the one placement in the schema that is unambiguously deliberate.
+
+**Landscape gets no bands at all.** The numbers describe vertical chrome. A 16:9 frame has no
+top header and no right-hand action column, so applying them would move a correct logo for no
+reason. `safeAreaBandsFor` returns `undefined` rather than zeroes, so a caller cannot
+accidentally treat "none" as a set of real numbers.
+
+**The bands are copied into the package and pinned by a test.** Importing
+`assets/safe-areas.json` would make a pure geometry package depend on the app's bundle, and it
+would couple a *guide* — tuned for legibility, changed without a release — to the placement of
+every logo a user has ever applied. A copy is the honest structure; the test that reads the JSON
+and compares each number is what stops the copy rotting.
+
+**Mutations are not a pass/fail score.** Seven were run here; six bite and one is an
+*equivalent mutant* (the `none` guard is unreachable because the record has no `none` key).
+Both outcomes were recorded. A suite that reported "7/7 killed" would have needed a contrived
+test for the equivalent one, and a suite that reported "6/7" without saying why would look
+weaker than it is.

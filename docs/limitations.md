@@ -475,7 +475,10 @@ context menus, in-editor import, the fill lock).
     `brandKits: string[]` and the `BrandKits/` directory are still empty placeholders until
     the UI lands. Two parts of the spec remain unimplemented in the commands themselves:
     the missing-font substitution flag, since the caption style is assigned by id and
-    resolution happens elsewhere. Intro and outro *planning and insertion* are built — a
+    resolution happens elsewhere. Safe-area-aware placement **is** built — a kit's preset
+    moves its corner graphics out of the platform's chrome, and the numbers are pinned to
+    `assets/safe-areas.json` — but there is no picker for it yet, and the overlay the preview
+    draws is still independent of what the kit does. Intro and outro *planning and insertion* are built — a
     clip's own duration is inserted at the start and every unlocked track ripples, or at the
     end with nothing moving — but an intro that is a **composition template** is planned and
     then refused by the insert command: building a composition from a template is a separate

@@ -71,7 +71,9 @@ format, the placement maths and the application plan live in `packages/brand-kit
 tests), and the commands that apply, reapply, remove, detach and insert an intro or
 outro live in `packages/timeline-engine` (26 tests). An intro is an *insert*, not a
 placement: the project grows by its length and every unlocked track ripples, so the user's
-cuts stay where they were against the picture. Applying a kit produces ordinary items tagged
+cuts stay where they were against the picture. Safe-area presets move a kit's corner
+graphics out of the platform's chrome, with the numbers pinned to `assets/safe-areas.json` by a
+test. Applying a kit produces ordinary items tagged
 `aiProvenance: {tool: 'brand-kit'}`, which is what makes "delete the kit, keep its work" a
 property of the design rather than a promise. What is missing is the list, the editor, the
 buttons and the `.cwbrand` zip. Three entries left this list

@@ -17,7 +17,7 @@ pnpm test:unit
 
 ```
 Test Files  124 passed (124)
-     Tests  3078 passed (3078)
+     Tests  3085 passed (3085)
 ```
 
 | Area | Tests | What they actually check |
@@ -116,8 +116,8 @@ Test Files  124 passed (124)
 | `packages/media-core` | 11 | Probing, peaks, path resolution |
 | `packages/project-schema` | 11 | Schema validation and migration |
 | `packages/design-system` | 4 | Component contracts |
-| `packages/brand-kits` | 43 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, and the intro/outro plan with its wrong-aspect warning |
-| **Total** | **3078** | 124 files |
+| `packages/brand-kits` | 50 | The `.cwbrand` schema, import/export with unknown-field preservation, placement resolution across aspect ratios, what applying a kit reports, the intro/outro plan with its wrong-aspect warning, and safe-area-aware placement pinned to `assets/safe-areas.json` |
+| **Total** | **3085** | 124 files |
 
 ### Tests that run real processes
 
@@ -743,6 +743,39 @@ intro's start by one *frame* was detected, while the microsecond value I tried f
 because a 30 fps quantize rounds 33 µs to zero, making it an equivalent mutant, not a survivor.
 That is worth recording: a mutation surviving is a question about whether the mutant is
 *observable*, not only about whether the test suite is good.
+
+### Brand kits: the logo stays out from under the buttons
+
+**The safe-area preset moves corner graphics, and only corner graphics.** A bottom-right logo
+on a vertical video sits exactly where TikTok's scrub bar and caption live. With a preset set,
+the bottom corners move up by the bottom band and in by the action column, the top corners move
+down by the top band, and `custom` placements are untouched — a point the user dragged to is a
+considered position, not a margin, and moving it would be overriding them.
+
+**The insets are added to the user's margin, not swapped for it.** The margin is their
+distance from the edge; the band is where the platform's chrome begins. A logo respecting only
+the safe area touches its boundary, one respecting only the margin sits under the buttons, and
+the sum is the only position that satisfies both — with the box's own size still subtracted, so
+the *box* is inside rather than its top-left corner.
+
+**Landscape is left alone.** The numbers describe vertical chrome, and applying them to 16:9
+would move a correctly placed logo for no reason — there is no top header or right-hand action
+column in a landscape frame. `none`, the schema default, behaves exactly as it did before the
+feature existed, which is what keeps a kit placed last year from moving on its next apply.
+
+**The bands are duplicated on purpose, and pinned.** `assets/safe-areas.json` is the source of
+truth for the *guides* the preview draws; this package carries a copy so it stays usable without
+a bundled JSON file, and a test reads the JSON and compares every number. A guide tuned without
+moving the copy — or the reverse — fails there rather than producing a logo outside the
+rectangle the user was shown.
+
+**Mutations.** 7 on this logic, 6 bite. The first run found a real hole: swapping the bottom
+inset for the top one in the bottom-left corner passed every test, because only bottom-right was
+covered; testing both bottom corners kills it. The survivor is an **equivalent mutant** — the
+`preset === 'none'` guard can be deleted because the band record has no `none` entry and lookup
+already returns `undefined`. Recording it matters as much as the kills: a mutation that cannot
+change behaviour says nothing about the tests, and leaving it in the list as a "survivor" would
+misrepresent the suite.
 
 **Not built yet, and deliberately not claimed:** the kit editor UI, `.cwbrand` zip packaging
 with assets, the "from the current clip" capture, and building a composition from a template.

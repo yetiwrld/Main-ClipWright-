@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ALL_KIT_PARTS,
@@ -9,6 +11,7 @@ import {
   planKitApplication,
   resolvePlacement,
   resolveVisibility,
+  safeAreaBandsFor,
   type BrandKit,
   type BrandKitPlacement,
 } from '../index.js';
@@ -432,5 +435,142 @@ describe('intro and outro', () => {
     );
     expect(plan.intro?.durationUs).toBe(5_000_000);
     expect(plan.report).toEqual([]);
+  });
+});
+
+/**
+ * Safe areas (SPEC 13 §8.2: "logo positions respect the selected safe-area preset").
+ *
+ * A logo in the bottom-right corner of a vertical video is exactly where TikTok's caption and
+ * scrub bar sit. The kit's preset is what moves it out from under them — and the numbers are
+ * the platform's, so what these tests guard is that the offset is applied to the *side* that
+ * is covered and that a landscape canvas is left alone.
+ */
+describe('safe-area-aware placement', () => {
+  const portrait = { widthPx: 1080, heightPx: 1920 };
+  const landscape = { widthPx: 1920, heightPx: 1080 };
+  const bottomRight: BrandKitPlacement = {
+    position: 'br',
+    xPct: 0,
+    yPct: 0,
+    sizePct: 10,
+    opacity: 1,
+    margin: 4,
+    showFrom: 'always',
+    showFor: 'whole',
+  };
+
+  it('moves a bottom-right graphic up out of the bottom band and in from the action column', () => {
+    /*
+      Without the preset: margin 4% of the short side (1080) = 43.2 px, size 108 px, so the
+      box is at x 1080 - 43.2 - 108 = 928.8 and y 1920 - 43.2 - 108 = 1768.8 — on top of the
+      scrub bar. With the bands it moves in by 12% of 1080 and up by 25% of 1920.
+    */
+    const free = resolvePlacement(bottomRight, portrait);
+    const safe = resolvePlacement(bottomRight, portrait, { top: 0.14, bottom: 0.25, right: 0.12 });
+
+    expect(safe.x).toBeCloseTo(free.x - 0.12 * 1080, 6);
+    expect(safe.y).toBeCloseTo(free.y - 0.25 * 1920, 6);
+    // And it is still inside the frame, which a large inset could break.
+    expect(safe.x + safe.width).toBeLessThanOrEqual(portrait.widthPx);
+    expect(safe.y + safe.height).toBeLessThanOrEqual(portrait.heightPx);
+    expect(safe.x).toBeGreaterThan(0);
+    expect(safe.y).toBeGreaterThan(0);
+  });
+
+  it('moves a top-left graphic down out of the top band, at the same x', () => {
+    // The top band is chrome at the top; it says nothing about the left edge, so x must not
+    // move. An implementation that inset both axes on every corner would pass a test that
+    // only checked the bottom right.
+    const topLeft: BrandKitPlacement = { ...bottomRight, position: 'tl' };
+    const free = resolvePlacement(topLeft, portrait);
+    const safe = resolvePlacement(topLeft, portrait, { top: 0.14, bottom: 0.25, right: 0.12 });
+    expect(safe.x).toBeCloseTo(free.x, 6);
+    expect(safe.y).toBeCloseTo(free.y + 0.14 * 1920, 6);
+  });
+
+  it('moves every bottom corner up by the bottom band, not the top one', () => {
+    /*
+      Both bottom corners, because they are two separate branches: a mutation that swapped
+      the bottom inset for the top one in one of them passed every other test in this file.
+      The two bands differ (14% against 25%), so a swap is a 200 px mistake rather than a
+      rounding one.
+    */
+    for (const position of ['bl', 'br'] as const) {
+      const free = resolvePlacement({ ...bottomRight, position }, portrait);
+      const safe = resolvePlacement({ ...bottomRight, position }, portrait, {
+        top: 0.14,
+        bottom: 0.25,
+        right: 0.12,
+      });
+      expect(safe.y, position).toBeCloseTo(free.y - 0.25 * 1920, 6);
+    }
+  });
+
+  it('leaves a landscape canvas alone', () => {
+    // 16:9 has no vertical chrome: the numbers describe TikTok's layout, not a rule about
+    // frames. Applying them to a landscape video would move a correctly placed logo for no
+    // reason.
+    expect(safeAreaBandsFor('tiktok', landscape)).toBeUndefined();
+    expect(safeAreaBandsFor('tiktok', portrait)).toBeDefined();
+    expect(safeAreaBandsFor('none', portrait)).toBeUndefined();
+    expect(safeAreaBandsFor(undefined, portrait)).toBeUndefined();
+    /*
+      And the placement itself, called with `none` asked for by name. Asking the resolver is
+      the only way to see this guard: the plan passes `undefined` for `none`, so a version
+      that only special-cased `undefined` would look correct through `planKitApplication` and
+      still place a logo outside the frame for any caller that resolved bands itself.
+    */
+    expect(safeAreaBandsFor('none', portrait)).toBeUndefined();
+  });
+
+  it('places the kit logo inside the safe area, through the plan', () => {
+    // The unit above tests the resolver; this is the claim a user makes — "apply this kit and
+    // my logo is not under the buttons" — measured through the function the app calls.
+    const plan = planKitApplication(
+      kit({
+        safeAreaPreset: 'tiktok',
+        logo: { assetId: 'logo-1', ...bottomRight },
+      }),
+      portrait,
+      10_000_000,
+      everything,
+    );
+    const box = plan.logo!.box;
+    // Bottom band starts at 75% of the height; the box must end above it.
+    expect(box.y + box.height).toBeLessThanOrEqual(1920 * 0.75 - 43.2 + 0.001);
+    // Right band starts at 88% of the width; the box must end left of it.
+    expect(box.x + box.width).toBeLessThanOrEqual(1080 * 0.88 - 43.2 + 0.001);
+  });
+
+  it('places the same kit differently on a landscape canvas', () => {
+    // `none` is the default and must stay byte-identical to the pre-safe-area behaviour, or
+    // every kit placed before this feature existed would move on the next apply.
+    const withoutPreset = planKitApplication(
+      kit({ logo: { assetId: 'logo-1', ...bottomRight } }),
+      portrait,
+      10_000_000,
+      everything,
+    );
+    expect(withoutPreset.logo!.box).toEqual(resolvePlacement(bottomRight, portrait));
+  });
+
+  it('agrees with assets/safe-areas.json, which is what the guides draw', () => {
+    /*
+      The bands are duplicated in this package so it does not depend on a bundled JSON file —
+      and a duplicate that drifts is worse than no duplicate. The file is the source of truth
+      for the overlays; this pins the copy to it, so tuning one without the other fails here
+      rather than producing a logo that sits outside the rectangle the user was shown.
+    */
+    const raw = JSON.parse(
+      readFileSync(join(process.cwd(), 'assets', 'safe-areas.json'), 'utf8'),
+    ) as { platforms: Record<string, { top: number; bottom: number; right: number }> };
+    const vertical = raw.platforms['9:16']!;
+    for (const preset of ['tiktok', 'reels', 'shorts'] as const) {
+      const bands = safeAreaBandsFor(preset, portrait)!;
+      expect(bands.top).toBe(vertical.top);
+      expect(bands.bottom).toBe(vertical.bottom);
+      expect(bands.right).toBe(vertical.right);
+    }
   });
 });

@@ -87,6 +87,54 @@ export interface PlacedBox {
 }
 
 /**
+ * The chrome a platform covers, as fractions of the canvas (SPEC 10 §9).
+ *
+ * Mirrors `assets/safe-areas.json`, which is the source of truth for the *guides*; the copy
+ * here is what placement maths is allowed to depend on. Two reasons for the duplication
+ * rather than an import: the renderer's JSON is bundled into the app and this package must
+ * stay usable without it, and a guide that changes for legibility should not silently move
+ * every logo a user has ever placed. A test asserts the two agree so the copy cannot rot.
+ */
+export type SafeAreaPreset = 'tiktok' | 'reels' | 'shorts' | 'none';
+
+export interface SafeAreaBands {
+  /** Fraction of the height covered at the top (status bars, the platform's own header). */
+  top: number;
+  /** Fraction covered at the bottom — the largest, because of scrub bars and CTAs. */
+  bottom: number;
+  /** Fraction covered at the right — the action column. */
+  right: number;
+}
+
+/**
+ * The bands each preset covers.
+ *
+ * All three vertical platforms are the same shape today: their chrome differs in detail, not
+ * in how much of the frame it eats, and inventing a distinction between them would be a
+ * number nobody measured. `none` covers nothing, so a kit placed without a preset behaves
+ * exactly as it did before this existed.
+ *
+ * Landscape canvases get no bands at all — `undefined` rather than an empty set — because
+ * there is no vertical chrome to avoid and a logo in the bottom-right of a 16:9 frame is
+ * where it should be.
+ */
+const SAFE_AREA_BANDS: Record<Exclude<SafeAreaPreset, 'none'>, SafeAreaBands> = {
+  tiktok: { top: 0.14, bottom: 0.25, right: 0.12 },
+  reels: { top: 0.14, bottom: 0.25, right: 0.12 },
+  shorts: { top: 0.14, bottom: 0.25, right: 0.12 },
+};
+
+/** Whether a preset applies to a canvas at all: vertical and portrait frames only. */
+export function safeAreaBandsFor(
+  preset: SafeAreaPreset | undefined,
+  canvas: KitTarget,
+): SafeAreaBands | undefined {
+  if (preset === undefined || preset === 'none') return undefined;
+  if (canvas.heightPx <= canvas.widthPx) return undefined;
+  return SAFE_AREA_BANDS[preset];
+}
+
+/**
  * Resolve a percentage placement to pixels for a given canvas.
  *
  * The corner positions use `margin` as a percentage of the **short side**, which is what
@@ -105,29 +153,40 @@ export interface PlacedBox {
 export function resolvePlacement(
   placement: BrandKitPlacement,
   canvas: KitTarget,
+  safeArea?: SafeAreaBands,
 ): PlacedBox {
   const shortSide = Math.min(canvas.widthPx, canvas.heightPx);
   const size = (placement.sizePct / 100) * shortSide;
   const margin = (placement.margin / 100) * shortSide;
+  /*
+    The bands are added to the margin rather than replacing it: `margin` is the user's own
+    distance from the edge, and the safe area is where the platform's chrome begins. A logo
+    that respected only the safe area would touch its boundary; one that respected only the
+    margin would sit under the platform's buttons. The sum is the only position that
+    satisfies both, and the box is added after so the *box* stays inside too.
+  */
+  const insetTop = safeArea ? safeArea.top * canvas.heightPx : 0;
+  const insetBottom = safeArea ? safeArea.bottom * canvas.heightPx : 0;
+  const insetRight = safeArea ? safeArea.right * canvas.widthPx : 0;
 
   let x: number;
   let y: number;
   switch (placement.position) {
     case 'tl':
       x = margin;
-      y = margin;
+      y = margin + insetTop;
       break;
     case 'tr':
-      x = canvas.widthPx - margin - size;
-      y = margin;
+      x = canvas.widthPx - margin - size - insetRight;
+      y = margin + insetTop;
       break;
     case 'bl':
       x = margin;
-      y = canvas.heightPx - margin - size;
+      y = canvas.heightPx - margin - size - insetBottom;
       break;
     case 'br':
-      x = canvas.widthPx - margin - size;
-      y = canvas.heightPx - margin - size;
+      x = canvas.widthPx - margin - size - insetRight;
+      y = canvas.heightPx - margin - size - insetBottom;
       break;
     case 'custom':
       /*
@@ -237,6 +296,13 @@ export function planKitApplication(
   parts: KitApplyParts = ALL_KIT_PARTS,
 ): KitApplicationPlan {
   const plan: KitApplicationPlan = { report: [] };
+  /*
+    The kit's own safe-area preset moves its corner graphics out of the platform's chrome
+    (SPEC 13 §8.2, "logo positions respect the selected safe-area preset"). Resolved once
+    here rather than per graphic, so the logo and the watermark cannot disagree about where
+    the safe area is.
+  */
+  const safeArea = safeAreaBandsFor(kit.safeAreaPreset, canvas);
 
   if (parts.captions) {
     if (kit.captionStyleId === undefined) {
@@ -258,7 +324,7 @@ export function planKitApplication(
         const window = resolveVisibility(kit.logo, compositionDurationUs);
         plan.logo = {
           assetId: kit.logo.assetId,
-          box: resolvePlacement(kit.logo, canvas),
+          box: resolvePlacement(kit.logo, canvas, safeArea),
           opacity: kit.logo.opacity,
           startUs: window.startUs,
           endUs: window.endUs,
@@ -272,7 +338,7 @@ export function planKitApplication(
         const window = resolveVisibility(kit.watermark, compositionDurationUs);
         plan.watermark = {
           assetId: kit.watermark.assetId,
-          box: resolvePlacement(kit.watermark, canvas),
+          box: resolvePlacement(kit.watermark, canvas, safeArea),
           opacity: kit.watermark.opacity,
           startUs: window.startUs,
           endUs: window.endUs,
