@@ -50,6 +50,16 @@ export interface AudioItemRequest {
   sourceDurationUs: number;
   /** Where it lands on the export timeline, in microseconds relative to the range start. */
   timelineStartUs: number;
+  /**
+   * How long the item is on the timeline, in microseconds.
+   *
+   * Distinct from `sourceDurationUs`, which is how much *source* to read and may be longer: a
+   * crossfade pulls the read earlier by up to `availableLeadUs` so the incoming clip has handles.
+   * Ducking needs this number, because a trigger describes when the item is *heard*, and reading
+   * the source length would keep a bed down for the handles of a transition nobody is speaking
+   * through.
+   */
+  timelineDurationUs: number;
   gain?: number;
   trackVolume?: number;
   fadeInUs?: number;
@@ -217,7 +227,24 @@ export async function buildAudioMix(options: {
       beds.push({ clip, start: at });
     } else {
       mixClipInto(mix, clip, at);
-      if (!item.muted) cues.push([at, at + clip.length]);
+      /*
+        The trigger ends where the *item* ends, not where the padded clip does.
+
+        `fitLength` above pads a short source to the length the item claims, so `clip.length` is
+        how long the clip is in the mix — not how long it has sound in it. A one-second voice on a
+        two-second item is padded with a second of silence, and a cue built from `clip.length`
+        covered that silent second too: the music ducked through it, under nothing. That is the
+        bug this line fixes, and it was invisible from the sound alone because a bed ducked for
+        longer sounds like a bed mixed lower.
+
+        The item's own span is the honest trigger, clamped to the mix so a clip running past the
+        export range cannot make a cue that extends beyond the buffer.
+      */
+      const triggerEnd = Math.min(
+        mix.length,
+        at + Math.round((item.timelineDurationUs / 1_000_000) * MIX_SAMPLE_RATE),
+      );
+      if (!item.muted) cues.push([at, triggerEnd]);
     }
   }
 
@@ -537,12 +564,21 @@ export function planAudioItems(
       sourceDurationUs: item.durationUs + availableLeadUs,
       timelineStartUs,
       crossfades,
+      timelineDurationUs: item.durationUs,
       ...(volumeKeys.length > 0 ? { keyframes: volumeKeys } : {}),
       gain: dbToGain(item.gainDb ?? 0),
       pan,
       ...(item.fadeInUs && item.fadeInUs > 0 ? { fadeInUs: item.fadeInUs } : {}),
       ...(item.fadeOutUs && item.fadeOutUs > 0 ? { fadeOutUs: item.fadeOutUs } : {}),
       ...(item.fadeCurve ? { fadeCurve: item.fadeCurve } : {}),
+      /*
+        Ducking (SPEC 12 §6.7). The mixer has read `duckUnderSpeech` on every item since the audio
+        slice; this function never forwarded it, and the project had no field to hold it, so the
+        flag was `undefined` for every clip ever exported and the ducking branch was dead code that
+        looked live. Only forwarded when true, so an ordinary clip's request stays the shape it
+        always was.
+      */
+      ...(item.duckUnderSpeech ? { duckUnderSpeech: true } : {}),
     });
   }
   return items;

@@ -261,6 +261,20 @@ export const TimelineItemSchema = z
       .passthrough()
       .optional(),
     muted: z.boolean().default(false),
+    /**
+     * Whether this item is a music bed that should drop under speech (SPEC 12 §6.7).
+     *
+     * The mixer has ducked a bed since the audio slice — `duckUnderSpeech` was read on every
+     * item and **written by nothing**, so the field existed only in the mixer's own request type
+     * and no project could ever set it. A brand kit's music bed is the one thing that wants it:
+     * the kit carries `duckUnderSpeech` from the start, the plan copies it onto `plan.music`, and
+     * the panel says "Music bed added with the kit's ducking" — so the absence was not a missing
+     * feature but a promise made in three places and kept in none.
+     *
+     * Off by default. Ducking is a property of a *bed*, and turning it on for a clip of dialogue
+     * would duck the dialogue under itself.
+     */
+    duckUnderSpeech: z.boolean().default(false),
     opacity: z.number().min(0).max(1).default(1),
     blendMode: z
       .enum(['normal', 'multiply', 'screen', 'overlay', 'add', 'soft-light'])

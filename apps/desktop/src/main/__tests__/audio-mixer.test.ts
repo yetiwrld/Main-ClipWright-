@@ -712,81 +712,15 @@ describe.skipIf(!HAS_FFMPEG)('buildAudioMix', () => {
     expect(keys.every((key) => Number.isFinite(key.valueDb))).toBe(true);
   });
 
-  it('ducks a music bed under speech', async () => {
-    const speech = makeAudioFile('speech.mp4', { seconds: 1, volume: 0.6 });
-    const music = makeAudioFile('music.mp4', { seconds: 2, volume: 0.3 });
-    const plan = buildExportPlan(
-      makeSettings({
-        rangeUs: [0, 2_000_000],
-        items: [
-          {
-            id: 'item-speech',
-            trackId: 'track-voice',
-            type: 'audio',
-            mediaId: 'media-speech',
-            startUs: 0,
-            durationUs: 1_000_000,
-            sourceInUs: 0,
-            sourceDurationUs: 1_000_000,
-            disabled: false,
-            muted: false,
-            hasAudio: true,
-          },
-          {
-            id: 'item-music',
-            trackId: 'track-music',
-            type: 'audio',
-            mediaId: 'media-music',
-            startUs: 0,
-            durationUs: 2_000_000,
-            sourceInUs: 0,
-            sourceDurationUs: 2_000_000,
-            disabled: false,
-            muted: false,
-            hasAudio: true,
-          },
-        ],
-      }),
-    );
-    const wavPath = join(TMP, 'ducked.wav');
-    const result = await buildAudioMix({
-      plan,
-      items: [
-        {
-          itemId: 'item-speech',
-          sourcePath: speech,
-          sourceInUs: 0,
-          sourceDurationUs: 1_000_000,
-          timelineStartUs: 0,
-          gain: 1,
-        },
-        {
-          itemId: 'item-music',
-          sourcePath: music,
-          sourceInUs: 0,
-          sourceDurationUs: 2_000_000,
-          timelineStartUs: 0,
-          gain: 0.6,
-          duckUnderSpeech: true,
-        },
-      ],
-      wavPath,
-    });
-    expect(existsSync(wavPath)).toBe(true);
-    expect(result.frames).toBe(MIX_SAMPLE_RATE * 2);
+  /*
+    The ducking test used to live here, and it was vacuous twice over —
+    `expect(amplitudeToDb(...)).toBeDefined()` is true of every number. Its replacement is the
+    `describe` block further down, *"a music bed that ducks under speech"*, which measures the
+    bed's own frequency with a Goertzel filter and includes a flat control. Rewriting it in place
+    would have kept the same window choices, which are what let the padded-trigger bug hide: there
+    was never a window comparing the bed under speech with the bed after it.
+  */
 
-    // The bed should be quieter while speech runs than after it stops.
-    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
-    const duringSpeech = { samples: decoded.samples.subarray(0, MIX_SAMPLE_RATE), length: MIX_SAMPLE_RATE / 2 };
-    const afterSpeech = {
-      samples: decoded.samples.subarray(MIX_SAMPLE_RATE * 1.6 * 2, MIX_SAMPLE_RATE * 1.9 * 2),
-      length: MIX_SAMPLE_RATE * 0.15,
-    };
-    // The music alone remains after the speech ends; it should be present, and
-    // the ducked region should have had gain reduction applied.
-    expect(amplitudeToDb(peakLevel(afterSpeech))).toBeGreaterThan(-50);
-    expect(amplitudeToDb(peakLevel(duringSpeech))).toBeDefined();
-  }, 120_000);
 
   /**
    * SPEC 12 §4.2 — "linked audio gets an equal-power crossfade over the same range
@@ -1120,3 +1054,202 @@ describe('planAudioItems', () => {
     expect(planAudioItems(plan, () => undefined)).toHaveLength(0);
   });
 });
+
+describe('a music bed that ducks under speech (SPEC 12 §6.7)', () => {
+  /*
+    The ducking *arithmetic* has been tested since the audio slice. What had never been tested — and
+    could not have passed — is that a real project ever reaches it, and this block is the third
+    attempt at a test for it.
+
+    The first two were vacuous, and each hid the next bug:
+
+    * `expect(amplitudeToDb(...)).toBeDefined()` is true of every number, including the wrong one.
+    * The trigger was built from the *padded* clip's length, so a one-second voice on a two-second
+      item kept the bed ducked through a silent second. Comparing "during" with "after" at
+      whole-second boundaries could not see it, because both windows were inside the reduction.
+
+    So this measures the bed's own frequency with a Goertzel filter, in windows chosen against the
+    release time rather than against round numbers, and the flat control is what proves the
+    difference is the ducking and not the fixture.
+  */
+
+  /** Magnitude at `freq` between two instants, on the mix's left channel. */
+  const bedEnergy = (samples: Float32Array, fromUs: number, toUs: number, frequency: number): number => {
+    const from = Math.round((fromUs / 1_000_000) * MIX_SAMPLE_RATE);
+    const to = Math.min(samples.length / 2, Math.round((toUs / 1_000_000) * MIX_SAMPLE_RATE));
+    if (to <= from) return 0;
+    const k = (2 * Math.PI * frequency) / MIX_SAMPLE_RATE;
+    const coeff = 2 * Math.cos(k);
+    let s1 = 0;
+    let s2 = 0;
+    for (let index = from; index < to; index += 1) {
+      /* Interleaved stereo: the left channel is every other sample. */
+      const sample = samples[index * 2] ?? 0;
+      const s0 = sample + coeff * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+    const power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    return Math.sqrt(Math.max(0, power)) / Math.max(1, to - from);
+  };
+
+  const BED_HZ = 200;
+  const VOICE_HZ = 900;
+
+  const build = async (options: { duckUnderSpeech: boolean; name: string }) => {
+    const bedSource = makeConstantToneFile('bed.wav', { seconds: 2, volume: 0.5, frequency: BED_HZ });
+    const voiceSource = makeConstantToneFile('voice.wav', { seconds: 1, volume: 0.5, frequency: VOICE_HZ });
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'item-bed',
+            trackId: 'track-music',
+            type: 'audio',
+            mediaId: 'media-bed',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            volumeDb: 0,
+            duckUnderSpeech: options.duckUnderSpeech,
+          },
+          /*
+            The voice occupies only the first second. The ducking release is 320 ms, so the bed is
+            back to full level by about 1.4 s — and the comparison window is 1.5 s onward, clear of
+            the release rather than straddling it.
+          */
+          {
+            id: 'item-voice',
+            trackId: 'track-audio',
+            type: 'audio',
+            mediaId: 'media-voice',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 1_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            volumeDb: 0,
+          },
+        ],
+      }),
+    );
+    const sources: Record<string, string> = { 'media-bed': bedSource, 'media-voice': voiceSource };
+    const wavPath = join(TMP, `ducking-${options.name}.wav`);
+    await buildAudioMix({
+      plan,
+      items: planAudioItems(plan, (mediaId) => sources[mediaId] ?? bedSource),
+      wavPath,
+    });
+    const decoded = await decodeToPcm(wavPath, 0, MIX_SAMPLE_RATE * 2);
+    return {
+      /** The bed's own tone while the voice is running. */
+      during: bedEnergy(decoded.samples, 200_000, 800_000, BED_HZ),
+      /** The bed's own tone once the release has finished. */
+      after: bedEnergy(decoded.samples, 1_500_000, 1_950_000, BED_HZ),
+    };
+  };
+
+  it('lowers the bed while speech is present', async () => {
+    /*
+      Measured at the bed's frequency, so the voice contributes nothing: a 900 Hz tone has no
+      energy at 200 Hz, and the whole question is what happened to the bed.
+    */
+    const levels = await build({ duckUnderSpeech: true, name: 'duck' });
+    /* 12 dB of reduction, less the attack ramp that is still settling in this window. */
+    expect(levels.during).toBeLessThan(levels.after * 0.5);
+  }, 120_000);
+
+  it('leaves the bed flat when the flag is off', async () => {
+    /*
+      The control. Without it a mixer that ducked everything unconditionally would pass the test
+      above, and "the bed is quieter under speech" would be true of every export.
+    */
+    const levels = await build({ duckUnderSpeech: false, name: 'flat' });
+    const ratio = levels.during / levels.after;
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
+  }, 120_000);
+
+  it('only ducks for as long as the item sounds, not for its padded length', async () => {
+    /*
+      The bug this block was written for, asserted directly.
+
+      A voice item one second long, whose *source* has to be padded because the item claims two
+      seconds, used to produce a trigger two seconds long: the bed stayed down through a silent
+      second. Measured here at a point that is inside the padded span and past the release — the
+      bed must be back at full level there.
+    */
+    const levels = await build({ duckUnderSpeech: true, name: 'span' });
+    /*
+      The voice is silent from 1.0 s and the release is 320 ms, so by 1.5 s the bed is at full
+      level. If the trigger ran to the padded end the bed would still be down here, and `after`
+      would be close to `during` instead of roughly twice it.
+    */
+    expect(levels.after).toBeGreaterThan(levels.during * 1.5);
+  }, 120_000);
+
+  it('forwards the flag from the item to the mixer', () => {
+    /*
+      The one-line gap, asserted where it lived. A plan with the field set and a request without it
+      is exactly the state the project shipped in: everything downstream was correct and the value
+      was dropped in between.
+    */
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'item-bed',
+            trackId: 'track-music',
+            type: 'audio',
+            mediaId: 'media-bed',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+            duckUnderSpeech: true,
+          },
+        ],
+      }),
+    );
+    const items = planAudioItems(plan, () => '/tmp/bed.mp4');
+    expect(items[0]?.duckUnderSpeech).toBe(true);
+  });
+
+  it('does not mark an ordinary clip as a bed', () => {
+    /* Only `true` is forwarded, so every existing request keeps its shape. */
+    const plan = buildExportPlan(
+      makeSettings({
+        rangeUs: [0, 2_000_000],
+        items: [
+          {
+            id: 'item-audio',
+            trackId: 'track-audio',
+            type: 'audio',
+            mediaId: 'media-a',
+            startUs: 0,
+            durationUs: 2_000_000,
+            sourceInUs: 0,
+            sourceDurationUs: 2_000_000,
+            disabled: false,
+            muted: false,
+            hasAudio: true,
+          },
+        ],
+      }),
+    );
+    const items = planAudioItems(plan, () => '/tmp/a.mp4');
+    expect(items[0]?.duckUnderSpeech).toBeUndefined();
+  });
+});
+

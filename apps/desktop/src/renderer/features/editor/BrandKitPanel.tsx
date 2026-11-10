@@ -143,6 +143,15 @@ export function applyKitCommand(
     captionItemIds?: string[];
     reapplying?: boolean;
     now?: () => string;
+    /**
+     * The kit's music asset duration, if the caller knows it.
+     *
+     * Passed down rather than looked up here because the panel is given asset *ids*, not media
+     * records — the same boundary that keeps a media id from being mistaken for a path. Absent
+     * means the bed runs the length of the composition, which is the right guess for a music
+     * track longer than the edit and is clamped by the mixer otherwise.
+     */
+    musicDurationUs?: number;
   },
 ) {
   return (state: TimelineState) => {
@@ -163,6 +172,8 @@ export function applyKitCommand(
       ...(options.captionItemIds && options.captionItemIds.length > 0
         ? { captionItemIds: options.captionItemIds }
         : {}),
+      compositionEndUs: projectDurationUs(state),
+      ...(options.musicDurationUs !== undefined ? { musicDurationUs: options.musicDurationUs } : {}),
     };
 
     let current = state;
@@ -172,7 +183,12 @@ export function applyKitCommand(
       away. An apply with nothing to do is not an error here — the caller decided to press the
       button, and the plan's report explains an empty result.
     */
-    const graphics = parts.logo || parts.captions || parts.lowerThird;
+    /*
+      Music is its own branch below, but it has to be in this decision *not* to skip the whole
+      apply. A kit with a bed and nothing else used to reach here with `graphics` false, skip the
+      call entirely, and leave the panel saying it had applied — the same silence, one layer up.
+    */
+    const graphics = parts.logo || parts.captions || parts.lowerThird || parts.music;
     if (graphics || options.reapplying) {
       const result = options.reapplying
         ? reapplyBrandKit(current, base)

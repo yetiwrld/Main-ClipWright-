@@ -123,6 +123,17 @@ export interface PlannedItem {
   fadeOutUs?: number;
   fadeCurve?: 'linear' | 'equal-power' | 'exponential';
   /**
+   * Whether this item is a music bed that drops under the other items (SPEC 12 §6.7).
+   *
+   * The sixth property of the item's audio to be dropped between the project and the mixer, and
+   * the one that was hardest to see: the mixer has read `duckUnderSpeech` since it was written, so
+   * the ducking *branch* existed, was tested at its own level, and could never run for a real
+   * project — the flag arrived `undefined` every time. The field on the item did not exist either,
+   * so nothing above this line could set it. Ducking was three layers of agreement about a value
+   * that no project could hold.
+   */
+  duckUnderSpeech?: boolean;
+  /**
    * The item's effect chain in stored order (SPEC 12 §3). Carried so the export can
    * apply the same colour maths the preview does; without it a graded clip arrives in
    * the file ungraded.
@@ -305,6 +316,7 @@ export interface ExportSettings {
     fadeInUs?: number;
     fadeOutUs?: number;
     fadeCurve?: 'linear' | 'equal-power' | 'exponential';
+    duckUnderSpeech?: boolean;
     /** Crop and transform, so the decoded frame matches the preview. */
     geometry?: {
       crop?: { left?: number; top?: number; right?: number; bottom?: number };
@@ -412,6 +424,7 @@ export function buildExportPlan(settings: ExportSettings): ExportPlan {
         fadeInUs: item.fadeInUs,
         fadeOutUs: item.fadeOutUs,
         fadeCurve: item.fadeCurve,
+        duckUnderSpeech: item.duckUnderSpeech,
         opacity: item.opacity,
         blendMode: item.blendMode,
         trackOrder: item.trackOrder,

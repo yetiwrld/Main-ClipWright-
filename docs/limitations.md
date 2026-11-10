@@ -463,10 +463,16 @@ context menus, in-editor import, the fill lock).
    falls back to software when it fails. But no machine with NVENC, QSV or AMF
    was available while this was written, so the *validation logic* is tested and
    the actual GPU output is not.
-11. **Audio effects are mostly not applied.** Gain, fades, panning, ducking,
-   loudness normalisation, transition crossfades, per-track mute and solo, and the
-   2 ms de-click taper are; the equaliser, reverb and other audio-rack effects are
-   not yet in the mix.
+11. **Audio effects are mostly applied.** Gain, fades, panning, ducking, loudness
+   normalisation, transition crossfades, per-track mute and solo, and the 2 ms de-click
+   taper all reach the mix. Only the **audio rack** — equaliser, reverb, de-ess — is
+   absent, which is the deferral recorded in item 11 of §1 above.
+   Ducking and normalisation were listed here for several slices while *neither could
+   run for a real project*: normalisation had a checkbox and a mixer branch, ducking
+   had an arithmetic and a mixer branch but no field on the item and no line forwarding
+   the flag, so three layers agreed about a value no project could hold. A music bed is
+   what exposed it — see `docs/decisions.md` §50. This line is now a statement about the
+   mix rather than about the code.
 12. **4K 60 fps on CPU is slower than real time.** It completes and validates;
    it is just slow.
 

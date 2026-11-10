@@ -615,3 +615,382 @@ describe('insertKitClip', () => {
     expect(result.code).toBe('invalid');
   });
 });
+
+describe('a kit’s music bed (SPEC 12 §6.7)', () => {
+  /*
+    This whole block exists because the feature was *described* and not *built*. `planKitApplication`
+    computed `plan.music`, `planSummary` printed "Music bed added with the kit's ducking", and
+    `applyBrandKit` had no music branch at all — so pressing Apply placed the logo, applied the
+    captions, and silently did nothing about the music. The brand-kits tests asserted the plan's
+    contents and passed, because the plan was right; nothing asserted that an *item* came out.
+
+    So these tests deliberately do not look at the plan. They apply a kit and look for the clip.
+  */
+  const musicKit = () =>
+    kit({
+      audio: { musicAssetId: 'music-1', musicVolumeDb: -18, duckUnderSpeech: true },
+    });
+
+  const planFor = (value: BrandKit) =>
+    planKitApplication(value, CANVAS, 10_000_000, {
+      assetIds: new Set(['music-1']),
+      captionStyleIds: new Set(['bold-creator']),
+    });
+
+  const base = () => createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+
+  it('actually creates the bed, rather than only saying it did', () => {
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const beds = Object.values(result.state.items).filter((item) => item.mediaId === 'music-1');
+    expect(beds).toHaveLength(1);
+  });
+
+  it('applies a kit whose *only* part is music', () => {
+    /*
+      The guard used to refuse this: a plan with music and nothing else was "nothing to apply
+      here", which was honest before the bed existed and wrong the moment it did.
+    */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('spans the project without making it longer', () => {
+    /*
+      The bed sits *under* the edit: applying a kit must not move a single cut. An insert would
+      ripple everything right and a longer clip than the project would change the export length.
+    */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 7_500_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    expect(bed.startUs).toBe(0);
+    expect(bed.durationUs).toBe(7_500_000);
+  });
+
+  it('never runs past the music it has', () => {
+    /*
+      A bed longer than its source is a silent tail: the mixer decodes what exists and places it,
+      so a clip claiming thirty seconds over a ten-second track leaves twenty seconds of nothing
+      while the timeline draws a waveform that implies otherwise.
+    */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 30_000_000,
+      musicDurationUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    expect(bed.durationUs).toBe(10_000_000);
+    expect(bed.sourceDurationUs).toBe(10_000_000);
+  });
+
+  it('carries the kit’s volume and ducking onto the item', () => {
+    /*
+      The two values that reach the mix. `duckUnderSpeech` is the one that matters most: the mixer
+      has read it since it was written, so a bed arriving without it would be a bed that plays at a
+      flat level under dialogue and the "ducking" in the panel's sentence would be a word.
+    */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    expect(bed.volumeDb).toBe(-18);
+    expect(bed.duckUnderSpeech).toBe(true);
+  });
+
+  it('does not duck when the kit says not to', () => {
+    const brandKit = kit({
+      audio: { musicAssetId: 'music-1', musicVolumeDb: -12, duckUnderSpeech: false },
+    });
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    expect(bed.duckUnderSpeech).toBe(false);
+  });
+
+  it('puts the bed on the music track, below the picture', () => {
+    /* The role is what tells the mixer — and any later ducking control — what this track is. */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    const track = result.state.tracks.find((candidate) => candidate.id === bed.trackId)!;
+    expect(track.role).toBe('music');
+    expect(track.kind).toBe('audio');
+    /*
+      Below every *picture* track. `order` is the stack position and the mixer sums in that order,
+      so a bed above the picture would be layered over the dialogue — the same items, the wrong
+      layer.
+
+      Not below every track: the default timeline ships `music` at −20 and `sfx` at −30, so sound
+      effects are deliberately beneath a bed. Asserting against all tracks would fail for a reason
+      that is right, which is the sort of expectation that gets weakened instead of understood.
+    */
+    const picture = result.state.tracks.filter((candidate) => candidate.kind !== 'audio');
+    expect(picture.length).toBeGreaterThan(0);
+    for (const other of picture) expect(track.order).toBeLessThan(other.order);
+  });
+
+  it('makes a music track when the project has none, below everything else', () => {
+    /*
+      The default timeline ships a `music` track, so the ordinary case *reuses* it and the
+      creation branch never runs. It still has to be right: a project imported or migrated without
+      a music track would otherwise put the bed wherever the new track happened to land — and the
+      first version of this test asserted the ordering against the default project, where no new
+      track is made at all, so it passed while testing nothing on the branch it was written for.
+    */
+    const brandKit = musicKit();
+    const state = createDefaultTimeline({ id: 'tl', name: 'Clip', fps: 30 });
+    const withoutMusic: TimelineState = {
+      ...state,
+      tracks: state.tracks.filter((candidate) => candidate.role !== 'music'),
+    };
+    const result = applyBrandKit(withoutMusic, {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const bed = Object.values(result.state.items).find((item) => item.mediaId === 'music-1')!;
+    const created = result.state.tracks.find((candidate) => candidate.id === bed.trackId)!;
+    expect(created.role).toBe('music');
+    expect(created.kind).toBe('audio');
+    expect(created.name).toBe('Kit music');
+    /* Below every picture track, and not the topmost track in the project. */
+    for (const other of result.state.tracks.filter((c) => c.kind !== 'audio')) {
+      expect(created.order).toBeLessThan(other.order);
+    }
+    const topmost = result.state.tracks.reduce((top, candidate) =>
+      candidate.order > top.order ? candidate : top,
+    );
+    expect(topmost.id).not.toBe(created.id);
+  });
+
+  it('reuses the music track across two kits rather than making a second one', () => {
+    /*
+      The track is found by role for this reason: a second kit with a bed would otherwise create a
+      second music track, and the two would each hold one bed with nothing to say which is live.
+    */
+    const first = musicKit();
+    const applied = applyBrandKit(base(), {
+      kit: first,
+      plan: planFor(first),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const second = kit({
+      id: 'kit-2',
+      audio: { musicAssetId: 'music-1', musicVolumeDb: -20, duckUnderSpeech: true },
+    });
+    const again = applyBrandKit(applied.state, {
+      kit: second,
+      plan: planKitApplication(second, CANVAS, 10_000_000, {
+        assetIds: new Set(['music-1']),
+        captionStyleIds: new Set(['bold-creator']),
+      }),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    const musicTracks = again.state.tracks.filter((candidate) => candidate.role === 'music');
+    expect(musicTracks).toHaveLength(1);
+  });
+
+  it('replaces the bed on reapply instead of stacking a second one', () => {
+    /*
+      Two beds under one edit is not merely louder: the user hears a phasing effect they cannot
+      explain and has no way to see why from the timeline, because both clips look identical.
+    */
+    const brandKit = musicKit();
+    const plan = planFor(brandKit);
+    const first = applyBrandKit(base(), {
+      kit: brandKit,
+      plan,
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = reapplyBrandKit(first.state, {
+      kit: brandKit,
+      plan,
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const beds = Object.values(second.state.items).filter((item) => item.mediaId === 'music-1');
+    expect(beds).toHaveLength(1);
+  });
+
+  it('replaces the bed when the same kit is applied twice, without reapply', () => {
+    /*
+      The path `reapplyBrandKit` does *not* cover, and the one the replacement loop exists for:
+      reapply removes the kit's items first, so by the time `applyBrandKit` runs there is nothing
+      to collide with and deleting the loop would pass every reapply test. A second plain apply —
+      which the panel does whenever the user presses Apply again — reaches the loop with a bed
+      already on the track, and must still leave exactly one.
+    */
+    const brandKit = musicKit();
+    const plan = planFor(brandKit);
+    const params = {
+      kit: brandKit,
+      plan,
+      canvas: CANVAS,
+      /* Literal-typed: `fps` is `30 | 60`, and a bare `30` widens to `number` in an object. */
+      fps: 30 as const,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    };
+    const first = applyBrandKit(base(), params);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = applyBrandKit(first.state, params);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const beds = Object.values(second.state.items).filter((item) => item.mediaId === 'music-1');
+    expect(beds).toHaveLength(1);
+  });
+
+  it('is removed by removeKitItems like everything else the kit made', () => {
+    /* "Delete the kit, keep its work" has to include the bed, or the music outlives its kit. */
+    const brandKit = musicKit();
+    const applied = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const removed = removeKitItems(applied.state, brandKit.id);
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(Object.values(removed.state.items).some((item) => item.mediaId === 'music-1')).toBe(false);
+  });
+
+  it('undoes the bed along with the rest, in one step', () => {
+    /*
+      An undo that restored the logo and left the music playing would be worse than no undo: the
+      project would be in a state the user never created and cannot describe.
+    */
+    const brandKit = kit({
+      logo: { assetId: 'logo-1', position: 'br', xPct: 4, yPct: 4, sizePct: 12, opacity: 1, margin: 4, showFrom: 'always', showFor: 'whole' },
+      audio: { musicAssetId: 'music-1', musicVolumeDb: -18, duckUnderSpeech: true },
+    });
+    const plan = planKitApplication(brandKit, CANVAS, 10_000_000, {
+      assetIds: new Set(['logo-1', 'music-1']),
+      captionStyleIds: new Set(['bold-creator']),
+    });
+    const state = base();
+    const applied = applyBrandKit(state, {
+      kit: brandKit,
+      plan,
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 10_000_000,
+    });
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const undone = applyPatches(applied.state, applied.inverse);
+    expect(Object.keys(undone.items)).toEqual(Object.keys(state.items));
+  });
+
+  it('does not add a zero-length bed to an empty project', () => {
+    /*
+      A composition with no length has nothing to play music under. A one-frame sliver would draw
+      on the timeline, cost a decode, and mean nothing.
+    */
+    const brandKit = musicKit();
+    const result = applyBrandKit(base(), {
+      kit: brandKit,
+      plan: planFor(brandKit),
+      canvas: CANVAS,
+      fps: 30,
+      appliedAt: APPLIED_AT,
+      compositionEndUs: 0,
+    });
+    /*
+      There is nothing to apply at all now, so the command refuses rather than succeeding with no
+      effect — the same rule the guard applies to a kit with no graphics.
+    */
+    expect(result.ok).toBe(false);
+  });
+});

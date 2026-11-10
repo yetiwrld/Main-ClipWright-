@@ -38,6 +38,23 @@ export interface ApplyBrandKitParams {
   captionItemIds?: string[];
   /** ISO timestamp, injected so the command is deterministic in tests. */
   appliedAt: string;
+  /**
+   * How long the project runs, for a music bed to span.
+   *
+   * The bed is laid from the start to the end of the composition rather than inserted or
+   * appended, because its whole purpose is to sit *under* the existing edit. Without this the
+   * command would have to guess, and a bed that stops a second early is the kind of thing a user
+   * hears once, at the end, and cannot explain.
+   */
+  compositionEndUs?: number;
+  /**
+   * The music asset's own duration, so the bed does not run past its material.
+   *
+   * Absent means unknown — an unprobed asset — and the bed is then as long as the project. Placing
+   * a clip longer than its source is what produced a silent tail in the mixer before it clamped,
+   * so a known duration is used when there is one.
+   */
+  musicDurationUs?: number;
 }
 
 /** One item a kit created, so the caller can select or report them. */
@@ -110,7 +127,23 @@ export function applyBrandKit(
   const hasGraphics =
     plan.logo !== undefined || plan.watermark !== undefined || plan.lowerThird !== undefined;
   const hasCaptions = plan.captionStyleId !== undefined;
-  if (!hasGraphics && !hasCaptions) {
+  /*
+    A kit whose only audio part is a music bed is a valid apply. Before the bed was built this
+    guard was right: a plan carrying nothing but music produced "This kit has nothing to apply
+    here" — which was true, and became false the moment the bed started being placed.
+  */
+  /*
+    Music counts only when there is somewhere to put it. A composition with no length has nothing
+    to play a bed under, and treating `plan.music` as sufficient would produce a command that
+    reports success and creates nothing — the exact "it worked and nothing happened" outcome this
+    guard exists to prevent, arrived at from the other side.
+  */
+  const bedDurationUs = Math.min(
+    Math.max(0, params.compositionEndUs ?? 0),
+    params.musicDurationUs ?? Number.MAX_SAFE_INTEGER,
+  );
+  const hasMusic = plan.music !== undefined && bedDurationUs > 0;
+  if (!hasGraphics && !hasCaptions && !hasMusic) {
     /*
       A plan with nothing to do fails rather than succeeding with no visible effect. "It
       worked and nothing happened" is the worst outcome for a button that was meant to
@@ -220,6 +253,95 @@ export function applyBrandKit(
 
       if (plan.logo) place('logo', plan.logo);
       if (plan.watermark) place('watermark', plan.watermark);
+    }
+
+    /*
+      ---- Music: a bed under the whole edit (SPEC 12 §6.7). ----
+
+      This is the part that made the panel's sentence a lie. `plan.music` was computed by
+      `planKitApplication`, printed by `planSummary` as "Music bed added with the kit's ducking",
+      and read by nothing: `applyBrandKit` had no music branch at all, so pressing Apply applied
+      the logo and the captions and silently did nothing about the music. The plan's own tests
+      asserted `plan.music.volumeDb` — they were true, and they were testing a description rather
+      than a result.
+
+      Three things about the placement are decisions rather than mechanics:
+
+      * **One track, reused, on the `music` role.** A second application replaces the bed instead of
+        stacking a second copy under it, and the role is what tells the mixer and any future
+        ducking control what this track is for.
+      * **It spans the project, not the project plus itself.** The bed is trimmed to
+        `compositionEndUs`, so applying a kit does not make the composition longer and does not
+        move anything. An insert would ripple the edit; a bed must not.
+      * **`duckUnderSpeech` comes from the kit**, which is the only place it can come from — the
+        kit is where the user said "music, under the speech". The mixer already knows what to do
+        with the flag; until now nothing in the project could set it.
+    */
+    if (plan.music) {
+      /*
+        `bedDurationUs` is decided above, where it also decides whether this applies at all: the
+        bed spans the project unless the music runs out first.
+      */
+      const bedStartUs = 0;
+      const durationUs = bedDurationUs;
+      {
+        let track = draft.tracks.find((candidate) => candidate.role === 'music');
+        if (!track) {
+          const lowestOrder = draft.tracks.reduce(
+            (lowest, candidate) => Math.min(lowest, candidate.order),
+            Number.MAX_SAFE_INTEGER,
+          );
+          track = {
+            id: `trk_kit_music_${kit.id}`,
+            role: 'music',
+            kind: 'audio',
+            name: 'Kit music',
+            /* Under the picture and under any other audio track, which is where a bed lives. */
+            order: lowestOrder === Number.MAX_SAFE_INTEGER ? 0 : lowestOrder - 1,
+            hidden: false,
+            locked: false,
+            muted: false,
+            solo: false,
+            heightPx: 48,
+            itemIds: [],
+            auto: false,
+          } as (typeof draft.tracks)[number];
+          draft.tracks.push(track);
+        }
+        const trackId = track.id;
+        if (!track.itemIds) track.itemIds = [];
+
+        /*
+          Replace rather than add: a reapply, or a second apply after the user changed the kit's
+          music, must not leave the old bed playing underneath the new one.
+        */
+        for (const existingId of [...track.itemIds]) {
+          const existing = draft.items[existingId] as TimelineItem | undefined;
+          if (existing && existing.aiProvenance?.tool === 'brand-kit') {
+            delete draft.items[existingId];
+            track.itemIds = track.itemIds.filter((id) => id !== existingId);
+          }
+        }
+
+        const bedId = nextId('kitmusic');
+        draft.items[bedId] = {
+          ...createMediaItem({
+            id: bedId,
+            trackId,
+            label: 'Kit music',
+            mediaId: plan.music.assetId,
+            startUs: bedStartUs,
+            durationUs,
+            sourceInUs: 0,
+            sourceDurationUs: params.musicDurationUs ?? durationUs,
+            type: 'audio',
+          }),
+          volumeDb: plan.music.volumeDb,
+          duckUnderSpeech: plan.music.duckUnderSpeech,
+          aiProvenance: provenance,
+        } as TimelineItem;
+        track.itemIds.push(bedId);
+      }
     }
   });
 

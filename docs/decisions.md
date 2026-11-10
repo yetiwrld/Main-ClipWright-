@@ -1649,3 +1649,61 @@ filters, `-ss` moved to the wrong side of `-i`, a non-monotonic profile, an inve
 that ignores the range. The one that survived longest was `-ss` after `-i`, which produces an
 identical file — slower, by decoding everything before the range — so a duration assertion could
 never see it; it is now pinned by position.
+
+## 50. Ducking was three layers of agreement about a value no project could hold
+
+SPEC 12 §6.7 asks for a music bed that ducks under speech. The *arithmetic* was built with the
+audio slice and is correct: `duckingCurve` reduces a bed while a trigger is present, attacks and
+releases over configurable windows, and returns exactly unity outside one. It had tests. What this
+slice found is that no project could ever reach it, and the reason is worth recording because it is
+this project's most recurring bug shape in its purest form.
+
+Three layers each had half the feature:
+
+- The **mixer** read `duckUnderSpeech` on every item and had a `beds` array and a cue list for it.
+- `planAudioItems` **never forwarded the flag**, so every request arrived with it `undefined`.
+- The **item schema had no field**, so nothing above the mixer could set it either.
+
+Each layer's own tests passed. The mixer's ducking test was the honest failure of ambition: it
+asserted `expect(amplitudeToDb(peakLevel(duringSpeech))).toBeDefined()`, which is true of every
+number including the wrong one. A test that cannot fail is not coverage, and this one sat in the
+file for several slices looking like exactly what it was supposed not to be.
+
+**A brand kit's music bed is what made it visible.** The kit schema has carried `musicAssetId`,
+`musicVolumeDb` and `duckUnderSpeech` from the start; `planKitApplication` copies them onto
+`plan.music`; and the panel prints *"Music bed added with the kit's ducking."* Meanwhile
+`applyBrandKit` had **no music branch at all** — so pressing Apply placed the logo, applied the
+captions, and said it had added a bed that did not exist. The brand-kits tests asserted
+`plan.music.volumeDb` and passed, because the *plan* was right; nothing asserted that an item came
+out of it. The rule this slice took away: **a test on a plan is a test of a description, not of a
+result**, and the panel's sentence is now backed by one that looks for the clip.
+
+Three things had to be built, in order:
+
+1. **`duckUnderSpeech` on the item**, defaulting to `false`. Turning it on by default was the
+   tempting mistake — a clip of dialogue would duck under itself — so it is a property of a *bed*,
+   set by the kit that says "music, under the speech".
+2. **Forwarding through the plan.** `PlannedItem` gained the field, `buildExportPlan` copies it,
+   `planAudioItems` forwards it. The last of those is one line, and it was the line missing.
+3. **The bed itself in `applyBrandKit`** — an ordinary audio item on a `music`-role track, spanning
+   the composition and trimmed to the music's own length.
+
+**The off-by-one-second that the new test found.** With the chain connected, the bed was still
+wrong: it ducked for the item's *padded* length rather than the length it sounds for. `fitLength`
+pads a short source with silence so the clip matches the item's claimed span — correct for mixing,
+wrong for a trigger — and the cue was built from `clip.length`. A one-second voice on a two-second
+item kept the bed down through a second of nothing. The fix carries `timelineDurationUs` on the
+request and builds the cue from it; the test that catches it measures the bed's own 200 Hz tone with
+a Goertzel filter at a point inside the padded span and past the release, which is why the two
+earlier attempts at this test could not have found it.
+
+**A test-only lesson, recorded because it cost an hour.** The first two attempts at the ducking test
+compared whole-second windows of the summed mix. Both passed against a broken mixer, and both would
+have kept passing. Measuring a *specific frequency* isolates the bed from the voice; measuring a
+*summed level* does not, because the voice's presence moves the total in the opposite direction to
+the ducking. The control case — the same fixture with `duckUnderSpeech: false` — is what makes the
+difference attributable rather than merely observed.
+
+Nineteen tests across the bed, the forwarding and the produced audio; thirteen mutations, all
+biting after the two fixes — including the bug this slice started from (`plan.music` read and never
+applied), the flag dropped on the way through, and the trigger built from the padded length.

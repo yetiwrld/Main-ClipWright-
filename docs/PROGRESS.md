@@ -4,7 +4,7 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `224a638`, plus the noise-reduction slice. 3458 automated tests,
+Last updated after commit `224a638`, plus the noise-reduction slice. 3476 automated tests,
 all passing.
 
 ---
@@ -277,8 +277,15 @@ playhead is derived from `AudioContext.currentTime` through an anchor taken on t
 of playback, so a dropped frame costs picture rather than sound, and playback rate
 (0.5×–2×, pitch preserved) is in the transport. **Per-track meters are in** (§6.3): a summing node per audible track in the graph, and two 3 px
 bars in the header on the master meter's own scale and colours, from the same arithmetic module.
-What is still missing from the audio system is the *rest* of §6: ducking, normalisation and
-noise reduction. **Text and shape items are in**, which closes the biggest
+**Ducking and normalisation are now both reachable.** Normalisation measures the real mix and
+lifts it toward −16 LUFS; ducking lowers a music bed under speech. Both worked in principle and
+neither could run for a real project: normalisation had a checkbox and a mixer branch, and ducking
+had an arithmetic and a mixer branch but **no field on the item and no line in `planAudioItems`
+forwarding the flag** — three layers agreeing about a value no project could hold. A brand kit's
+music bed is what exposed it: the panel said "Music bed added with the kit's ducking" while
+`applyBrandKit` had no music branch at all. All three are built now, and the bed's cue ends where the
+item *sounds* rather than where its padded clip ends — a one-second voice on a two-second item used
+to keep the bed down through a second of silence. **Text and shape items are in**, which closes the biggest
 hole in the phase: the schema had declared the two item types and their fields from
 the start while nothing read them, so a project could hold a title that no renderer
 would draw and no user could create. A text item is deliberately a caption without
@@ -352,7 +359,7 @@ GitHub release; they cannot be done in a Linux sandbox:
 pnpm verify
 ```
 
-That runs lint, typecheck, all 3458 tests, builds the app, and runs the repository
+That runs lint, typecheck, all 3476 tests, builds the app, and runs the repository
 checks. It should end with `check-repo: OK`. CI runs exactly the same command on
 Windows, so a local pass and a CI pass mean the same thing — which was not true
 before this session.
