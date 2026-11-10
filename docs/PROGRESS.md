@@ -65,8 +65,8 @@ export path:
 - The export — ffmpeg burns the captions in from a generated ASS script, so the
   file matches the preview.
 
-Still open in Phase 5: the colour eyedropper, brand kit **UI**, the voiceover recorder and
-the equaliser. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
+Still open in Phase 5: the colour eyedropper, the brand kit **editor** (the list and the apply
+controls are built; see below), the voiceover recorder and the equaliser. The brand kit's data layer is finished but no screen reads it: the `.cwbrand`
 format, the placement maths and the application plan live in `packages/brand-kits` (36
 tests), and the commands that apply, reapply, remove, detach and insert an intro or
 outro live in `packages/timeline-engine` (26 tests). An intro is an *insert*, not a
@@ -75,7 +75,10 @@ cuts stay where they were against the picture. Safe-area presets move a kit's co
 graphics out of the platform's chrome, with the numbers pinned to `assets/safe-areas.json` by a
 test. A kit can also be captured from the clip in front of you: `captureKitFromClip` reads the
 caption style, its colours and font, and measures a corner image back into percentages so the
-kit works on a different aspect ratio. A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
+kit works on a different aspect ratio. A **Kits tab** in the library lists a project's kits and
+applies them — one undo step per application, a report when a part could not be applied, and a
+confirm that says the items survive a delete. What is missing is the editor that *writes* a kit.
+A `.cwbrand` file is a real zip — `kit.json` plus the assets it names — written
 without a dependency and verified in the tests with `unzip`, including a checksum check
 that a flipped byte fails. Applying a kit produces ordinary items tagged
 `aiProvenance: {tool: 'brand-kit'}`, which is what makes "delete the kit, keep its work" a

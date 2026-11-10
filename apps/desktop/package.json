@@ -18,6 +18,7 @@
   "dependencies": {
     "@clipwright/ai-core": "workspace:*",
     "@clipwright/audio-core": "workspace:*",
+    "@clipwright/brand-kits": "workspace:*",
     "@clipwright/caption-styles": "workspace:*",
     "@clipwright/compositor": "workspace:*",
     "@clipwright/design-system": "workspace:*",

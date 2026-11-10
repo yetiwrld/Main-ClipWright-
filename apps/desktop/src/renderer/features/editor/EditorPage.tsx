@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, LayoutPanelLeft, PanelRight, ScrollText, Upload } from 'lucide-react';
 import { Button, Chip, Dialog, IconButton, PanelHeader } from '@clipwright/design-system';
 import { api, describeError, isDesktop } from '../../api.js';
@@ -13,9 +13,11 @@ import { CaptionPanel, CaptionWordView } from './CaptionPanel.js';
 import { ExportDialog } from '../export/ExportDialog.js';
 import { CaptionStyleEditor } from './CaptionStyleEditor.js';
 import { playheadStore } from './playhead-store.js';
+import { BrandKitPanel } from './BrandKitPanel.js';
+import { useBrandKits } from './use-brand-kits.js';
 import { useCaptionStyles } from './use-caption-styles.js';
 import { mediaAwaitingProxy, type PreviewJobLike } from './preview-quality.js';
-import { DEFAULT_STYLE_ID } from '@clipwright/caption-styles';
+import { BUILT_IN_STYLES, DEFAULT_STYLE_ID } from '@clipwright/caption-styles';
 
 export function EditorPage({
   projectId,
@@ -36,8 +38,20 @@ export function EditorPage({
   const [timelineShare, setTimelineShare] = useState(0.42);
   const [resizing, setResizing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<'media' | 'captions'>('media');
+  const [leftTab, setLeftTab] = useState<'media' | 'captions' | 'kits'>('media');
   const captionStyles = useCaptionStyles(projectId);
+  const brandKits = useBrandKits(projectId);
+  /*
+    What the project can actually supply, so a kit's apply dialog reports a missing logo
+    instead of promising one. Built from the two libraries the editor already holds — the
+    media list and the style presets plus this project's copies — rather than asked of the
+    kit, which knows nothing about either.
+  */
+  const captionStyleIds = useMemo(
+    () => new Set([...BUILT_IN_STYLES.map((style) => style.id), ...Object.keys(captionStyles.styles)]),
+    [captionStyles.styles],
+  );
+  const assetIds = useMemo(() => new Set(media.map((item) => item.id)), [media]);
   const [styleEditorOpen, setStyleEditorOpen] = useState(false);
   /*
     The `useProxyPreview` setting, for the preview's quality chip (SPEC 10 §5.1, SPEC 04 §6.3).
@@ -303,6 +317,15 @@ export function EditorPage({
                 >
                   Captions
                 </Button>
+                <Button
+                  size={28}
+                  variant={leftTab === 'kits' ? 'secondary' : 'ghost'}
+                  role="tab"
+                  aria-selected={leftTab === 'kits'}
+                  onClick={() => setLeftTab('kits')}
+                >
+                  Kits
+                </Button>
               </div>
               {leftTab === 'media' ? (
                 <MediaLibrary
@@ -310,6 +333,15 @@ export function EditorPage({
                   timeline={timeline}
                   loading={mediaLoading}
                   error={mediaError}
+                />
+              ) : leftTab === 'kits' && state ? (
+                <BrandKitPanel
+                  state={state}
+                  timeline={timeline}
+                  brandKits={brandKits}
+                  canvas={{ widthPx: state.canvas.width, heightPx: state.canvas.height }}
+                  captionStyleIds={captionStyleIds}
+                  assetIds={assetIds}
                 />
               ) : state ? (
                 <CaptionPanel

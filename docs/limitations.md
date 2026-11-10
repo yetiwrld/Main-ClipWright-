@@ -460,34 +460,24 @@ context menus, in-editor import, the fill lock).
     reviewed digests are required before a shippable artefact exists.
 12. **The build is unsigned** until `CSC_LINK` and `CSC_KEY_PASSWORD` exist.
     Everything that mentions the installer says so.
-13. **Brand kits are specified, validated, planned and applicable — but there is no UI.**
-    SPEC 13 §8 lists them as CORE for v1 acceptance, and the honest state is this: the
-    `.cwbrand` format, its bounds, import/export with unknown-field preservation, placement
-    resolution across aspect ratios, the application plan, the diagnosis, and the commands
-    that apply, reapply, remove and detach a kit are all **built and tested**
-    (`packages/brand-kits`, 36 tests; the commands in `packages/timeline-engine`, 18 tests;
-    20 mutations between them, all biting). Applying produces ordinary items carrying
-    `aiProvenance: {tool: 'brand-kit'}`, so a removed kit leaves its work standing. What does
-    not exist is everything a user would touch — the kit list and editor, and the buttons
-    that call the commands. Capturing a kit **from the current clip** does exist as data
-    (`captureKitFromClip`: the caption style, its colours and font, and a corner image measured
-    back into percentages), but no button offers it, and text/shape items cannot be captured
-    because the kit's schema has no field for them yet. The `.cwbrand` **archive** does exist:
-    `writeBrandKitArchive`/`readBrandKitArchive` write and read a real zip (verified against
-    `unzip`), but nothing in the app offers to export or import one yet.
-    Nothing in the app mentions brand kits, which is the correct state for an unbuilt feature
-    (`specs/13` §2: an unfinished tool is never shown as a teaser). The project schema's
-    `brandKits: string[]` and the `BrandKits/` directory are still empty placeholders until
-    the UI lands. Two parts of the spec remain unimplemented in the commands themselves:
-    the missing-font substitution flag, since the caption style is assigned by id and
-    resolution happens elsewhere. Safe-area-aware placement **is** built — a kit's preset
-    moves its corner graphics out of the platform's chrome, and the numbers are pinned to
-    `assets/safe-areas.json` — but there is no picker for it yet, and the overlay the preview
-    draws is still independent of what the kit does. Intro and outro *planning and insertion* are built — a
-    clip's own duration is inserted at the start and every unlocked track ripples, or at the
-    end with nothing moving — but an intro that is a **composition template** is planned and
-    then refused by the insert command: building a composition from a template is a separate
-    feature, and placing an empty clip would be worse than saying so.
+13. **Brand kits are built end to end except the editor and the file pickers.** SPEC 13 §8
+    lists them as CORE for v1 acceptance, and the honest state is this: the `.cwbrand` format,
+    import/export with unknown-field preservation, placement resolution across aspect ratios,
+    safe-area-aware corners, the application plan and its report, the commands that apply,
+    reapply, remove, detach and insert an intro or outro, the `.cwbrand` **archive** (a real zip,
+    verified against `unzip`), and capture **from the current clip** are all built and tested
+    (`packages/brand-kits`, 88 tests; the commands in `packages/timeline-engine`, 26). A
+    **Kits tab** in the editor's library lists a project's kits, shows how many items each has
+    placed, and offers apply (with the spec's six part checkboxes and a before-apply summary
+    that reports a missing logo), reapply, detach, remove and delete — each as one undo step,
+    and deleting a kit leaves its items standing.
+    What is *not* built: the kit **editor** (creating a kit from scratch and changing its
+    fields), the export/import buttons (the file picker lives in the main process and no
+    `brandKit:export` channel exists), and building a composition from a `compositionTemplateId`
+    — so a template-based intro is planned and then refused rather than inserted empty. Text and
+    shape items cannot be captured, because the kit's schema has no field for them. Nothing in
+    the app offers to *create* a kit, so a project's kit list is empty until something writes
+    one: the panel says so rather than showing a disabled button (`specs/13` §2).
 14. **Shapes and icons are editable in the inspector, and the picker re-opens on an
     existing item.** The row that was missing (SPEC 11 §12) is there: a shape lists its kind,
     an icon offers its 0.5–4 stroke width and a *Change…* button that reopens the picker on

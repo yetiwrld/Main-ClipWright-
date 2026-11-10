@@ -1126,3 +1126,35 @@ size**, because size belongs to the style and a captured size would fight it.
 output through `tryParseBrandKit` and `exportBrandKit`, because a captured kit goes into an
 editor and then into a `.cwbrand` file — and a capture that produced kits which fail to validate
 or lose fields on export would be a feature that only looks finished.
+
+## 39. The kit panel applies through `timeline.run`, and composes four commands into one undo
+
+**Nothing in the panel touches timeline state.** Every action returns a `CommandResult` and
+goes through `timeline.run`, which is the one writer — so an application is undoable, the
+autosave sees it, and the notes surface the way they do for a trim or a delete. A panel that
+called `applyBrandKit` and set state itself would work perfectly until the first Ctrl+Z.
+
+**Four commands become one history entry.** An application with an intro and an outro is
+graphics, captions, a start insert and an end append: four commands, each with its own patches.
+`run` takes one, so the panel composes them into a closure that rebuilds a patch set from the
+before-and-after states. The patches are deliberately coarse — whole `items` and `tracks`
+arrays rather than a minimal diff — because the history needs enough to undo and redo, not a
+diff algorithm, and a minimal diff is a second thing that can be wrong.
+
+**Both directions are tested, because only testing undo hides half of it.** The first patch set
+this produced undid correctly and redid to the state the project was already in, since a
+patch containing *before* values is indistinguishable from one containing *after* values until
+replay runs the wrong way. The test now applies the inverse and then the patches and asserts the
+logo is back.
+
+**The Apply button asks the plan, not the kit.** `canApply` plans the application and asks
+whether any part survived. A button enabled on "the kit has a logo" lights up for a kit whose
+logo is not in this project, and then either does nothing or, worse, does something partial
+without having warned.
+
+**`settings` rather than a new table.** Kits live in the project record's settings under one
+key, exactly as the caption-style copies do: `settings` is `passthrough`, so the project format
+did not change, and a kit is data that belongs to the project it was made for. A malformed entry
+is dropped rather than throwing, and the map's key wins over the object's `id` — because the key
+is what every caller looks a kit up with, and an object whose id drifted would otherwise be
+found under one name and report another.

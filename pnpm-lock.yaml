@@ -122,6 +122,9 @@ importers:
       '@clipwright/audio-core':
         specifier: workspace:*
         version: link:../../packages/audio-core
+      '@clipwright/brand-kits':
+        specifier: workspace:*
+        version: link:../../packages/brand-kits
       '@clipwright/caption-styles':
         specifier: workspace:*
         version: link:../../packages/caption-styles
