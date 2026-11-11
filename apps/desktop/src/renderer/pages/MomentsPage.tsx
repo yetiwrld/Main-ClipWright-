@@ -89,6 +89,16 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
   const [maxDurationSec, setMaxDurationSec] = useState(MAX_DURATION_SEC);
   const [favouritesOnly, setFavouritesOnly] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
+  /*
+    SPEC 07 §7's remaining two filters. Both are single predicates over a field the card already
+    displays, and both were absent while the popover offered three of the five.
+
+    Status is expressed as "only this status" rather than a checkbox set: the page already has
+    *Favourites only* and *Show rejected*, and a third independent toggle would let a user select
+    two statuses that cannot both hold — an empty list they would read as a bug.
+  */
+  const [statusFilter, setStatusFilter] = useState<'any' | 'candidate' | 'favourite' | 'clipped'>('any');
+  const [confidenceFilter, setConfidenceFilter] = useState<'any' | 'high' | 'medium' | 'low'>('any');
   const [contentType, setContentType] = useState('auto');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -179,6 +189,8 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
       if (!showRejected && moment.status === 'rejected') continue;
       if (favouritesOnly && moment.status !== 'favourite') continue;
       if (moment.score < minScore) continue;
+      if (statusFilter !== 'any' && moment.status !== statusFilter) continue;
+      if (confidenceFilter !== 'any' && moment.confidence !== confidenceFilter) continue;
       const durationSec = moment.durationUs / 1_000_000;
       if (durationSec < minDurationSec || durationSec > maxDurationSec) continue;
       if (needle) {
@@ -194,7 +206,19 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
       return b.moment.score - a.moment.score;
     });
     return list;
-  }, [groups, alternateIndex, favouritesOnly, maxDurationSec, minDurationSec, minScore, query, showRejected, sort]);
+  }, [
+    groups,
+    alternateIndex,
+    confidenceFilter,
+    favouritesOnly,
+    maxDurationSec,
+    minDurationSec,
+    minScore,
+    query,
+    showRejected,
+    sort,
+    statusFilter,
+  ]);
 
   const active = visible.find((entry) => entry.moment.id === activeId)?.moment ?? visible[0]?.moment ?? null;
 
@@ -592,6 +616,34 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
                   if (value < minDurationSec) setMinDurationSec(value);
                 }}
                 ariaLabel="Longest duration in seconds"
+              />
+            </label>
+            <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              Status
+              <Select
+                value={statusFilter}
+                onChange={(value) => setStatusFilter(value as typeof statusFilter)}
+                ariaLabel="Filter by status"
+                options={[
+                  { value: 'any', label: 'Any status' },
+                  { value: 'candidate', label: 'Candidate' },
+                  { value: 'favourite', label: 'Favourite' },
+                  { value: 'clipped', label: 'Clipped' },
+                ]}
+              />
+            </label>
+            <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              Confidence
+              <Select
+                value={confidenceFilter}
+                onChange={(value) => setConfidenceFilter(value as typeof confidenceFilter)}
+                ariaLabel="Filter by confidence"
+                options={[
+                  { value: 'any', label: 'Any confidence' },
+                  { value: 'high', label: 'High' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'low', label: 'Low' },
+                ]}
               />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)' }}>

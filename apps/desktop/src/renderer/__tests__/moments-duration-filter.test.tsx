@@ -42,7 +42,12 @@ vi.mock('../api.js', () => ({
   describeError: (err: unknown) => String(err),
 }));
 
-function moment(id: string, durationSec: number, title: string) {
+function moment(
+  id: string,
+  durationSec: number,
+  title: string,
+  extra: Partial<{ status: string; confidence: string }> = {},
+) {
   return {
     id,
     projectId: 'prj_1',
@@ -54,8 +59,8 @@ function moment(id: string, durationSec: number, title: string) {
     endUs: durationSec * 1_000_000,
     durationUs: durationSec * 1_000_000,
     score: 80,
-    confidence: 'high',
-    status: 'candidate',
+    confidence: extra.confidence ?? 'high',
+    status: extra.status ?? 'candidate',
     basis: 'heuristic',
     dimensions: {},
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -172,5 +177,81 @@ describe('the duration range filters by clip length', () => {
 
     await waitFor(() => expect(screen.getByText(/^Longest: 30s$/)).toBeTruthy());
     expect(screen.getByText(/^Shortest: 30s$/)).toBeTruthy();
+  });
+});
+
+describe('the status and confidence filters complete SPEC 07 §7', () => {
+  /*
+    §7's popover names five controls; three were built. Duration came first because it decides
+    whether a clip is usable at all; these two are convenience over fields the card already shows,
+    and they were the last of the five.
+
+    Status is a single choice rather than a checkbox set — the page also has *Favourites only* and
+    *Show rejected*, and a third independent toggle would let a user select two statuses that cannot
+    both hold, producing an empty list they would read as a bug.
+  */
+  beforeEach(() => {
+    bridge.listMoments.mockResolvedValue([
+      moment('m1', 20, 'High confidence', { confidence: 'high' }),
+      moment('m2', 30, 'Low confidence', { confidence: 'low' }),
+      moment('m3', 40, 'A favourite', { status: 'favourite' }),
+      moment('m4', 50, 'Already clipped', { status: 'clipped' }),
+    ]);
+  });
+
+  it('filters by status', async () => {
+    await openFilters();
+    await waitFor(() => expect(visibleTitle('High confidence')).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by status' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Clipped' }));
+
+    await waitFor(() => expect(visibleTitle('Already clipped')).toBe(true));
+    expect(visibleTitle('High confidence')).toBe(false);
+    expect(visibleTitle('A favourite')).toBe(false);
+  });
+
+  it('filters by confidence', async () => {
+    await openFilters();
+    await waitFor(() => expect(visibleTitle('High confidence')).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by confidence' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Low' }));
+
+    await waitFor(() => expect(visibleTitle('Low confidence')).toBe(true));
+    expect(visibleTitle('High confidence')).toBe(false);
+  });
+
+  it('shows everything before either is touched', async () => {
+    /* Defaults must exclude nothing — the filter is an opt-in narrowing, not a view. */
+    await openFilters();
+    await waitFor(() => expect(visibleTitle('High confidence')).toBe(true));
+    for (const title of ['Low confidence', 'A favourite', 'Already clipped']) {
+      expect(visibleTitle(title)).toBe(true);
+    }
+  });
+
+  it('combines the two with the rest of the popover', async () => {
+    /*
+      Predicates that short-circuit each other would pass the individual tests above. A favourite
+      with high confidence must survive status=favourite AND confidence=high, and the low-confidence
+      favourite must not.
+    */
+    bridge.listMoments.mockResolvedValue([
+      moment('m1', 20, 'Favourite, high', { status: 'favourite', confidence: 'high' }),
+      moment('m2', 30, 'Favourite, low', { status: 'favourite', confidence: 'low' }),
+      moment('m3', 40, 'Candidate, high', { confidence: 'high' }),
+    ]);
+    await openFilters();
+    await waitFor(() => expect(visibleTitle('Favourite, high')).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by status' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Favourite' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by confidence' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'High' }));
+
+    await waitFor(() => expect(visibleTitle('Favourite, high')).toBe(true));
+    expect(visibleTitle('Favourite, low')).toBe(false);
+    expect(visibleTitle('Candidate, high')).toBe(false);
   });
 });

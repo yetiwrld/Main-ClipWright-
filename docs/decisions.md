@@ -2466,3 +2466,31 @@ behaviours disagree about.
 **What I did not build.** Status and confidence filters are still absent from the popover. Both are
 displayed per card, both are one predicate, and neither is recorded here as a defect — they are the
 remaining two thirds of a feature whose useful third now works. `limitations.md` does not claim them.
+
+## 71. Finishing the popover, and why *not* a checkbox set
+
+§70 added the duration filter and left status and confidence open. Both are one predicate over a
+field the card already shows, so there was no judgement left in building them — except in how.
+
+The obvious shape is a set of checkboxes per facet: *Candidate, Favourite, Rejected, Clipped*. It is
+also wrong here. The page already carries **Favourites only** and **Show rejected**, which are
+status predicates in disguise, and a checkbox set alongside them would let a user tick *Candidate*
+and *Clipped* — two statuses that cannot both hold — and get an empty list. They would reasonably
+conclude the moments were gone.
+
+So status and confidence are single-choice selects including an explicit *Any*. The rule underneath
+is about **what an empty list means**: if a control can produce one through a combination the user
+cannot see as contradictory, the control is lying about the data. A select that offers one value at
+a time cannot express the contradiction, so the empty state stays informative — it means there are
+no moments matching, not that the filters cancel.
+
+**One test earns its place more than the others.** Each facet has its own test, and then there is one
+that sets both. Predicates that short-circuit one another satisfy every individual test — set status
+to *Favourite*, and the confidence filter silently stops mattering; every per-facet test still
+passes. The combined test is the only one that can see it, and the mutation that reproduces it
+(`else if` between the two checks) is killed by that test alone.
+
+**Two mutations that are worth naming.** Swapping the comparison fields —
+`moment.status !== confidenceFilter` — is the mistake this code invites, because both are enum strings
+on the same object and TypeScript cannot tell them apart. Both swaps were tried; both are killed.
+That is the difference between a test that exercises a filter and one that pins which field it reads.
