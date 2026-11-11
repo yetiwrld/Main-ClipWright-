@@ -570,6 +570,10 @@ still does not do:
   ratio (4:3 would export a different picture and display it as the project's own), so a custom
   project exports at 9:16 unless the user picks something else. Closing this needs a free-text
   aspect in the export panel, which is a feature rather than a repair.
+- **Status and confidence are shown on a moment but were absent from the Filters popover until
+  recently.** §7 lists five filters and three existed; duration (the one that decides whether a clip
+  is usable at all), status and confidence are now all present. Recorded here only because the
+  popover is the screen's filtering story and its completeness is worth being able to check.
 - **The Recommended badge (§02 §4.3) is not built.** The screen has no crop preview and no
   suggestion from the source's shape or content type; the user picks a ratio and it is used.
 - **Caption style tiles are text buttons, not live animated previews** (§02 §4.4). They name the
