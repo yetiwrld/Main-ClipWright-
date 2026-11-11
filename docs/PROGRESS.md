@@ -4,16 +4,25 @@ Written in plain language, for anyone picking this up. It is a summary, not a
 replacement for `docs/verification.md` (what has been proven) and
 `docs/limitations.md` (what is knowingly missing).
 
-Last updated after commit `f8efdb2`. 3647 automated tests, all passing.
+Last updated after commit `db21154`. 3647 automated tests, all passing.
 
-**The last seven commits repaired the app's connections to itself rather than adding features.** Every
+**This stretch of work repaired the app's connections to itself rather than adding features.** Every
 one was a value, a name or a channel that two files disagreed about: the start screen sent settings
 keys the schema does not have (so it could not create a project at all), four project actions existed
 in the store and in no window, a refactor deleted 36 IPC channels including the whole AI and moments
 surface, and the ducking settings on every track were read by nothing. The features were written;
-what was missing was the join. `docs/decisions.md` §51–55 records each one, and the recurring shape —
-a name in two files that no test reads from both sides — is why `ipc-surface.test.ts` now compares
-the bridge's channel list against main's in both directions.
+what was missing was the join. `ipc-surface.test.ts` now compares the bridge's channel list against
+main's in both directions.
+
+The shape recurred often enough to be worth naming: **a value existed as data and a constant was
+passed in its place.** The transcript export wrapped subtitles for 16:9 whatever the project was; the
+import copied media after the user asked it not to; the Moments screen offered a content type it
+never saved, and the analyser spelled that content type differently anyway; the export panel started
+at 16:9, 30 fps and auto-number regardless of the composition in front of it; and writing one
+project setting reset the other twenty-two to their defaults. `docs/decisions.md` §56–71 records each
+repair, along with two lessons about testing that cost CI cycles to learn: a test that reaches a
+binary it is not gated on passes locally and fails there as an unhandled error, and a test whose
+oracle is "nothing appears" cannot distinguish a guard from the bug it guards against.
 
 ---
 
