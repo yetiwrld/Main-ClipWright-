@@ -2434,3 +2434,35 @@ test — the worst kind of false signal when you have just changed the code unde
 by label, and a new test enumerates all eight selects that way. That was only possible because
 `Field` gained a `htmlFor` in §61; before that, position was the *only* way to reach a control, which
 is how the brittleness got in and stayed.
+
+## 70. A test that could not tell clamping from crossing
+
+SPEC 07 §7's Filters popover names five controls; three existed. The one missing that mattered is the
+**duration range**: a user with a 60-second slot and a 95-scored 90-second moment had no way to set
+it aside. The others (status, confidence) are shown on the card already, so filtering by them is
+convenience; duration is about whether the clip is usable at all.
+
+Two sliders, in seconds, spanning the schema's 3–600 s floor and ceiling so an untouched filter
+excludes nothing. Each handle *pushes* the other rather than crossing it — a range whose ends have
+swapped hides every moment, and an empty list reads as "there are no moments here", not as "you
+dragged one handle past the other".
+
+**The interesting part is the first test I wrote for that.** It dragged *Shortest* past *Longest* and
+asserted the list went empty. Then I removed both clamps as a mutation and it stayed green. Of course
+it did: an inverted range hides everything too. The assertion could not distinguish the behaviour I
+wanted from the behaviour I was guarding against, which is the definition of a vacuous test, and it
+is the third variant of that mistake this run (after §67's lookup short-circuit and §65's assertion
+on a call that queues work).
+
+What the assertion had to be was the **readout** — `Shortest: 100s` and `Longest: 100s` after
+dragging the short handle to 100 against a maximum of 20 — because that is the only observable where
+clamping and inverting differ. A second test covers the opposite handle, since a fix that guarded one
+direction would have passed the first.
+
+This is the pattern worth carrying forward: **when a test's oracle is "nothing appears", check
+whether the bug also produces nothing.** If it does, the oracle has to move to something the two
+behaviours disagree about.
+
+**What I did not build.** Status and confidence filters are still absent from the popover. Both are
+displayed per card, both are one predicate, and neither is recorded here as a defect — they are the
+remaining two thirds of a feature whose useful third now works. `limitations.md` does not claim them.

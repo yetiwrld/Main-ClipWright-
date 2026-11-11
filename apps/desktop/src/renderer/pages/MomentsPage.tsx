@@ -43,6 +43,14 @@ const CONTENT_TYPES: Array<{ value: string; label: string }> = [
   { value: 'other', label: 'Other' },
 ];
 
+/*
+  The duration filter's bounds. The schema allows clips from 3 s to 600 s (SPEC 07 §5's floor and
+  ceiling), so a filter wider than that could never exclude anything and a narrower one could never
+  include everything.
+*/
+const MIN_DURATION_SEC = 3;
+const MAX_DURATION_SEC = 600;
+
 const STAGE_ORDER: Array<MomentsProgressPayload['stage']> = ['candidates', 'features', 'scoring', 'dedupe', 'ranking'];
 
 const STAGE_LABELS: Record<MomentsProgressPayload['stage'], string> = {
@@ -72,6 +80,13 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortId>('score');
   const [minScore, setMinScore] = useState(0);
+  /*
+    SPEC 07 §7's duration-range filter. Stored in seconds and compared against `durationUs`, because
+    the control is a pair of sliders and microseconds are not something anyone drags. The defaults
+    span the schema's whole range, so an untouched filter excludes nothing.
+  */
+  const [minDurationSec, setMinDurationSec] = useState(MIN_DURATION_SEC);
+  const [maxDurationSec, setMaxDurationSec] = useState(MAX_DURATION_SEC);
   const [favouritesOnly, setFavouritesOnly] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [contentType, setContentType] = useState('auto');
@@ -164,6 +179,8 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
       if (!showRejected && moment.status === 'rejected') continue;
       if (favouritesOnly && moment.status !== 'favourite') continue;
       if (moment.score < minScore) continue;
+      const durationSec = moment.durationUs / 1_000_000;
+      if (durationSec < minDurationSec || durationSec > maxDurationSec) continue;
       if (needle) {
         const haystack = `${moment.title} ${moment.reason} ${moment.transcriptPreview} ${moment.hookSentence}`.toLowerCase();
         if (!haystack.includes(needle)) continue;
@@ -177,7 +194,7 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
       return b.moment.score - a.moment.score;
     });
     return list;
-  }, [groups, alternateIndex, favouritesOnly, minScore, query, showRejected, sort]);
+  }, [groups, alternateIndex, favouritesOnly, maxDurationSec, minDurationSec, minScore, query, showRejected, sort]);
 
   const active = visible.find((entry) => entry.moment.id === activeId)?.moment ?? visible[0]?.moment ?? null;
 
@@ -548,6 +565,34 @@ export function MomentsPage({ projectId, onNavigate }: { projectId: string; onNa
             <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
               Minimum score: {minScore}
               <Slider value={minScore} min={0} max={100} onChange={setMinScore} ariaLabel="Minimum score" />
+            </label>
+            <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              Shortest: {minDurationSec}s
+              <Slider
+                value={minDurationSec}
+                min={MIN_DURATION_SEC}
+                max={MAX_DURATION_SEC}
+                onChange={(value) => {
+                  /* The two handles cannot cross: a range whose ends have swapped excludes
+                     everything, and the user reads that as "no moments" rather than as a mistake. */
+                  setMinDurationSec(value);
+                  if (value > maxDurationSec) setMaxDurationSec(value);
+                }}
+                ariaLabel="Shortest duration in seconds"
+              />
+            </label>
+            <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+              Longest: {maxDurationSec}s
+              <Slider
+                value={maxDurationSec}
+                min={MIN_DURATION_SEC}
+                max={MAX_DURATION_SEC}
+                onChange={(value) => {
+                  setMaxDurationSec(value);
+                  if (value < minDurationSec) setMinDurationSec(value);
+                }}
+                ariaLabel="Longest duration in seconds"
+              />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)' }}>
               <Checkbox checked={favouritesOnly} onChange={setFavouritesOnly} ariaLabel="Favourites only" />
