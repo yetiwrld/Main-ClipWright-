@@ -1,0 +1,19 @@
+Copyright © Clipwright. All rights reserved.
+
+Clipwright Studio and its source code are proprietary software. No permission is
+granted to copy, modify, distribute, or use this software, in whole or in part,
+for any purpose without prior written permission from the copyright holder.
+
+This is a placeholder chosen deliberately: the owner has not yet selected a
+licence. See README.md → Licence and docs/decisions.md.
+
+THIRD-PARTY COMPONENTS
+
+This product includes, or is designed to include in packaged releases:
+- FFmpeg (GPL build) — GNU General Public License v2-or-later, as a separate
+  executable; see docs/licences.md for source-offer details.
+- Electron / Chromium — see docs/licences.md.
+- Node dependencies listed in THIRD-PARTY-NOTICES.txt.
+
+Those components are licensed under their own terms; nothing in this file
+restricts your rights under those licences.
