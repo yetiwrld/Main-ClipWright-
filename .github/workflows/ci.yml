@@ -55,21 +55,13 @@ jobs:
             echo "========== packages/$pkg =========="
             (cd "packages/$pkg" && pnpm test) 2>&1 | tee "test-$pkg.log" || {
               failed=1
-              tail -c 1200 "test-$pkg.log" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
-                read -r -d '' blob || true
-                printf '::error::Package FAILED: %s — %s' "$pkg" "$blob"
-                echo
-              }
+              printf '::error::Package FAILED: %s log(base64):%s\n' "$pkg" "$(sed -e 's/\x1b\[[0-9;]*m//g' "test-$pkg.log" | tail -c 1500 | base64 -w0)"
             }
           done
           echo '========== apps/desktop =========='
           (cd apps/desktop && pnpm test) 2>&1 | tee test-desktop.log || {
             failed=1
-            tail -c 1200 test-desktop.log | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
-              read -r -d '' blob || true
-              printf '::error::Package FAILED: apps/desktop — %s' "$blob"
-              echo
-            }
+            printf '::error::Package FAILED: apps/desktop log(base64):%s\n' "$(sed -e 's/\x1b\[[0-9;]*m//g' test-desktop.log | tail -c 1500 | base64 -w0)"
           }
           exit $failed
       - name: Build (electron-vite)
