@@ -3,9 +3,8 @@
 **Turn one long video into many short, captioned, ready-to-post clips.**
 A local-first Windows desktop multitrack video editor (Electron + React + SQLite).
 
-> **Project status (2026-11-12): alpha — source complete for the current scope, Windows
-> packaging unverified.** The app has not been launched on a real Windows machine from a
-> built installer, no release exists, and several spec areas (updater, `.cwpack` export,
+> **Project status (2026-11-12): alpha — v0.1.0 is published as a **prerelease** built by
+> CI; the app has never been launched on any machine.** Several spec areas (updater, `.cwpack` export,
 > brand kits, waveform cache) are explicitly not built. Read `docs/limitations.md` before
 > relying on anything here. The export pipeline has been verified with a real FFmpeg on
 > Linux — see `docs/verification.md`.
@@ -114,8 +113,10 @@ trust the hash). Never install an unsigned build from anywhere else.
 
 ## Version & release notes
 
-- Version: **0.1.0** (see `apps/desktop/package.json`). No releases have been published yet.
-- Changelog / release notes will live in GitHub Releases once the first tag is cut.
+- Version: **0.1.0** — published 2026-11-12 as a **prerelease** (unsigned alpha):
+  <https://github.com/yetiwrld/Main-ClipWright-/releases/tag/v0.1.0>
+  Built by CI (`.github/workflows/release.yml`) on windows-latest. Artefact SHA-256s are in
+  the release notes. The app has never been launched by anyone yet.
 
 ## Licence
 
