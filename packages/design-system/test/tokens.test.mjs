@@ -1,10 +1,12 @@
 /** Design-system invariants: required tokens exist; no hex colours leak outside design-system. */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const root = new URL('../../..', import.meta.url).pathname; // repo root
+const here = dirname(fileURLToPath(import.meta.url)); // packages/design-system/test
+const root = resolve(here, '../../..'); // repo root
 const read = (p) => readFileSync(join(root, p), 'utf8');
 
 const REQUIRED = [
