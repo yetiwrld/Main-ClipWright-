@@ -1,4 +1,18 @@
-# Verification report — v0.1.0 (2026-11-12)
+# Verification report — v0.1.1 (2026-11-12)
+
+## Release v0.1.1 (prerelease, CI-built)
+
+- `release.yml` tag-push build on windows-latest: **success** expected (see
+  https://github.com/yetiwrld/Main-ClipWright-/actions). Artefacts: NSIS setup + portable
+  (versions 0.1.1). The tag is cut from the branch commit that includes the faster-whisper
+  backend; artefact SHA-256s are in the release notes.
+- CI (this branch) is green on **ubuntu-latest and windows-latest**: install (VS 2026 +
+  node-gyp@13, VsDevCmd), typecheck, per-package unit tests (135 total), `electron-vite build`.
+- **NOT verified:** the app has never been launched; the faster-whisper backend has never
+  loaded a real model; the probe order has never run on Windows. The v0.1.1 release proves
+  the pipeline, not the product's runtime behaviour.
+
+## v0.1.0 report (historical)
 
 **This is an honest, partial report. Completion per specs/16 is NOT claimed.**
 Everything below states what was actually executed, where, and with what result.

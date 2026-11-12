@@ -1,6 +1,6 @@
 {
   "name": "clipwright-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Clipwright Studio — turn one long video into many short, captioned, ready-to-post clips. A local-first Windows desktop multitrack video editor.",
   "packageManager": "pnpm@9.15.9",

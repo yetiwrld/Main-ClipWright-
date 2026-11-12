@@ -1,4 +1,4 @@
-# Known limitations — as of 2026-11-12 (v0.1.0, unreleased)
+# Known limitations — as of 2026-11-12 (v0.1.1 prerelease, CI-built, never launched)
 
 Everything in this file is a real, current limitation. Nothing here is hidden by
 wording elsewhere in the docs; `README.md` links back here.

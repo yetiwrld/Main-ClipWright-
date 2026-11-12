@@ -131,7 +131,7 @@ jobs:
           $sumSetup = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $sumPortable = if ($portable) { (Get-FileHash $portable.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'n/a' }
           $notes = @"
-          Clipwright Studio $tag
+          Clipwright Studio $tag — alpha prerelease
 
           **Unsigned build.** Windows SmartScreen will warn that the publisher is unknown.
           Verify the SHA-256 hashes below before running.
@@ -139,8 +139,22 @@ jobs:
           - Setup:   $sumSetup  $($setup.Name)
           - Portable: $sumPortable  $(if ($portable) { $portable.Name } else { 'not produced' })
 
-          FFmpeg is a separate GPL executable (BtbN GPL build, see docs/licences.md);
-          corresponding source is offered there and in the release notes of this tag.
+          **What's new in 0.1.1**
+          - faster-whisper offline transcription backend: faster-whisper (CTranslate2) models
+            already in your Hugging Face hub cache (e.g. Systran/faster-whisper-*,
+            mobiuslabsgmbh/faster-whisper-large-v3-turbo) are detected read-only at startup or
+            via Settings → Models → Refresh and can be selected in the Transcription model
+            dropdown. Requires Python with the faster-whisper package; Python is auto-probed
+            (py launcher -3.12 first, then common install locations) or set CLIPWRIGHT_PYTHON.
+
+          **Honest status (read before running)**
+          - This build is CI-compiled, CI-tested (135 unit tests) and CI-packaged; the app has
+            never been launched by any build pipeline or on any machine. First launch is
+            unverified.
+          - Offline transcription end-to-end (whisper.cpp and the new faster-whisper path) is
+            UNVERIFIED — no model file has been loaded by any build of this app yet.
+          - FFmpeg is a separate GPL executable (BtbN GPL build, see docs/licences.md);
+            corresponding source is offered there and in the release notes of this tag.
           "@
           $notes | Out-File release-notes.md -Encoding utf8
-          gh release create $tag "$($setup.FullName)" $(if ($portable) { "$($portable.FullName)" }) --title "Clipwright Studio $tag" --notes-file release-notes.md
+          gh release create $tag "$($setup.FullName)" $(if ($portable) { "$($portable.FullName)" }) --title "Clipwright Studio $tag" --notes-file release-notes.md --prerelease

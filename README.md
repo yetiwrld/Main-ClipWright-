@@ -113,10 +113,13 @@ trust the hash). Never install an unsigned build from anywhere else.
 
 ## Version & release notes
 
-- Version: **0.1.0** — published 2026-11-12 as a **prerelease** (unsigned alpha):
-  <https://github.com/yetiwrld/Main-ClipWright-/releases/tag/v0.1.0>
+- Version: **0.1.1** — published 2026-11-12 as a **prerelease** (unsigned alpha):
+  <https://github.com/yetiwrld/Main-ClipWright-/releases/tag/v0.1.1>
   Built by CI (`.github/workflows/release.yml`) on windows-latest. Artefact SHA-256s are in
-  the release notes. The app has never been launched by anyone yet.
+  the release notes. 0.1.1 adds the faster-whisper backend (cached CT2 models are detected
+  read-only and selectable). The app has never been launched by anyone yet; offline
+  transcription is unverified end-to-end. v0.1.0 notes:
+  <https://github.com/yetiwrld/Main-ClipWright-/releases/tag/v0.1.0>
 
 ## Licence
 
