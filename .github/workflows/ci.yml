@@ -18,13 +18,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+      # corepack reads packageManager from package.json (pnpm@9.15.9) — the same
+      # pattern that the repository's other CI workflow uses successfully.
+      - run: corepack enable
       - name: Install
         run: pnpm install --frozen-lockfile --fetch-retries 5
         env:
