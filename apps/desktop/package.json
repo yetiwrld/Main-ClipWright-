@@ -1,0 +1,52 @@
+{
+  "name": "@clipwright/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clipwright Studio \u2014 turn one long video into many short, captioned, ready-to-post clips.",
+  "author": "Clipwright",
+  "license": "UNLICENSED",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dist": "electron-vite build && electron-builder --config electron-builder.yml --win --x64",
+    "dist:dir": "electron-vite build && electron-builder --config electron-builder.yml --win --x64 --dir",
+    "dist:linux": "electron-vite build && electron-builder --config electron-builder.yml --linux dir"
+  },
+  "dependencies": {
+    "@clipwright/ai-core": "workspace:*",
+    "@clipwright/audio-core": "workspace:*",
+    "@clipwright/caption-styles": "workspace:*",
+    "@clipwright/design-system": "workspace:*",
+    "@clipwright/export-core": "workspace:*",
+    "@clipwright/media-core": "workspace:*",
+    "@clipwright/project-schema": "workspace:*",
+    "@clipwright/timeline-engine": "workspace:*",
+    "@fontsource/manrope": "^5.3.0",
+    "better-sqlite3": "^13.1.1",
+    "clsx": "^2.1.1",
+    "immer": "^10.1.1",
+    "lucide-react": "^0.469.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "zod": "^3.23.8",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^45.3.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "vite": "^6.0.0"
+  }
+}

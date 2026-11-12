@@ -1,0 +1,42 @@
+# electron-builder configuration — unsigned by default (see docs/decisions.md).
+# Code signing requires CSC_LINK + CSC_KEY_PASSWORD secrets on the release runner;
+# without them the installer is still produced but the app and docs state it is unsigned.
+appId: com.clipwright.studio
+productName: Clipwright Studio
+copyright: Copyright © Clipwright. All rights reserved.
+files:
+  - out/**
+  - package.json
+asar: true
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+  - "resources/bin/**"
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter:
+      - "**/*"
+directories:
+  output: release
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: ../../assets/ClipWright_Icon.ico
+  requestedExecutionLevel: asInvoker
+nsis:
+  oneClick: false
+  perMachine: false # per-user install by default; wizard offers per-machine when run elevated
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true # checkbox shown at install time, default checked
+  createStartMenuShortcut: true
+  shortcutName: Clipwright Studio
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false # user projects/media are never deleted on uninstall
+  license: ../../LICENSE
+  artifactName: Clipwright-Studio-Setup-${version}-x64.${ext}
+portable:
+  artifactName: Clipwright-Studio-${version}-x64-portable.${ext}
+publish: null # publishing happens via the release workflow, never silently
