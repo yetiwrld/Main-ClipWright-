@@ -26,7 +26,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --fetch-retries 5
+        env:
+          # The Electron npm postinstall downloads ~110 MB from the release CDN,
+          # which has flaked on these runners before. CI never launches Electron;
+          # electron-builder fetches its own dist when packaging.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - name: Typecheck
         run: pnpm -r typecheck
       - name: Unit tests
