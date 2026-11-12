@@ -24,7 +24,8 @@ jobs:
       # corepack reads packageManager from package.json (pnpm@9.15.9) — the same
       # pattern that the repository's other CI workflow uses successfully.
       - run: corepack enable
-      - name: Install
+      - name: Install (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -o pipefail
@@ -43,6 +44,24 @@ jobs:
           # The Electron npm postinstall downloads ~110 MB from the release CDN,
           # which has flaked on these runners before. CI never launches Electron;
           # electron-builder fetches its own dist when packaging.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Install (Windows, VS env)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Write-Host "Visual Studio: $vsPath"
+          cmd /c "call `"$vsPath\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && pnpm install --frozen-lockfile --fetch-retries 5 > install.log 2>&1"
+          if ($LASTEXITCODE -ne 0) {
+            $raw = [IO.File]::ReadAllText('install.log')
+            $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($raw))
+            if ($b64.Length -gt 3000) { $b64 = $b64.Substring($b64.Length - 3000) }
+            Write-Host "::error::pnpm install failed (exit $LASTEXITCODE) log(base64 tail):$b64"
+            exit $LASTEXITCODE
+          }
+        env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - name: Typecheck
         run: pnpm -r typecheck

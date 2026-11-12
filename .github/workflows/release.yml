@@ -21,8 +21,21 @@ jobs:
       # pattern that the repository's other CI workflow uses successfully.
       - run: corepack enable
 
-      - name: Install
-        run: pnpm install --frozen-lockfile --fetch-retries 5
+      - name: Install (VS env)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Write-Host "Visual Studio: $vsPath"
+          cmd /c "call `"$vsPath\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && pnpm install --frozen-lockfile --fetch-retries 5 > install.log 2>&1"
+          if ($LASTEXITCODE -ne 0) {
+            $raw = [IO.File]::ReadAllText('install.log')
+            $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($raw))
+            if ($b64.Length -gt 3000) { $b64 = $b64.Substring($b64.Length - 3000) }
+            Write-Host "::error::pnpm install failed (exit $LASTEXITCODE) log(base64 tail):$b64"
+            exit $LASTEXITCODE
+          }
         env:
           # The Electron npm postinstall downloads ~110 MB from the release CDN,
           # which has flaked on these runners before. CI never launches Electron;
@@ -75,13 +88,19 @@ jobs:
         run: node scripts/release/gen-checksums.mjs
 
       - name: Build & package (NSIS + portable, x64)
-        shell: bash
+        shell: pwsh
         run: |
-          set -o pipefail
-          pnpm --filter @clipwright/desktop dist 2>&1 | tee dist.log || {
-            code=$?
-            printf '::error::packaging failed (exit %s) log(base64):%s\n' "$code" "$(sed -e 's/\x1b\[[0-9;]*m//g' dist.log | tail -c 2500 | base64 -w0)"
-            exit $code
+          $ErrorActionPreference = 'Continue'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Write-Host "Visual Studio: $vsPath"
+          cmd /c "call `"$vsPath\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && pnpm --filter @clipwright/desktop dist > dist.log 2>&1"
+          if ($LASTEXITCODE -ne 0) {
+            $raw = [IO.File]::ReadAllText('dist.log')
+            $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($raw))
+            if ($b64.Length -gt 3000) { $b64 = $b64.Substring($b64.Length - 3000) }
+            Write-Host "::error::packaging failed (exit $LASTEXITCODE) log(base64 tail):$b64"
+            exit $LASTEXITCODE
           }
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
