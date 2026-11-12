@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm -r typecheck
+      - name: Unit tests
+        run: pnpm -r test
+      - name: Build (electron-vite)
+        run: pnpm --filter @clipwright/desktop build
+      - name: Export matrix (Linux only; only if ffmpeg is available)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          if command -v ffmpeg >/dev/null; then
+            CLIPWRIGHT_FFMPEG="$(command -v ffmpeg)" node_modules/.bin/tsx scripts/verify/export-matrix.ts
+          else
+            echo "ffmpeg not found on runner; skipping export matrix (see docs/verification.md)"
+          fi

@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm -r typecheck
+      - name: Unit tests
+        run: pnpm -r test
+
+      # ---- bundled binaries (unpinned sources, see docs/release.md) ----
+      - name: Fetch FFmpeg (BtbN GPL build)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-extract -Force
+          $binDir = Join-Path $PWD 'apps/desktop/resources/bin'
+          Copy-Item (Get-ChildItem ffmpeg-extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $binDir/ffmpeg.exe
+          Copy-Item (Get-ChildItem ffmpeg-extract -Recurse -Filter ffprobe.exe | Select-Object -First 1).FullName $binDir/ffprobe.exe
+
+      - name: Fetch yt-dlp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile apps/desktop/resources/bin/yt-dlp.exe
+
+      - name: Fetch & build whisper.cpp (pinned tag)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git clone --depth 1 --branch v1.9.5 https://github.com/ggerganov/whisper.cpp whisper.cpp
+          cmake -S whisper.cpp -B whisper.cpp/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build whisper.cpp/build --config Release
+          $exe = Get-ChildItem whisper.cpp/build -Recurse -Filter whisper-cli.exe | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem whisper.cpp/build -Recurse -Filter main.exe | Select-Object -First 1 }
+          if (-not $exe) { throw 'whisper-cli.exe not produced' }
+          Copy-Item $exe.FullName apps/desktop/resources/bin/whisper-cli.exe
+
+      - name: Record sha256 checksums
+        run: node scripts/release/gen-checksums.mjs
+
+      - name: Build & package (NSIS + portable, x64)
+        run: pnpm --filter @clipwright/desktop dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Print artefact hashes
+        shell: pwsh
+        run: |
+          Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Output "$h  $($_.Name)  ($($_.Length) bytes)"
+          }
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $setup = Get-ChildItem apps/desktop/release -Filter '*Setup*.exe' | Select-Object -First 1
+          $portable = Get-ChildItem apps/desktop/release -Filter '*portable*.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'NSIS artefact not found' }
+          $sumSetup = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sumPortable = if ($portable) { (Get-FileHash $portable.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'n/a' }
+          $notes = @"
+          Clipwright Studio $tag
+
+          **Unsigned build.** Windows SmartScreen will warn that the publisher is unknown.
+          Verify the SHA-256 hashes below before running.
+
+          - Setup:   $sumSetup  $($setup.Name)
+          - Portable: $sumPortable  $(if ($portable) { $portable.Name } else { 'not produced' })
+
+          FFmpeg is a separate GPL executable (BtbN GPL build, see docs/licences.md);
+          corresponding source is offered there and in the release notes of this tag.
+          "@
+          $notes | Out-File release-notes.md -Encoding utf8
+          gh release create $tag "$($setup.FullName)" $(if ($portable) { "$($portable.FullName)" }) --title "Clipwright Studio $tag" --notes-file release-notes.md

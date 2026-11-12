@@ -1,0 +1,387 @@
+THIRD-PARTY NOTICES — Clipwright Studio
+
+Generated from the pnpm lockfile with `pnpm licenses list --json` on 2026-11-12.
+This list covers npm dependencies of the workspace. It does not cover the
+FFmpeg/whisper.cpp/yt-dlp binaries staged by the release workflow; those
+are recorded in docs/licences.md with versions and hashes.
+
+## (MIT OR CC0-1.0) (1 packages)
+- type-fest @ 0.13.1 — Sindre Sorhus
+
+## (WTFPL OR MIT) (1 packages)
+- utf8-byte-length @ 1.0.5 — Carl Xiong
+
+## 0BSD (1 packages)
+- tslib @ 2.9.1 — Microsoft Corp.
+
+## Apache-2.0 (9 packages)
+- @malept/cross-spawn-promise @ 2.0.0 — Mark Lee
+- baseline-browser-mapping @ 2.11.36
+- ejs @ 3.1.10 — Matthew Eernisse
+- expect-type @ 1.4.0
+- exponential-backoff @ 3.1.3 — Sami Sayegh
+- filelist @ 1.0.6 — Matthew Eernisse
+- jake @ 10.9.4 — Matthew Eernisse
+- sumchecker @ 3.0.1 — Mark Lee
+- typescript @ 5.9.3 — Microsoft Corp.
+
+## BSD-2-Clause (5 packages)
+- @electron/osx-sign @ 1.3.3 — electron
+- @electron/windows-sign @ 1.2.2 — Felix Rieseberg
+- dotenv @ 16.6.1
+- dotenv-expand @ 11.0.7 — motdotla
+- http-cache-semantics @ 4.3.0 — Kornel Lesiński
+
+## BSD-3-Clause (10 packages)
+- asn1js @ 3.1.0 — Yury Strozhevsky
+- bytestreamjs @ 2.0.1 — Yury Strozhevsky
+- duplexer2 @ 0.1.4 — Conrad Pankoff
+- fast-uri @ 3.1.9 — Vincent Le Goff
+- global-agent @ 3.0.0 — Gajus Kuizinas
+- pkijs @ 3.4.3 — Yury Strozhevsky
+- roarr @ 2.15.4 — Gajus Kuizinas
+- source-map @ 0.6.1 — Nick Fitzgerald
+- source-map-js @ 1.2.2 — Valentin 7rulnik Semirulnik
+- sprintf-js @ 1.1.3 — Alexandru Mărășteanu
+
+## BlueOak-1.0.0 (7 packages)
+- chownr @ 3.0.0 — Isaac Z. Schlueter
+- isexe @ 3.1.5, 4.0.0 — Isaac Z. Schlueter
+- minimatch @ 10.2.6 — Isaac Z. Schlueter
+- minipass @ 7.1.3 — Isaac Z. Schlueter
+- sax @ 1.6.1 — Isaac Z. Schlueter
+- tar @ 7.5.23 — Isaac Z. Schlueter
+- yallist @ 5.0.0 — Isaac Z. Schlueter
+
+## CC-BY-4.0 (1 packages)
+- caniuse-lite @ 1.0.30001826 — Ben Briggs
+
+## ISC (30 packages)
+- @isaacs/fs-minipass @ 4.0.1 — Isaac Z. Schlueter
+- abbrev @ 4.0.0 — GitHub Inc.
+- at-least-node @ 1.0.0 — Ryan Zimmerman
+- cliui @ 8.0.1 — Ben Coe
+- electron-to-chromium @ 1.5.483 — Kilian Valkhof
+- fs.realpath @ 1.0.0 — Isaac Z. Schlueter
+- get-caller-file @ 2.0.5 — Stefan Penner
+- glob @ 7.2.3 — Isaac Z. Schlueter
+- graceful-fs @ 4.2.11
+- hosted-git-info @ 4.1.0 — Rebecca Turner
+- inflight @ 1.0.6 — Isaac Z. Schlueter
+- inherits @ 2.0.4
+- isexe @ 2.0.0 — Isaac Z. Schlueter
+- json-stringify-safe @ 5.0.1 — Isaac Z. Schlueter
+- lru-cache @ 5.1.1, 6.0.0 — Isaac Z. Schlueter
+- lucide-react @ 0.469.0 — Eric Fennis
+- minimatch @ 3.1.5, 5.1.9, 9.0.9 — Isaac Z. Schlueter
+- nopt @ 9.0.0 — GitHub Inc.
+- once @ 1.4.0 — Isaac Z. Schlueter
+- picocolors @ 1.1.1 — Alexey Raspopov
+- proc-log @ 6.1.0 — GitHub Inc.
+- rimraf @ 2.6.3 — Isaac Z. Schlueter
+- semver @ 5.7.3, 6.3.2, 7.7.4, 7.8.6 — GitHub Inc.
+- siginfo @ 2.0.0 — Emil Bay
+- signal-exit @ 3.0.7 — Ben Coe
+- which @ 2.0.2, 5.0.0, 6.0.1 — GitHub Inc.
+- wrappy @ 1.0.2 — Isaac Z. Schlueter
+- y18n @ 5.0.8 — Ben Coe
+- yallist @ 3.1.1, 4.0.0 — Isaac Z. Schlueter
+- yargs-parser @ 21.1.1 — Ben Coe
+
+## MIT (282 packages)
+- @babel/code-frame @ 7.29.7 — The Babel Team
+- @babel/compat-data @ 7.29.7 — The Babel Team
+- @babel/core @ 7.29.13 — The Babel Team
+- @babel/generator @ 7.29.14 — The Babel Team
+- @babel/helper-compilation-targets @ 7.29.13 — The Babel Team
+- @babel/helper-globals @ 7.29.7 — The Babel Team
+- @babel/helper-module-imports @ 7.29.7 — The Babel Team
+- @babel/helper-module-transforms @ 7.29.14 — The Babel Team
+- @babel/helper-plugin-utils @ 7.29.7 — The Babel Team
+- @babel/helper-string-parser @ 7.29.14 — The Babel Team
+- @babel/helper-validator-identifier @ 7.29.7 — The Babel Team
+- @babel/helper-validator-option @ 7.29.7 — The Babel Team
+- @babel/helpers @ 7.29.14 — The Babel Team
+- @babel/parser @ 7.29.14 — The Babel Team
+- @babel/plugin-transform-arrow-functions @ 7.29.7 — The Babel Team
+- @babel/plugin-transform-react-jsx-self @ 7.29.7 — The Babel Team
+- @babel/plugin-transform-react-jsx-source @ 7.29.7 — The Babel Team
+- @babel/template @ 7.29.7 — The Babel Team
+- @babel/traverse @ 7.29.14 — The Babel Team
+- @babel/types @ 7.29.14 — The Babel Team
+- @electron-internal/extract-zip @ 1.0.8
+- @electron/asar @ 3.4.1
+- @electron/fuses @ 1.8.0 — Electron Community
+- @electron/get @ 3.1.0, 5.1.0 — Samuel Attard
+- @electron/notarize @ 2.5.0 — Samuel Attard
+- @electron/rebuild @ 4.2.1
+- @electron/universal @ 2.0.3 — Samuel Attard
+- @esbuild/linux-x64 @ 0.21.5, 0.25.12, 0.28.2
+- @jridgewell/gen-mapping @ 0.3.13 — Justin Ridgewell
+- @jridgewell/remapping @ 2.3.5 — Justin Ridgewell
+- @jridgewell/resolve-uri @ 3.1.2 — Justin Ridgewell
+- @jridgewell/sourcemap-codec @ 1.6.0 — Justin Ridgewell
+- @jridgewell/trace-mapping @ 0.3.31 — Justin Ridgewell
+- @malept/flatpak-bundler @ 0.4.0 — Matt Watson
+- @noble/hashes @ 1.8.0 — Paul Miller
+- @oxc-project/types @ 0.156.0 — Boshen and oxc contributors
+- @peculiar/asn1-schema @ 2.11.1 — PeculiarVentures, LLC
+- @peculiar/json-schema @ 1.1.12 — PeculiarVentures, Inc
+- @peculiar/utils @ 2.0.3 — PeculiarVentures
+- @peculiar/webcrypto @ 1.7.2 — PeculiarVentures
+- @rolldown/binding-linux-x64-gnu @ 1.2.19
+- @rolldown/binding-linux-x64-musl @ 1.2.19
+- @rolldown/pluginutils @ 1.0.0-beta.27, 1.1.0
+- @rollup/rollup-linux-x64-gnu @ 4.68.2 — Lukas Taegert-Atkinson
+- @rollup/rollup-linux-x64-musl @ 4.68.2 — Lukas Taegert-Atkinson
+- @sindresorhus/is @ 4.6.0 — Sindre Sorhus
+- @szmarczak/http-timer @ 4.0.6 — Szymon Marczak
+- @types/babel__core @ 7.20.5
+- @types/babel__generator @ 7.27.0
+- @types/babel__template @ 7.4.4
+- @types/babel__traverse @ 7.28.0
+- @types/better-sqlite3 @ 7.6.13
+- @types/cacheable-request @ 6.0.3
+- @types/debug @ 4.1.13
+- @types/estree @ 1.0.10
+- @types/fs-extra @ 9.0.13
+- @types/http-cache-semantics @ 4.2.0
+- @types/keyv @ 3.1.4
+- @types/ms @ 2.1.0
+- @types/node @ 22.20.5, 24.19.2
+- @types/react @ 19.3.0
+- @types/react-dom @ 19.3.0
+- @types/responselike @ 1.0.3
+- @vitejs/plugin-react @ 4.7.0 — Evan You
+- @vitest/expect @ 2.1.9
+- @vitest/mocker @ 2.1.9
+- @vitest/pretty-format @ 2.1.9
+- @vitest/runner @ 2.1.9
+- @vitest/snapshot @ 2.1.9
+- @vitest/spy @ 2.1.9
+- @vitest/utils @ 2.1.9
+- @xmldom/xmldom @ 0.8.15
+- agent-base @ 7.1.4 — Nathan Rajlich
+- ajv @ 8.20.0 — Evgeny Poberezkin
+- ansi-regex @ 5.0.1 — Sindre Sorhus
+- ansi-styles @ 4.3.0 — Sindre Sorhus
+- app-builder-lib @ 26.18.0 — Vladimir Krivosheev
+- assertion-error @ 2.0.1 — Jake Luer
+- async @ 3.2.6 — Caolan McMahon
+- async-exit-hook @ 2.0.1 — Tapani Moilanen
+- asynckit @ 0.4.0 — Alex Indigo
+- aws4 @ 1.13.2 — Michael Hart
+- balanced-match @ 1.0.2, 4.0.4
+- base64-js @ 1.5.1 — T. Jameson Little
+- better-sqlite3 @ 13.1.1 — Joshua Wise
+- bluebird @ 3.7.2 — Petka Antonov
+- boolean @ 3.2.0
+- brace-expansion @ 1.1.22, 2.1.8, 5.0.13
+- browserslist @ 4.29.5 — Andrey Sitnik
+- buffer-from @ 1.1.2
+- builder-util @ 26.16.0 — Vladimir Krivosheev
+- builder-util-runtime @ 9.7.0 — Vladimir Krivosheev
+- cac @ 6.7.14, 7.1.0 — egoist
+- cacheable-lookup @ 5.0.4 — Szymon Marczak
+- cacheable-request @ 7.0.4 — Luke Childs
+- call-bind-apply-helpers @ 1.0.2 — Jordan Harband
+- chai @ 5.3.3 — Jake Luer
+- chalk @ 4.1.2
+- check-error @ 2.1.3 — Jake Luer
+- chromium-pickle-js @ 0.2.0
+- ci-info @ 4.3.1, 4.5.0 — Thomas Watson Steen
+- clone-response @ 1.0.3 — Luke Childs
+- clsx @ 2.1.1 — Luke Edwards
+- color-convert @ 2.0.1 — Heather Arthur
+- color-name @ 1.1.4 — DY
+- combined-stream @ 1.0.8 — Felix Geisendörfer
+- commander @ 5.1.0, 9.5.0 — TJ Holowaychuk
+- compare-version @ 0.1.2 — Kevin Mårtensson
+- concat-map @ 0.0.1 — James Halliday
+- convert-source-map @ 2.0.0 — Thorsten Lorenz
+- cookie @ 1.1.1 — Roman Shtylman
+- core-util-is @ 1.0.3 — Isaac Z. Schlueter
+- cross-dirname @ 0.1.0
+- cross-spawn @ 7.0.6 — André Cruz
+- csstype @ 3.2.3 — Fredrik Nicol
+- debug @ 4.4.3 — Josh Junon
+- decompress-response @ 6.0.0 — Sindre Sorhus
+- deep-eql @ 5.0.2 — Jake Luer
+- defer-to-connect @ 2.0.1 — Szymon Marczak
+- define-data-property @ 1.1.4 — Jordan Harband
+- define-properties @ 1.2.1 — Jordan Harband
+- delayed-stream @ 1.0.0 — Felix Geisendörfer
+- detect-node @ 2.1.0 — Ilya Kantor
+- dir-compare @ 4.2.0 — Liviu Grigorescu
+- dmg-builder @ 26.18.0 — Vladimir Krivosheev
+- dunder-proto @ 1.0.1 — Jordan Harband
+- electron @ 45.3.1 — Electron Community
+- electron-builder @ 26.18.0 — Vladimir Krivosheev
+- electron-builder-squirrel-windows @ 26.18.0 — Vladimir Krivosheev
+- electron-publish @ 26.18.0 — Vladimir Krivosheev
+- electron-vite @ 6.0.0 — Alex Wei
+- electron-winstaller @ 5.4.0
+- emoji-regex @ 8.0.0 — Mathias Bynens
+- end-of-stream @ 1.4.5 — Mathias Buus
+- env-paths @ 2.2.1, 3.0.0 — Sindre Sorhus
+- err-code @ 2.0.3 — IndigoUnited
+- es-define-property @ 1.0.1 — Jordan Harband
+- es-errors @ 1.3.0 — Jordan Harband
+- es-module-lexer @ 1.7.0 — Guy Bedford
+- es-object-atoms @ 1.1.2 — Jordan Harband
+- es-set-tostringtag @ 2.1.0 — Jordan Harband
+- es6-error @ 4.1.1 — Ben Youngblood
+- esbuild @ 0.21.5, 0.25.12, 0.28.2
+- escalade @ 3.2.0 — Luke Edwards
+- escape-string-regexp @ 4.0.0 — Sindre Sorhus
+- estree-walker @ 3.0.3 — Rich Harris
+- fast-deep-equal @ 3.1.3 — Evgeny Poberezkin
+- fdir @ 6.5.0 — thecodrr
+- form-data @ 4.0.6 — Felix Geisendörfer
+- fs-extra @ 7.0.1, 8.1.0, 9.1.0, 10.1.0, 11.3.1, 11.4.1 — JP Richardson
+- function-bind @ 1.1.2 — Raynos
+- gensync @ 1.0.0-beta.2 — Logan Smyth
+- get-intrinsic @ 1.3.0 — Jordan Harband
+- get-proto @ 1.0.1 — Jordan Harband
+- get-stream @ 5.2.0 — Sindre Sorhus
+- globalthis @ 1.0.4 — Jordan Harband
+- gopd @ 1.2.0 — Jordan Harband
+- got @ 11.8.6
+- has-flag @ 4.0.0 — Sindre Sorhus
+- has-property-descriptors @ 1.0.2 — Jordan Harband
+- has-symbols @ 1.1.0 — Jordan Harband
+- has-tostringtag @ 1.0.2 — Jordan Harband
+- hasown @ 2.0.4 — Jordan Harband
+- http-proxy-agent @ 7.0.2 — Nathan Rajlich
+- http2-wrapper @ 1.0.3 — Szymon Marczak
+- https-proxy-agent @ 7.0.6 — Nathan Rajlich
+- immer @ 10.2.0 — Michel Weststrate
+- is-fullwidth-code-point @ 3.0.0 — Sindre Sorhus
+- isarray @ 1.0.0 — Julian Gruber
+- isbinaryfile @ 4.0.10, 5.0.7
+- jiti @ 2.7.0
+- js-tokens @ 4.0.0 — Simon Lydell
+- js-yaml @ 4.3.2 — Vladimir Zapparov
+- jsesc @ 3.1.0 — Mathias Bynens
+- json-buffer @ 3.0.1 — Dominic Tarr
+- json-schema-traverse @ 1.0.0 — Evgeny Poberezkin
+- json5 @ 2.2.3 — Aseem Kishore
+- jsonfile @ 4.0.0, 6.2.1 — JP Richardson
+- keyv @ 4.5.4 — Jared Wray
+- lazy-val @ 1.0.5 — Vladimir Krivosheev
+- lodash @ 4.18.1 — John-David Dalton
+- loupe @ 3.2.1 — Veselin Todorov
+- lowercase-keys @ 2.0.0 — Sindre Sorhus
+- magic-string @ 0.30.21, 1.4.5 — Rich Harris
+- matcher @ 3.0.0 — Sindre Sorhus
+- math-intrinsics @ 1.1.0 — Jordan Harband
+- mime @ 2.6.0 — Robert Kieffer
+- mime-db @ 1.52.0
+- mime-types @ 2.1.35
+- mimic-response @ 1.0.1, 3.1.0 — Sindre Sorhus
+- minimist @ 1.2.8 — James Halliday
+- minizlib @ 3.1.0 — Isaac Z. Schlueter
+- mkdirp @ 0.5.6 — James Halliday
+- ms @ 2.1.3
+- nanoid @ 3.3.20 — Andrey Sitnik
+- node-abi @ 4.40.0 — Lukas Geiger
+- node-addon-api @ 8.9.2
+- node-api-version @ 0.2.1 — Tim Fish
+- node-gyp @ 12.4.0 — Nathan Rajlich
+- node-int64 @ 0.4.0 — Robert Kieffer
+- node-releases @ 2.0.63 — Sergey Rubanov
+- normalize-url @ 6.1.0 — Sindre Sorhus
+- object-keys @ 1.1.1 — Jordan Harband
+- p-cancelable @ 2.1.1 — Sindre Sorhus
+- p-limit @ 3.1.0 — Sindre Sorhus
+- path-is-absolute @ 1.0.1 — Sindre Sorhus
+- path-key @ 3.1.1 — Sindre Sorhus
+- pathe @ 1.1.2
+- pathval @ 2.0.1 — Veselin Todorov
+- pe-library @ 0.4.1 — jet
+- picomatch @ 4.0.7 — Jon Schlinkert
+- plist @ 3.1.0 — Nathan Rajlich
+- postcss @ 8.5.32 — Andrey Sitnik
+- postject @ 1.0.0-alpha.6
+- process-nextick-args @ 2.0.1
+- progress @ 2.0.3 — TJ Holowaychuk
+- promise-retry @ 2.0.1 — IndigoUnited
+- proper-lockfile @ 4.1.2 — André Cruz
+- pump @ 3.0.4 — Mathias Buus Madsen
+- pvtsutils @ 1.3.6 — PeculiarVentures
+- pvutils @ 1.2.0 — Yury Strozhevsky
+- quick-lru @ 5.1.1 — Sindre Sorhus
+- react @ 19.3.1
+- react-dom @ 19.3.1
+- react-refresh @ 0.17.0
+- react-router @ 7.18.5 — Remix Software
+- react-router-dom @ 7.18.5 — Remix Software
+- read-binary-file-arch @ 1.0.6 — Samuel Maddock
+- readable-stream @ 2.3.8
+- require-directory @ 2.1.1 — Troy Goode
+- require-from-string @ 2.0.2 — Vsevolod Strukchinsky
+- resedit @ 1.7.2 — jet
+- resolve-alpn @ 1.2.1 — Szymon Marczak
+- responselike @ 2.0.1 — lukechilds
+- retry @ 0.12.0 — Tim Koschützki
+- rolldown @ 1.2.19
+- rollup @ 4.68.2 — Rich Harris
+- safe-buffer @ 5.1.2 — Feross Aboukhadijeh
+- scheduler @ 0.28.0
+- semver-compare @ 1.0.0 — James Halliday
+- serialize-error @ 7.0.1 — Sindre Sorhus
+- set-cookie-parser @ 2.7.3 — Nathan Friedly
+- shebang-command @ 2.0.0 — Kevin Mårtensson
+- shebang-regex @ 3.0.0 — Sindre Sorhus
+- simple-update-notifier @ 2.0.0 — alexbrazier
+- source-map-support @ 0.5.21
+- stackback @ 0.0.2 — Roman Shtylman
+- stat-mode @ 1.0.0 — Nathan Rajlich
+- std-env @ 3.10.0
+- string-width @ 4.2.3 — Sindre Sorhus
+- string_decoder @ 1.1.1
+- strip-ansi @ 6.0.1 — Sindre Sorhus
+- supports-color @ 7.2.0 — Sindre Sorhus
+- temp @ 0.9.4 — Bruce Williams
+- temp-file @ 3.4.0 — Vladimir Krivosheev
+- tiny-async-pool @ 1.3.0 — Rafael Xavier de Souza
+- tinybench @ 2.9.0
+- tinyexec @ 0.3.2 — James Garbutt
+- tinyglobby @ 0.2.17 — Superchupu
+- tinypool @ 1.1.1
+- tinyrainbow @ 1.2.0
+- tinyspy @ 3.0.2
+- tmp @ 0.2.7 — KARASZI István
+- tmp-promise @ 3.0.3 — Benjamin Gruenbaum and Collaborators.
+- tsx @ 4.23.15 — Hiroki Osame
+- undici @ 6.29.1, 7.30.2
+- undici-types @ 6.21.0, 7.24.6
+- universalify @ 0.1.2, 2.0.1 — Ryan Zimmerman
+- unzipper @ 0.12.5 — Ziggy Jonsson
+- update-browserslist-db @ 1.3.4 — Andrey Sitnik
+- util-deprecate @ 1.0.2 — Nathan Rajlich
+- vite @ 5.4.21, 6.4.6 — Evan You
+- vite-node @ 2.1.9 — Anthony Fu
+- vitest @ 2.1.9 — Anthony Fu
+- webcrypto-core @ 1.9.2 — PeculiarVentures
+- why-is-node-running @ 2.3.0 — Mathias Buus
+- wrap-ansi @ 7.0.0 — Sindre Sorhus
+- xmlbuilder @ 15.1.1 — Ozgur Ozcitak
+- yargs @ 17.7.3
+- yocto-queue @ 0.1.0 — Sindre Sorhus
+- zod @ 3.25.76 — Colin McDonnell
+- zustand @ 5.1.0 — Paul Henschel
+
+## OFL-1.1 (1 packages)
+- @fontsource/manrope @ 5.3.0 — Google Inc.
+
+## Python-2.0 (1 packages)
+- argparse @ 2.0.1
+
+## WTFPL (1 packages)
+- truncate-utf8-bytes @ 1.0.2 — Carl Xiong
+
+## WTFPL OR ISC (1 packages)
+- sanitize-filename @ 1.6.5 — Parsha Pourkhomami
+
+Total: 351 package entries across 14 licence texts.
