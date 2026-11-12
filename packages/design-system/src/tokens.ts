@@ -1,0 +1,38 @@
+/** Canvas mirror of tokens.css (same values, for canvas-drawn UI). */
+export const tokens = {
+  color: {
+    brand: '#FF7A00',
+    brandStrong: '#FF5A00',
+    brandAmber: '#FFB000',
+    brandTint: 'rgba(255, 122, 0, 0.14)',
+    brandTintStrong: 'rgba(255, 122, 0, 0.24)',
+    onBrand: '#121212',
+    surfaceApp: '#0E0E0F',
+    surfacePanel: '#161617',
+    surfaceCard: '#1F1F21',
+    surfaceHover: '#28282B',
+    surfacePressed: '#303034',
+    surfaceOverlay: 'rgba(0, 0, 0, 0.6)',
+    lineFaint: 'rgba(255, 255, 255, 0.06)',
+    lineDefault: '#2E2E32',
+    textPrimary: '#F2F2F3',
+    textSecondary: '#A8A8AE',
+    textMuted: '#80808A',
+    textDisabled: '#5C5C64',
+    textBrand: '#FF8A1F',
+    success: '#3DD68C',
+    warning: '#F5C542',
+    error: '#F0524F',
+    info: '#4DA3FF',
+    track: {
+      video: '#3F7F93', overlay: '#5C6FB5', image: '#8A6FB0', voiceover: '#3E8F8A',
+      audio: '#4E9A6F', music: '#6FA05A', sfx: '#A0679A', caption: '#C28AA0',
+      text: '#7E8FA6', adjustment: '#8C8F5C',
+    },
+  },
+  radius: { tag: 4, clip: 5, control: 8, panel: 12, dialog: 16, pill: 999 },
+  space: [4, 8, 12, 16, 24, 32, 48] as const,
+  panelGap: 6,
+  motion: { ease: 'cubic-bezier(0.2, 0, 0, 1)', fast: 120, panel: 200, screen: 320 },
+} as const;
+export type Tokens = typeof tokens;

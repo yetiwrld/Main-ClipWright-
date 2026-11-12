@@ -1,0 +1,127 @@
+/* Clipwright Studio design tokens — the ONLY source of colour/radius/spacing/type.
+   Mirrored in tokens.ts for canvas code. No hex values outside this file. */
+:root,
+:root[data-theme="dark"] {
+  /* Brand (accent only, ≤5% of any screen) */
+  --brand: #FF7A00;
+  --brand-strong: #FF5A00;
+  --brand-amber: #FFB000;
+  --brand-tint: rgba(255, 122, 0, 0.14);
+  --brand-tint-strong: rgba(255, 122, 0, 0.24);
+  --on-brand: #121212;
+
+  /* Surfaces */
+  --surface-app: #0E0E0F;
+  --surface-panel: #161617;
+  --surface-card: #1F1F21;
+  --surface-hover: #28282B;
+  --surface-pressed: #303034;
+  --surface-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Lines */
+  --line-faint: rgba(255, 255, 255, 0.06);
+  --line-default: #2E2E32;
+  --line-strong: #3A3A40;
+
+  /* Text */
+  --text-primary: #F2F2F3;
+  --text-secondary: #A8A8AE;
+  --text-muted: #80808A;
+  --text-disabled: #5C5C64;
+  --text-brand: #FF8A1F;
+
+  /* Status */
+  --success: #3DD68C;
+  --warning: #F5C542;
+  --error: #F0524F;
+  --info: #4DA3FF;
+  --success-tint: rgba(61, 214, 140, 0.14);
+  --warning-tint: rgba(245, 197, 66, 0.14);
+  --error-tint: rgba(240, 82, 79, 0.14);
+  --info-tint: rgba(77, 163, 255, 0.14);
+
+  /* Timeline track colours (muted, never orange) */
+  --track-video: #3F7F93;
+  --track-overlay: #5C6FB5;
+  --track-image: #8A6FB0;
+  --track-voiceover: #3E8F8A;
+  --track-audio: #4E9A6F;
+  --track-music: #6FA05A;
+  --track-sfx: #A0679A;
+  --track-caption: #C28AA0;
+  --track-text: #7E8FA6;
+  --track-adjustment: #8C8F5C;
+
+  /* Type */
+  --font-sans: "Manrope", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --fs-xs: 0.75rem;   /* 12px */
+  --fs-sm: 0.8125rem; /* 13px */
+  --fs-md: 0.875rem;  /* 14px */
+  --fs-lg: 1rem;      /* 16px */
+  --fs-xl: 1.25rem;   /* 20px */
+  --fs-2xl: 1.75rem;  /* 28px */
+  --fs-hero: 3.5rem;  /* 56px */
+  --lh-xs: 1rem;
+  --lh-sm: 1.25rem;
+  --lh-md: 1.3125rem;
+  --lh-lg: 1.375rem;
+  --lh-xl: 1.625rem;
+  --lh-2xl: 2.125rem;
+  --lh-hero: 3.75rem;
+  --weight-body: 400;
+  --weight-label: 500;
+  --weight-title: 600;
+  --weight-hero: 700;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --panel-gap: 6px;
+  --card-padding: 16px;
+  --page-margin: 32px;
+  --max-content: 1200px;
+  --topbar-height: 40px;
+  --rail-width: 56px;
+  --click-target: 32px;
+
+  /* Radius */
+  --radius-tag: 4px;
+  --radius-clip: 5px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-dialog: 16px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur-panel: 200ms;
+  --dur-screen: 320ms;
+
+  /* Shadows (floating surfaces only) */
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --glow-playhead: 0 0 6px rgba(255, 122, 0, 0.55);
+
+  /* Focus */
+  --focus-ring: 0 0 0 2px var(--surface-app), 0 0 0 4px var(--brand);
+}
+
+/* Light theme is intentionally empty — a future token swap, never component changes. */
+:root[data-theme="light"] {
+  /* TODO(light-theme): mirror every token above with light values. */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-panel: 0ms;
+    --dur-screen: 0ms;
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+out/
+release/
+*.log
+.DS_Store
+coverage/
+.turbo/
+.vite/
+*.tsbuildinfo
+test-fixtures/*.mp4
+test-fixtures/*.mov
+test-fixtures/*.mkv
+test-fixtures/*.wav
+!test-fixtures/README.md
+apps/desktop/release/

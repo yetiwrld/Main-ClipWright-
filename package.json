@@ -1,0 +1,23 @@
+{
+  "name": "clipwright-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clipwright Studio — turn one long video into many short, captioned, ready-to-post clips. A local-first Windows desktop multitrack video editor.",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @clipwright/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "dist": "pnpm --filter @clipwright/desktop dist",
+    "dist:dir": "pnpm --filter @clipwright/desktop dist:dir",
+    "verify:export-matrix": "tsx scripts/verify/export-matrix.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
