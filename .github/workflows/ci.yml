@@ -47,7 +47,18 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
       - name: Unit tests
-        run: pnpm -r test
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm -r test 2>&1 | tee test.log || {
+            code=$?
+            sed -e 's/\x1b\[[0-9;]*m//g' test.log | tail -c 4000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
+              read -r -d '' blob || true
+              printf '::error::pnpm -r test failed (exit %s): %s' "$code" "$blob"
+              echo
+            }
+            exit $code
+          }
       - name: Build (electron-vite)
         run: pnpm --filter @clipwright/desktop build
       - name: Export matrix (Linux only; only if ffmpeg is available)
