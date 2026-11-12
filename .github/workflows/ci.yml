@@ -25,7 +25,20 @@ jobs:
       # pattern that the repository's other CI workflow uses successfully.
       - run: corepack enable
       - name: Install
-        run: pnpm install --frozen-lockfile --fetch-retries 5
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile --fetch-retries 5 2>&1 | tee install.log || {
+            code=$?
+            # Logs live behind blob storage this environment cannot reach; surface
+            # the failing output as a check annotation so it is readable via the API.
+            tail -c 4000 install.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
+              read -r -d '' blob || true
+              printf '::error::pnpm install failed (exit %s): %s' "$code" "$blob"
+              echo
+            }
+            exit $code
+          }
         env:
           # The Electron npm postinstall downloads ~110 MB from the release CDN,
           # which has flaked on these runners before. CI never launches Electron;
