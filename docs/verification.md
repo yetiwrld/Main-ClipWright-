@@ -110,6 +110,25 @@ multi-clip batch export, WebM path end-to-end, NVENC/QSV hardware paths.
 | 5 Editor advanced | Captions/keyframe primitives implemented and unit-tested; **PENDING** save/close/reopen run |
 | 6 Export / packaging / QA | Export verified (above); **installer, updater, release: NOT DONE / UNVERIFIED** |
 
+## Release v0.1.0 (2026-11-12)
+
+**A GitHub Release exists for tag `v0.1.0` (marked prerelease, unsigned):**
+https://github.com/yetiwrld/Main-ClipWright-/releases/tag/v0.1.0
+
+- Built on `windows-latest` by `.github/workflows/release.yml`: VS 2026 / node-gyp@13 /
+  better-sqlite3 v13 source build, whisper.cpp v1.9.5 (pinned tag, CI-built), BtbN FFmpeg
+  GPL build (`master-latest` pin — replace with a reviewed tag before any public release),
+  yt-dlp latest. SHA-256s of both artefacts are in the release notes.
+- Artefacts: `Clipwright-Studio-Setup-0.1.0-x64.exe` (~259 MB, NSIS per-user),
+  `Clipwright-Studio-0.1.0-x64-portable.exe` (~238 MB).
+- CI (this branch) is green on **ubuntu-latest and windows-latest**: corepack pnpm
+  install (with VS Developer Command Prompt + node-gyp@13 on Windows), typecheck,
+  123 unit tests per package, `electron-vite build`.
+- **NOT verified:** the app has never been launched; the installer/portable have never
+  run on any Windows machine; no clean-VM install; no whisper transcription end-to-end;
+  no updater has shipped (the release was built by CI, not by the app). The v0.1.0
+  release proves the pipeline, not the product's daily reliability.
+
 **No `phase-N-complete` tag is applied.** Tags will be created only after the corresponding
 checkpoints pass on real Windows hardware (or a Windows CI runner with app launch).
 
