@@ -50,6 +50,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # pnpm's bundled node-gyp (v10) cannot detect VS 2026; install a
+          # node-gyp that can (>=12.1.0) and point pnpm at it.
+          npm install -g node-gyp@13 --no-audit --no-fund | Out-Null
+          $ng = Join-Path (npm root -g) 'node-gyp\bin\node-gyp.js'
+          Write-Host "node-gyp: $ng"
+          $env:npm_config_node_gyp = $ng
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           Write-Host "Visual Studio: $vsPath"
