@@ -3,10 +3,20 @@
   "compilerOptions": {
     "noEmit": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["node"]
+    "types": [
+      "node",
+      "vite/client"
+    ]
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": [
+    "src",
+    "electron.vite.config.ts"
+  ]
 }

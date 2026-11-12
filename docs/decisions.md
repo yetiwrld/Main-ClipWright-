@@ -78,6 +78,13 @@ Architecture and product decisions taken while building Clipwright Studio, with 
   combos; runtime renders for 4 qualities; §19.6 validation = `verified`). That is not a
   substitute for the spec §16 full pass.
 
+## Renderer
+
+- **Design showcase lives at `/__design`, dev-only** (`import.meta.env.DEV` guard, removed from production bundles). It exists so the design system can be reviewed without running the full app; it renders tokens, type, and every component.
+- **`components.css` must be imported by the app.** Found and fixed 2026-11-12: the design-system shipped `components.css` (94 `.cw-*` rules) but nothing imported it — components rendered unstyled. Exported as `@clipwright/design-system/components.css` and imported in `styles.css`. Build-verified (CSS bundle 20.9 kB → 34.4 kB).
+- **Dev-only mock bridge for browser previews** (`devMock.ts`): installs a fake `window.clipwright` only when `import.meta.env.DEV && !window.clipwright`. Never active in production builds; never overrides a real preload bridge; logs a loud console banner. The `/__design` route is the only supported use.
+- **`vite.preview.config.mts`** serves the renderer outside Electron for the showcase (`npx vite --config vite.preview.config.mts`, port 5173). Vite always sets `import.meta.env.DEV=false` for `vite build`, so the preview is a dev-server concern, not a bundle. Not used by packaging.
+
 ## Storage v1 scope cuts (recorded, none hidden)
 
 - `.cwpack` export/import: **not implemented** (v1 stores are single-machine).

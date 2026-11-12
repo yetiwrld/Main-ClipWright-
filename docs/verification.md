@@ -35,6 +35,12 @@ Command: `pnpm -r test`. Typecheck: `pnpm -r typecheck` (not re-run after latest
 - `electron-vite build` (main + preload + renderer): **succeeds**, ~4.5 s; renderer bundle
   ~798 kB main chunk (< 2.5 MB configured warning limit).
 - Workspace packages are built/consumed via source (no publish step).
+- **Fix 2026-11-12:** renderer now imports `@clipwright/design-system/components.css`
+  (previously unused; `.cw-*` rules missing from the app). Verified in built CSS.
+- **New:** dev-only design showcase at `/__design`; dev-only mock bridge (`devMock.ts`)
+  for browser previews. `npx vite --config vite.preview.config.mts` serves the renderer
+  on port 5173 for the showcase; all modules transform without errors; **no browser was
+  available to screenshot the rendered page** (Electron binary and Chromium undownloadable).
 
 ## Export matrix (specs/14, scripts/verify/export-matrix.ts)
 

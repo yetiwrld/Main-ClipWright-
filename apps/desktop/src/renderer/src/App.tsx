@@ -15,6 +15,9 @@ const MomentsStage = lazy(() => import('./pages/MomentsStage.js').then((m) => ({
 const EditorPage = lazy(() => import('./pages/EditorPage.js').then((m) => ({ default: m.EditorPage })));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage.js').then((m) => ({ default: m.ProjectsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then((m) => ({ default: m.SettingsPage })));
+const DesignShowcase = import.meta.env.DEV
+  ? lazy(() => import('./pages/DesignShowcase.js').then((m) => ({ default: m.DesignShowcase })))
+  : null;
 
 const RAIL = [
   { to: '/', icon: HomeIcon, label: 'Home' },
@@ -190,6 +193,7 @@ export const App = () => {
                   <Route path="/" element={<Home />} />
                   <Route path="/projects" element={<ProjectsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  {DesignShowcase && <Route path="/__design" element={<DesignShowcase />} />}
                   <Route path="/project/:projectId" element={<ImportStage />} />
                   <Route path="/moments/:projectId" element={<MomentsStage />} />
                   <Route path="/editor/:projectId/:compId?" element={<EditorPage />} />
