@@ -49,7 +49,7 @@ export const installDevMockBridge = (): void => {
     moments: { load: () => ok([]), setStatus: () => ok(false), run: () => ok('mock-job'), createClips: () => ok({ created: [], errors: [] }) },
     composition: { list: () => ok([]), load: () => ok(null), save: () => ok({ savedAt: 0 }), delete: () => ok(false) },
     export: { plan: () => ok(null), start: () => ok('mock-export'), history: () => ok([]) },
-    whisper: { listModels: () => ok({ binaryFound: false, modelsDir: '', models: [], defaultModel: 'small' }) },
+    whisper: { listModels: () => ok({ binaryFound: false, modelsDir: '', models: [], defaultModel: 'small', fasterWhisper: { pythonPath: null, pythonLabel: null, version: null, hubCache: '', models: [] } }) },
     providers: { list: () => ok([]), saveOpenAiCompatible: () => ok({ id: 'mock', maskedSuffix: null }), delete: () => ok(false), test: () => ok({ reply: 'mock' }) },
     ollama: { status: () => ok({ available: false, version: null, models: [] }) },
     invoke: () => Promise.reject(new Error('dev mock bridge: “invoke” is not implemented')),

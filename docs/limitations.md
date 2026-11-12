@@ -17,6 +17,14 @@ wording elsewhere in the docs; `README.md` links back here.
 4. **Real whisper transcription.** Untested end-to-end: no whisper-cli binary was available
    in this environment. The code path is honest (fails with a clear error when missing) but
    has not produced a transcript.
+4a. **faster-whisper backend (2026-11-12).** The app can now detect Python(s) with
+   `faster_whisper` installed and use `faster-whisper:<org/repo>` CT2 models found in the
+   Hugging Face hub cache — the code paths are unit-tested, and the spawn → Python-helper →
+   JSON → words pipeline was integration-tested with a stubbed `faster_whisper` module.
+   **No real model has ever been loaded; no real transcript has been produced by this build.**
+   Device/compute selection is ctranslate2 defaults (`device='auto'`, `compute_type='default'`).
+   Detection probes are Windows-oriented (py launcher, %LOCALAPPDATA%/Program Files installs);
+   on other platforms use CLIPWRIGHT_PYTHON if probing misses your interpreter.
 5. **URL downloads via yt-dlp.** yt-dlp is not bundled and not present; the run is untested.
 6. **AI provider calls.** Ollama/OpenAI-compatible paths are unit-tested at the HTTP-client
    level (mocked); no live provider call was made here.
@@ -37,8 +45,8 @@ wording elsewhere in the docs; `README.md` links back here.
 ## Verified (with evidence) — keep this list exact
 
 - `pnpm -r test`: all packages green (design-system 2, audio-core 8, project-schema 7,
-  timeline-engine 13, media-core 9, caption-styles 11, ai-core 19, export-core 40,
-  apps/desktop 14) on Linux.
+  timeline-engine 13, media-core 9, caption-styles 11, ai-core 25, export-core 40,
+  apps/desktop 26) on Linux.
 - `electron-vite build` (main, preload, renderer) completes without errors.
 - Export matrix (`scripts/verify/export-matrix.ts`): plan checks 20/20 PASS; 4/4 runtime
   render checks (draft/standard/high/maximum; 1080×1920, caption-burned) produce real files

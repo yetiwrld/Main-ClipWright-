@@ -12,9 +12,11 @@ import type { Logger } from './logging.js';
 import type { SecretStore } from './secrets.js';
 import { probeMedia, copyManaged, extractAudio, makeThumbnail, makeProxy } from './mediaRunner.js';
 import { resolveBinaries, parseFfprobeJson, probeInput, fastFingerprint } from '@clipwright/media-core';
-import { newId, type AppSettings } from '@clipwright/project-schema';
+import { newId, type AppSettings, type TranscriptWord } from '@clipwright/project-schema';
+import type { ParsedTranscript } from '@clipwright/ai-core';
 import { buildCaptions } from '@clipwright/caption-styles';
 import { transcribe, listWhisperModels, resolveWhisperBinary, KNOWN_MODELS } from './whisper.js';
+import { detectFasterWhisper, transcribeFasterWhisper, FASTER_WHISPER_PREFIX } from './fasterWhisper.js';
 import { runMomentsPipeline } from './momentsRunner.js';
 import { runExportJob } from './exportRunner.js';
 import { mediaFolder } from './workspace.js';
@@ -54,19 +56,61 @@ export const registerJobHandlers = (jobs: JobRunner, deps: RunnerDeps): void => 
     const configuredModel = project.settings.transcriptionModel !== 'auto' ? project.settings.transcriptionModel : appSettings.transcriptionModel;
     let modelId = configuredModel === 'auto' ? 'small' : configuredModel;
     if (modelId === 'auto') modelId = 'small';
+
+    const finishTranscript = (parsed: ParsedTranscript & { words: TranscriptWord[] }) => {
+      storage.replaceTranscript(projectId, parsed.words);
+      const approxNote = parsed.approximate ? ' (timing approximate)' : '';
+      logger.info('Transcript stored', { words: parsed.words.length, approximate: parsed.approximate, language: parsed.language });
+      storage.replaceCaptions(projectId, buildCaptions(parsed.words));
+      storage.setProjectStage(projectId, 'transcribed');
+      return { wordCount: parsed.words.length, approximateNote: approxNote || undefined };
+    };
+
+    // faster-whisper (CT2) path — uses the user's Python + cached HF models
+    if (modelId.startsWith(FASTER_WHISPER_PREFIX)) {
+      const repoId = modelId.slice(FASTER_WHISPER_PREFIX.length);
+      const fw = await detectFasterWhisper();
+      if (!fw.pythonPath) {
+        throw new Error(
+          'A faster-whisper model is selected, but no Python with the faster-whisper package was found. Install it (pip install faster-whisper), or set CLIPWRIGHT_PYTHON to the right python.exe (e.g. the one that has faster_whisper 1.2.1) and press Refresh in Settings → Models.',
+        );
+      }
+      const detected = fw.models.find((m) => m.repoId === repoId);
+      if (!detected) {
+        const found = fw.models.map((m) => m.repoId).join(', ') || 'none';
+        throw new Error(`The faster-whisper model “${repoId}” is not a complete snapshot in the Hugging Face hub cache at ${fw.hubCache}. Detected: ${found}. Re-download the model or pick another in Settings → Models.`);
+      }
+      storage.setProjectStage(projectId, 'transcribing');
+      ctx.report(0.05, 'Transcribing');
+      const durationSec = statSync(audioPath).size / (16000 * 2); // 16 kHz s16 mono — progress only, approximate
+      const parsed = await transcribeFasterWhisper({
+        status: fw,
+        modelSnapshotPath: detected.snapshotPath,
+        audioWav: audioPath,
+        language: project.settings.language === 'auto' ? 'auto' : project.settings.language,
+        durationSec,
+        onProgress: (f, phase) => ctx.report(0.05 + 0.85 * f, phase),
+        signal: ctx.signal,
+      });
+      if (ctx.signal.aborted) throw new Error('Cancelled by the user.');
+      ctx.report(0.92, 'Building captions');
+      return finishTranscript(parsed);
+    }
+
     const known = KNOWN_MODELS.find((m) => m.id === modelId) ?? KNOWN_MODELS.find((m) => m.id === 'small')!;
     const modelPath = join(modelsDir, known.file);
     if (!existsSync(modelPath)) {
       const installed = listWhisperModels(modelsDir).filter((m) => m.installed);
+      const fwHint = installed.length === 0 ? ' Faster-whisper models detected on this PC (if any) are selectable in Settings → Models once Python with faster-whisper is found.' : '';
       throw new Error(
         installed.length === 0
-          ? `The offline transcription model (${known.name}) isn't downloaded yet. Open Models to download it, or switch this stage to an online provider in Settings.`
+          ? `The offline transcription model (${known.name}) isn't downloaded yet. Open Models to download it, or switch this stage to an online provider in Settings.${fwHint}`
           : `The selected model (${known.name}) isn't downloaded. Installed models: ${installed.map((m) => m.name).join(', ')}. Pick one in Settings → Models.`,
       );
     }
     const bin = resolveWhisperBinary(process.resourcesPath);
     if (!bin) {
-      throw new Error('The offline transcription engine (whisper.cpp) is not available in this build. Switch transcription to an online provider in Settings, or install whisper-cli.');
+      throw new Error('The offline transcription engine (whisper.cpp) is not available in this build. Pick a detected faster-whisper model in Settings → Models, or switch to an online provider.');
     }
 
     storage.setProjectStage(projectId, 'transcribing');
@@ -81,12 +125,7 @@ export const registerJobHandlers = (jobs: JobRunner, deps: RunnerDeps): void => 
     if (ctx.signal.aborted) throw new Error('Cancelled by the user.');
 
     ctx.report(0.92, 'Building captions');
-    storage.replaceTranscript(projectId, parsed.words);
-    const approxNote = parsed.approximate ? ' (timing approximate)' : '';
-    logger.info('Transcript stored', { words: parsed.words.length, approximate: parsed.approximate });
-    storage.replaceCaptions(projectId, buildCaptions(parsed.words));
-    storage.setProjectStage(projectId, 'transcribed');
-    return { wordCount: parsed.words.length, approximateNote: approxNote || undefined };
+    return finishTranscript(parsed);
   });
 
   jobs.register('moments', async (ctx, params) => {

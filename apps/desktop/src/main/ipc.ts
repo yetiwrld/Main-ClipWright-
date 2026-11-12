@@ -19,6 +19,7 @@ import type { JobRunner } from './jobs.js';
 import { Journal, lockStatus, recoveryDir, removeLock, writeLock } from './journal.js';
 import { fastFingerprint } from '@clipwright/media-core';
 import { listWhisperModels, defaultModel } from './whisper.js';
+import { detectFasterWhisper } from './fasterWhisper.js';
 import { createClipFromMoment } from './clipService.js';
 import { buildExportPlan, type ExportPlanSettings } from '@clipwright/export-core';
 import { compositionDurationUs } from '@clipwright/project-schema';
@@ -355,7 +356,22 @@ export const registerIpc = (ctx: AppContext): void => {
   handle('export:history', async () => storage.listExports(50));
 
   /* ------------------------------------------------------------ models */
-  handle('whisper:listModels', async () => ({ binaryFound: !!(process.env['CLIPWRIGHT_WHISPER'] || existsSync(join(process.resourcesPath ?? '', 'bin', process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'))), modelsDir: join(ctx.workspaceRoot(), 'Models', 'whisper'), models: listWhisperModels(join(ctx.workspaceRoot(), 'Models', 'whisper')), defaultModel: defaultModel(false) }));
+  handle('whisper:listModels', async (refresh?: boolean) => {
+    const fw = await detectFasterWhisper(refresh === true);
+    return {
+      binaryFound: !!(process.env['CLIPWRIGHT_WHISPER'] || existsSync(join(process.resourcesPath ?? '', 'bin', process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'))),
+      modelsDir: join(ctx.workspaceRoot(), 'Models', 'whisper'),
+      models: listWhisperModels(join(ctx.workspaceRoot(), 'Models', 'whisper')),
+      defaultModel: defaultModel(false),
+      fasterWhisper: {
+        pythonPath: fw.pythonPath,
+        pythonLabel: fw.pythonLabel,
+        version: fw.version,
+        hubCache: fw.hubCache,
+        models: fw.models.map((m) => ({ id: m.repoId, name: m.repoId, snapshotPath: m.snapshotPath, sizeBytes: m.sizeBytes })),
+      },
+    };
+  });
 
   /* ---------------------------------------------------------- providers */
   handle('providers:list', async () => storage.listProviders());

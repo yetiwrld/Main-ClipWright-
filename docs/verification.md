@@ -23,12 +23,40 @@ listed as **PENDING**, not as passed.
 | @clipwright/timeline-engine | 13 passed |
 | @clipwright/media-core | 9 passed |
 | @clipwright/caption-styles | 11 passed |
-| @clipwright/ai-core | 19 passed |
+| @clipwright/ai-core | 25 passed (incl. faster-whisper JSON parser) |
 | @clipwright/export-core | 40 passed |
-| @clipwright/desktop (storage, journal) | 14 passed |
-| **Total** | **123 passed** |
+| @clipwright/desktop (storage, journal, faster-whisper scan/detect) | 26 passed |
+| **Total** | **135 passed** |
 
 Command: `pnpm -r test`. Typecheck: `pnpm -r typecheck` (not re-run after latest edits; CI runs it).
+
+## faster-whisper backend (new, 2026-11-12 — partial)
+
+Purpose: run OpenAI Whisper CT2 models already cached in the user's HF hub cache
+(`~/.cache/huggingface/hub`), which whisper.cpp cannot read.
+
+What was actually executed in this environment (Linux, Node 22, Python 3.11):
+
+- `parseFasterWhisperJson` unit tests (word timestamps → microseconds, proportional-estimate
+  fallback with `approximate: true`, no-timing segments skipped, confidence clamping, malformed
+  input throws): **6/6 pass**.
+- HF hub cache scan (`scanFasterWhisperModels`) unit tests against fixture directories:
+  detects complete snapshots (model.bin ≥ 1 MB + config.json), picks newest snapshot, ignores
+  incomplete/junk entries, missing cache returns `[]`: **12/12 desktop tests pass**.
+- Integration test of the full spawn pipeline with a **stubbed `faster_whisper` Python module**
+  (no real inference): progress events (`SEGMENT <end>` → fraction), JSON result written by the
+  helper, words parsed with correct µs timings (`hello@50000-600000` …), stderr surfaced on
+  non-zero exit, missing-model-directory error path: **all pass**.
+- `pnpm -r typecheck`, `electron-vite build`: **succeed**.
+- CI run after push: see branch CI status (windows-latest + ubuntu-latest).
+
+What was NOT executed (and must not be claimed):
+
+- No real model file was loaded; faster-whisper was never imported by Python here (not on
+  PyPI-reachable model store from this sandbox; HF is unreachable).
+- The probe order (py launcher `-3.12` …, then %LOCALAPPDATA% paths, then CLIPWRIGHT_PYTHON)
+  has **never run on Windows**; the first launch on the user's PC is the first real probe.
+- GPU/compute behaviour of ctranslate2 defaults — untested.
 
 ## Build
 

@@ -41,10 +41,18 @@ export interface ExportHistoryRow {
 export interface ProviderRow {
   id: string; kind: string; displayName: string; baseUrl: string | null; model: string | null; secretId: string | null; enabled: boolean;
 }
+export interface FasterWhisperStatus {
+  pythonPath: string | null;
+  pythonLabel: string | null;
+  version: string | null;
+  hubCache: string;
+  models: Array<{ id: string; name: string; snapshotPath: string; sizeBytes: number }>;
+}
 export interface WhisperStatus {
   binaryFound: boolean; modelsDir: string;
   models: Array<{ id: string; name: string; file: string; sizeBytes: number; installed: boolean }>;
   defaultModel: string;
+  fasterWhisper?: FasterWhisperStatus;
 }
 export interface OllamaStatus { available: boolean; version: string | null; models: string[] }
 
@@ -118,7 +126,7 @@ export const api = {
   exportStart: (projectId: string, compId: string, settings: unknown, fileName?: string) =>
     unwrap<string>(raw()['export'].start({ projectId, compId, settings, fileName })),
   exportHistory: () => unwrap<ExportHistoryRow[]>(raw()['export'].history()),
-  whisper: { listModels: () => unwrap<WhisperStatus>(raw()['whisper'].listModels()) },
+  whisper: { listModels: (refresh?: boolean) => unwrap<WhisperStatus>(raw()['whisper'].listModels(refresh === true)) },
   providers: {
     list: () => unwrap<ProviderRow[]>(raw()['providers'].list()),
     saveOpenAiCompatible: (payload: { baseUrl: string; apiKey: string; model: string; label?: string }) =>

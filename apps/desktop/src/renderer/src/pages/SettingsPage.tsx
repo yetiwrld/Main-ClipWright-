@@ -30,8 +30,8 @@ export const SettingsPage = () => {
 
   const settings = boot?.settings;
 
-  const refreshAsync = useCallback(async () => {
-    const [w, o, p] = await Promise.allSettled([api.whisper.listModels(), api.ollama.status(), api.providers.list()]);
+  const refreshAsync = useCallback(async (forceDetect = false) => {
+    const [w, o, p] = await Promise.allSettled([api.whisper.listModels(forceDetect), api.ollama.status(), api.providers.list()]);
     if (w.status === 'fulfilled') setWhisper(w.value);
     if (o.status === 'fulfilled') setOllama(o.value);
     if (p.status === 'fulfilled') setProviders(p.value);
@@ -154,6 +154,7 @@ export const SettingsPage = () => {
                 <Select value={settings.transcriptionModel} onChange={(e) => void updateSettings({ transcriptionModel: e.target.value })} aria-label="Transcription model">
                   <option value="auto">Automatic (small)</option>
                   {whisper?.models.map((m) => <option key={m.id} value={m.id}>{m.name}{m.installed ? '' : ' (not downloaded)'}</option>)}
+                  {whisper?.fasterWhisper?.models.map((m) => <option key={`faster-whisper:${m.id}`} value={`faster-whisper:${m.id}`}>{m.name} (faster-whisper · detected)</option>)}
                 </Select>
               </div>
               <div className="settings-row">
@@ -176,11 +177,16 @@ export const SettingsPage = () => {
             <div className="settings-section">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <div className="settings-row__label">Offline transcription models</div>
-                <Button variant="ghost" size="28" onClick={() => void refreshAsync()}><RefreshCw size={14} aria-hidden /> Refresh</Button>
+                <Button variant="ghost" size="28" onClick={() => void refreshAsync(true)}><RefreshCw size={14} aria-hidden /> Refresh</Button>
               </div>
-              {!whisper?.binaryFound && (
+              {!whisper?.binaryFound && !whisper?.fasterWhisper?.pythonPath && (
                 <div className="notice notice--warning" role="status" style={{ marginBottom: 12 }}>
-                  Whisper isn’t available in this build, so offline transcription will fail. Online transcription works regardless. This is expected in unofficial builds; official releases bundle whisper-cli.
+                  Neither whisper.cpp nor faster-whisper was detected in this build, so offline transcription will fail. Online transcription works regardless. Set CLIPWRIGHT_PYTHON to a Python that has faster-whisper installed to enable offline transcription.
+                </div>
+              )}
+              {!whisper?.binaryFound && whisper?.fasterWhisper?.pythonPath && (
+                <div className="notice" role="status" style={{ marginBottom: 12 }}>
+                  whisper.cpp isn’t available in this build, but faster-whisper was detected (Python {whisper.fasterWhisper.version}{whisper.fasterWhisper.pythonLabel ? ` via ${whisper.fasterWhisper.pythonLabel}` : ''}). Select one of the detected faster-whisper models below to transcribe offline.
                 </div>
               )}
               <div className="models-grid">
@@ -195,7 +201,34 @@ export const SettingsPage = () => {
                   </div>
                 ))}
               </div>
-              <p className="honesty" style={{ marginTop: 12 }}>Models come from the whisper.cpp releases on Hugging Face over HTTPS; checksums are verified when the official build ships them.</p>
+              <div style={{ marginTop: 16 }}>
+                <div className="settings-row__label" style={{ marginBottom: 6 }}>faster-whisper models detected on this PC</div>
+                <p className="settings-row__hint" style={{ marginBottom: 8 }}>
+                  Loaded from your Hugging Face hub cache: <code>{whisper?.fasterWhisper?.hubCache ?? ''}</code>
+                  {whisper?.fasterWhisper?.pythonPath ? ` — via Python ${whisper.fasterWhisper.version ?? ''} (${whisper.fasterWhisper.pythonLabel ?? whisper.fasterWhisper.pythonPath}).` : ' — no Python with faster-whisper was found, so these cannot be used yet.'}
+                </p>
+                {!whisper?.fasterWhisper?.pythonPath && (whisper?.fasterWhisper?.models.length ?? 0) > 0 && (
+                  <div className="notice notice--warning" role="status" style={{ marginBottom: 8 }}>
+                    Faster-whisper models were found, but no working Python interpreter has the faster-whisper package. Install it with <code>pip install faster-whisper</code>, or set the <code>CLIPWRIGHT_PYTHON</code> environment variable to the right python.exe and press Refresh.
+                  </div>
+                )}
+                <div className="models-grid">
+                  {(whisper?.fasterWhisper?.models ?? []).map((m) => (
+                    <div key={m.id} className="model-row">
+                      <Cpu size={18} aria-hidden style={{ color: 'var(--text-muted)' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{m.name}</div>
+                        <div className="settings-row__hint">{(m.sizeBytes / 1024 ** 3).toFixed(2)} GB · CT2 · selectable in the Transcription model dropdown</div>
+                      </div>
+                      <StatusPill tone="success">Detected</StatusPill>
+                    </div>
+                  ))}
+                  {(whisper?.fasterWhisper?.models?.length ?? 0) === 0 && (
+                    <p className="empty-hint">No faster-whisper (CT2) models found in the Hugging Face hub cache. This scan is read-only and happens at startup or on Refresh.</p>
+                  )}
+                </div>
+              </div>
+              <p className="honesty" style={{ marginTop: 12 }}>whisper.cpp models come from the whisper.cpp releases on Hugging Face over HTTPS; checksums are verified when the official build ships them. faster-whisper detection is a read-only scan of your cache — the first transcription run loads the model for real.</p>
             </div>
           )}
 

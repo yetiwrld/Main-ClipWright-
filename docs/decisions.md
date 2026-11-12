@@ -66,6 +66,29 @@ Architecture and product decisions taken while building Clipwright Studio, with 
   `4095:4096` on a 1080×1920 render) and the §19.6 SAR check fails. Found by the real
   render matrix, not by inspection.
 
+## Transcription engines (2026-11-12)
+
+- **Two offline engines are supported.** whisper.cpp (bundled in official builds) reads only
+  ggml models; faster-whisper (this PC's cached Systran / mobiuslabsgmbh CT2 models) cannot
+  be read by whisper.cpp at all — there is no supported converter, and pretending HF-cache
+  scanning of ggml files would find something was false.
+- **The faster-whisper backend is selected with `faster-whisper:<org/repo>` as the value of
+  the existing `transcriptionModel` setting** (prefix handled in runners.ts). No schema change.
+- **Python is probed, never assumed:** CLIPWRIGHT_PYTHON → py launcher -3.12/-3.13/-3.11/-3.10/…
+  → well-known Windows install dirs → `python`/`python3`. Every candidate must actually import
+  `faster_whisper`. The user's machine resolves Python 3.12 (their `py` default is 3.15, which
+  lacks the package — hence the probe order).
+- **Model discovery is a read-only scan** of the HF hub cache (`HF_HUB_CACHE`, `HF_HOME/hub`,
+  or `~/.cache/huggingface/hub`): `models--*--*/snapshots/*/model.bin` ≥ 1 MB + `config.json`;
+  newest complete snapshot wins. No files are copied, linked, or modified. `CLIPWRIGHT_PYTHON` +
+  Refresh in Settings → Models re-probes on demand; results are cached per session otherwise.
+- **Clipwright never downloads CT2 models** — the user's existing cache is the source of truth,
+  used in place. (The whisper.cpp path can still download ggml models.)
+- **Helpers run out-of-process** (embedded Python script written to a temp dir; args argv-only,
+  source never interpolates paths) so there is no shell-injection surface.
+- **Progress is honest when inexact:** the WAV-size estimate feeds only the progress bar
+  (labelled approximate in code comments); transcript timing itself comes from faster-whisper.
+
 ## Phases & honesty
 
 - **Phase checkpoints that cannot be executed here are documented, not claimed.** The

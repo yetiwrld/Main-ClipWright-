@@ -82,7 +82,7 @@ const api = {
     history: () => invoke('export:history'),
   },
   whisper: {
-    listModels: () => invoke('whisper:listModels'),
+    listModels: (refresh?: boolean) => invoke('whisper:listModels', refresh === true),
   },
   providers: {
     list: () => invoke('providers:list'),
