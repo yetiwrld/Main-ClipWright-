@@ -46,19 +46,32 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - name: Typecheck
         run: pnpm -r typecheck
-      - name: Unit tests
+      - name: Unit tests (per package, so the failing package is identifiable)
         shell: bash
         run: |
           set -o pipefail
-          pnpm -r test 2>&1 | tee test.log || {
-            code=$?
-            sed -e 's/\x1b\[[0-9;]*m//g' test.log | tail -c 4000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
+          failed=0
+          for pkg in design-system audio-core project-schema timeline-engine media-core caption-styles ai-core export-core; do
+            echo "========== packages/$pkg =========="
+            (cd "packages/$pkg" && pnpm test) 2>&1 | tee "test-$pkg.log" || {
+              failed=1
+              tail -c 1200 "test-$pkg.log" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
+                read -r -d '' blob || true
+                printf '::error::Package FAILED: %s — %s' "$pkg" "$blob"
+                echo
+              }
+            }
+          done
+          echo '========== apps/desktop =========='
+          (cd apps/desktop && pnpm test) 2>&1 | tee test-desktop.log || {
+            failed=1
+            tail -c 1200 test-desktop.log | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' | {
               read -r -d '' blob || true
-              printf '::error::pnpm -r test failed (exit %s): %s' "$code" "$blob"
+              printf '::error::Package FAILED: apps/desktop — %s' "$blob"
               echo
             }
-            exit $code
           }
+          exit $failed
       - name: Build (electron-vite)
         run: pnpm --filter @clipwright/desktop build
       - name: Export matrix (Linux only; only if ffmpeg is available)
